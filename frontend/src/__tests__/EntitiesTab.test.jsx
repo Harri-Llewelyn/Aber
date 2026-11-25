@@ -2,7 +2,8 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { cellUrl } from '../routes'
-import { EntitiesTab, purgeIsSoon } from '../components/tabs/EntitiesTab'
+import { EntitiesTab } from '../components/tabs/EntitiesTab'
+import { purgeIsSoon } from '../utils/entities'
 import { api } from '../api'
 import { expectCardHeading } from '../test/cardHeading'
 import { tabLink } from '../test/tabBar'
@@ -18,7 +19,8 @@ vi.mock('../api', async (importOriginal) => ({
   }
 }))
 
-// The page opens on Active; these tests are about its other two tabs (entitiesActive.test.jsx has that one).
+// The page opens on Active; these tests are about its other two tabs (entitiesActive.test.jsx has that one,
+// and entitiesGroups.test.jsx the groups the rows are in).
 beforeEach(() => window.history.replaceState(null, '', '/entities/archived'))
 
 // The bundle is a ZIP handed to an anchor; jsdom has no object URLs, and the file is not the fact
@@ -29,6 +31,14 @@ const ARCHIVED_CELL = {
   entity_id: 'Cell_1', name: 'Assembly Line 1', entity_type: 'cell',
   archived_at: '2026-07-25T10:00:00Z', auto_delete_at: null
 }
+
+/** Opens every group: a tab that has one starts with it open. */
+const expandAll = async () => {
+  const button = await screen.findByRole('button', { name: /^(Expand|Collapse) all$/ })
+  if (button.textContent === 'Expand all') fireEvent.click(button)
+}
+/** The rows of the groups that are open. */
+const dataRows = () => [...document.querySelectorAll('tbody tr:not(.table-group-row)')]
 
 const showArchives = async (hasPermission = () => true, rows = [ARCHIVED_CELL]) => {
   api.get.mockResolvedValue(rows)
@@ -492,6 +502,7 @@ const showLifecycle = async (lists, props = {}) => {
   const showToast = vi.fn()
   const onViewTrail = vi.fn()
   render(<EntitiesTab showToast={showToast} hasPermission={() => true} onViewTrail={onViewTrail} {...props} />)
+  await expandAll()
   const first = lists.archives?.[0] || lists.retired?.[0]
   await waitFor(() => expect(screen.getAllByText(first.name).length).toBeGreaterThan(0))
   return { showToast, onViewTrail }
@@ -503,6 +514,7 @@ const showRetired = async (lists) => {
   const onViewTrail = vi.fn()
   render(<EntitiesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={onViewTrail} />)
   fireEvent.click(tabLink('Retired'))
+  if (lists.retired) await expandAll()
   await screen.findByText(lists.retired?.[0]?.name || /Nothing has been retired/)
   return { onViewTrail }
 }
@@ -512,7 +524,7 @@ describe('EntitiesTab lists archived areas', () => {
 
   it('lists an area beside the cells, gateways and devices, with the same two actions', async () => {
     await showLifecycle({ archives: [ARCHIVED_AREA] })
-    expect(screen.getByText('AREA')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Areas, 1 area' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Restore/i })).not.toBeDisabled()
     expect(purgeButton()).not.toBeDisabled()
     // The export is a device's: an area has no shell and no readings of its own.
@@ -624,16 +636,17 @@ describe('EntitiesTab shows what has been retired', () => {
     expect(screen.getByText(/Nothing has been retired/)).toBeInTheDocument()
   })
 
-  it('lists the tombstone with its name, type, who retired it and the historian id', async () => {
+  it('lists the tombstone with its name, who retired it and the historian id, under its kind', async () => {
     await showRetired({ retired: [RETIRED_DEVICE, RETIRED_GATEWAY] })
-    const rows = document.querySelectorAll('tbody tr')
-    expect(rows).toHaveLength(2)
-    expect(rows[0].textContent).toContain('CNC_01')
-    expect(rows[0].textContent).toContain('DEVICE')
+    const [gateway, device, ...rest] = dataRows()
+    expect(rest).toHaveLength(0)
+    expect(device.textContent).toContain('CNC_01')
     // Nobody: the retention timer deleted it.
-    expect(rows[0].textContent).toContain('retention timer')
-    expect(rows[0].textContent).toContain('abc123')
-    expect(rows[1].textContent).toContain('admin@example.test')
+    expect(device.textContent).toContain('retention timer')
+    expect(device.textContent).toContain('abc123')
+    expect(gateway.textContent).toContain('admin@example.test')
+    expect(screen.getAllByRole('button', { expanded: true }).map(b => b.querySelector('.group-heading-label').textContent))
+      .toEqual(['Gateways', 'Devices'])
   })
 
   it("names who retired it by their display name, read live, with the stamped email on hover", async () => {
@@ -695,7 +708,7 @@ describe('EntitiesTab shows what has been retired', () => {
 describe('EntitiesTab layout', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
-  it('is one scrolling card named for the page, with a tab per stage and no counts', async () => {
+  it('is one scrolling card named for the page, with a tab per stage and no counts on them', async () => {
     await showLifecycle({ archives: [ARCHIVED_CELL, ARCHIVED_AREA], retired: [RETIRED_DEVICE] })
     expect(document.querySelector('.page-layout.page-fill > .page-main')).not.toBeNull()
     expect(document.querySelector('.page-heading')).toBeNull()
@@ -709,32 +722,29 @@ describe('EntitiesTab layout', () => {
     expect(within(strip).getAllByRole('link').map(t => t.textContent)).toEqual(['Active', 'Archived', 'Retired'])
     expect(document.querySelector('.section-count')).toBeNull()
     // Each stage explains itself in its tab's tooltip; the bar has no "?". The toolbar is one for the
-    // three tabs, the search first, and the table follows it.
+    // three tabs, the search first, then Expand all over the groups, then the table.
     expect(tabLink('Active')).toHaveAccessibleDescription(/Every entity in service/)
     expect(tabLink('Archived')).toHaveAccessibleDescription(/Restore returns one intact/)
     expect(tabLink('Retired')).toHaveAccessibleDescription(/Only a tombstone remains/)
     expect(strip.querySelector('.help-tip')).toBeNull()
-    expect(strip.nextElementSibling).toHaveClass('filter-bar')
-    expect(strip.nextElementSibling.nextElementSibling).toHaveClass('table-wrap')
+    const parts = () => {
+      const after = []
+      for (let el = strip.nextElementSibling; el; el = el.nextElementSibling) after.push(el.className)
+      return after
+    }
+    expect(parts()).toEqual(['filter-bar', 'groups-header', 'table-wrap'])
     fireEvent.click(tabLink('Retired'))
     expect(strip.querySelector('.help-tip')).toBeNull()
-    expect(strip.nextElementSibling).toHaveClass('filter-bar')
-    expect(strip.nextElementSibling.nextElementSibling).toHaveClass('table-wrap')
+    expect(parts()).toEqual(['filter-bar', 'groups-header', 'table-wrap'])
   })
 
-  it('orders and styles the shared columns alike in both tables', async () => {
+  it('orders the shared columns alike in both tables', async () => {
     await showLifecycle({ archives: [ARCHIVED_DEVICE], retired: [RETIRED_DEVICE] })
-    const heads = () => [...document.querySelectorAll('thead th')].slice(0, 3).map(th => th.textContent)
-    const typeBadge = () => document.querySelector('tbody tr').children[1].querySelector('.badge')
+    const heads = () => [...document.querySelectorAll('thead th')].slice(0, 2).map(th => th.textContent)
 
-    expect(heads()).toEqual(['Name', 'Kind', 'UUID'])
-    expect(typeBadge()).toHaveTextContent('DEVICE')
-    expect(typeBadge()).toHaveClass('badge-neutral')
-
+    expect(heads()).toEqual(['Name', 'UUID'])
     fireEvent.click(tabLink('Retired'))
-    expect(heads()).toEqual(['Name', 'Kind', 'UUID'])
-    expect(typeBadge()).toHaveTextContent('DEVICE')
-    expect(typeBadge()).toHaveClass('badge-neutral')
+    expect(heads()).toEqual(['Name', 'UUID'])
   })
 
   it('right-aligns the What Survives header over its actions and names the timer Auto-Purge', async () => {
@@ -750,7 +760,8 @@ describe('EntitiesTab layout', () => {
       { ...ARCHIVED_CELL, auto_delete_at: inDays(30) },
       { ...ARCHIVED_AREA, auto_delete_at: inDays(3) }
     ] })
-    const [later, soon] = document.querySelectorAll('.cell-purge-date')
+    // The areas' group comes first.
+    const [soon, later] = document.querySelectorAll('.cell-purge-date')
 
     expect(later).not.toHaveClass('mono')
     expect(later).not.toHaveClass('cell-purge-date-soon')
@@ -785,7 +796,7 @@ describe('EntitiesTab: sorting by a column (#801)', () => {
 
   const at = (url) => window.history.replaceState(null, '', url)
   const address = () => window.location.pathname + window.location.search
-  const names = () => [...document.querySelectorAll('tbody tr')].map(tr => tr.cells[0].textContent)
+  const names = () => dataRows().map(tr => tr.cells[0].textContent)
   const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
 
   const archived = (name, autoDeleteAt) => ({

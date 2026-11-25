@@ -1,22 +1,26 @@
-import React from 'react'
-import { IconChevronDown, IconChevronUp, IconCheck, IconPlus } from './Icons'
+import React, { useId } from 'react'
+import { IconCheck, IconPlus } from './Icons'
+import { GroupHeading } from './GroupHeading'
 import { HelpTip } from './HelpTip'
 import { Tooltip } from './Tooltip'
+import { plural } from '../../utils/format'
 
 /**
- * A vocabulary's sections as the Vocabulary page draws them: a heading that opens and closes (with its
- * "N in use" count) and, when open, one chip for each entry, or what the tab's `renderItems(section)`
- * draws instead. `tab` is the tab descriptor VocabularyPanel documents, whose `isUsed`, `isActionable`,
- * `onUse`, `metaFor`, `tooltipFor`, `idFor` and `noteFor` decide what a chip says and does;
- * `isOpen(key)` and `toggle(key)` are the caller's state.
+ * A vocabulary's sections as the Vocabulary page draws them: a `GroupHeading` that says how many entries
+ * the section holds, with its "?" and its "N in use" beside it, and, when open, one chip for each entry,
+ * or what the tab's `renderItems(section)` draws instead. `tab` is the tab descriptor VocabularyPanel
+ * documents, whose `isUsed`, `isActionable`, `onUse`, `metaFor`, `tooltipFor`, `idFor` and `noteFor`
+ * decide what a chip says and does; `isOpen(key)` and `toggle(key)` are the caller's (`useOpenGroups`).
  * VocabularyPanel draws the standards' tabs with it, and a tab with a panel of its own (Imported) draws
  * its concepts with it, so a chip looks and acts the same on every tab.
  */
 export function VocabularySections({ sections, tab: active, canAddMetric, isOpen, toggle }) {
+  const listId = useId()
   return (
     <>
-      {sections.map(section => {
+      {sections.map((section, at) => {
         const open = isOpen(section.key)
+        const bodyId = `${listId}-${at}`
         const used = active.isUsed ? section.items.filter(i => active.isUsed(i)).length : 0
         return (
           <div key={section.key}>
@@ -26,15 +30,14 @@ export function VocabularySections({ sections, tab: active, canAddMetric, isOpen
               className="vocab-section-head"
               onClick={e => { if (!e.target.closest('button')) toggle(section.key) }}
             >
-              <button
-                type="button"
-                className="table-group-button"
-                onClick={() => toggle(section.key)}
-                aria-expanded={open}
-              >
-                {open ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
-                <span className="table-group-label">{section.title}</span>
-              </button>
+              <GroupHeading
+                open={open}
+                onToggle={() => toggle(section.key)}
+                label={section.title}
+                count={section.items.length}
+                countLabel={plural(section.items.length, 'entry', 'entries')}
+                controls={bodyId}
+              />
               {section.hint && <HelpTip label={`About ${section.title}`} text={section.hint} />}
               {used > 0 && (
                 <Tooltip text={`${used} already used by a catalog metric`}>
@@ -43,11 +46,9 @@ export function VocabularySections({ sections, tab: active, canAddMetric, isOpen
               )}
             </div>
 
-            {open && active.renderItems && (
-              <div className="vocab-section-body">{active.renderItems(section)}</div>
-            )}
-            {open && !active.renderItems && (
-              <div className="vocab-section-body">
+            <div id={bodyId} className="vocab-section-body" hidden={!open}>
+              {open && active.renderItems && active.renderItems(section)}
+              {open && !active.renderItems && (
                 <div className="vocab-chips">
                   {section.items.map(item => {
                     const inUse = active.isUsed ? active.isUsed(item) : false
@@ -90,8 +91,8 @@ export function VocabularySections({ sections, tab: active, canAddMetric, isOpen
                     )
                   })}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )
       })}

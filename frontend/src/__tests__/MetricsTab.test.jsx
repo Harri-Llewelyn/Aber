@@ -261,22 +261,23 @@ describe('Metric Catalog — collapsible groups', () => {
     // Collapsed on arrival: the catalog outgrew being unrolled.
     renderTab()
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: false })).toBeTruthy())
     expect(screen.queryByText('Axes/DISPLACEMENT')).toBeNull()
     expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
     expect(screen.queryByText('safety_interlock')).toBeNull()
 
-    // The header names the group and carries no count; its tooltip says how many it holds.
-    const header = screen.getByRole('button', { name: 'Controller', expanded: false })
-    expect(within(header).getByText('Controller')).toBeTruthy()
-    expect(header.querySelector('.section-count')).toBeNull()
+    // The header names the group and says how many it holds; its tooltip says what its names begin with.
+    const header = screen.getByRole('button', { name: 'Controller, 2 metrics', expanded: false })
+    expect(within(header).getByText('Controller')).toHaveClass('table-group-label')
+    expect(header.querySelector('.group-heading-count [aria-hidden]')).toHaveTextContent('· 2')
+    expect(tooltipOf(header)).toBe('Metrics named "Controller/…"')
   })
 
   it('expands a single group without touching the others', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: false })).toBeTruthy())
 
-    fireEvent.click(screen.getByRole('button', { name: 'Controller', expanded: false }))
+    fireEvent.click(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: false }))
 
     expect(screen.getByText('Controller/EXECUTION')).toBeTruthy()
     expect(screen.getByText('Controller/FIRMWARE')).toBeTruthy()
@@ -286,10 +287,10 @@ describe('Metric Catalog — collapsible groups', () => {
 
   it('collapses again on a second click', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: false })).toBeTruthy())
 
-    fireEvent.click(screen.getByRole('button', { name: 'Controller', expanded: false }))
-    fireEvent.click(screen.getByRole('button', { name: 'Controller', expanded: true }))
+    fireEvent.click(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: false }))
+    fireEvent.click(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: true }))
 
     expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
   })
@@ -715,7 +716,7 @@ describe('Metric Catalog — search', () => {
 
   it('auto-expands matching groups, so a search is not a list of shut headers', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: false })).toBeTruthy())
 
     fireEvent.change(search(), { target: { value: 'EXECUTION' } })
 
@@ -727,7 +728,7 @@ describe('Metric Catalog — search', () => {
 
   it('matches case-insensitively on the metric name', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: false })).toBeTruthy())
 
     fireEvent.change(search(), { target: { value: 'axes/' } })
     expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy()
@@ -735,7 +736,7 @@ describe('Metric Catalog — search', () => {
 
   it('says so when nothing matches, rather than rendering a bare table header', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: false })).toBeTruthy())
 
     fireEvent.change(search(), { target: { value: 'no-such-metric' } })
     expect(screen.getByText(/No metric matches/)).toBeTruthy()
@@ -743,7 +744,7 @@ describe('Metric Catalog — search', () => {
 
   it('restores the collapsed view when the search is cleared', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: false })).toBeTruthy())
 
     fireEvent.change(search(), { target: { value: 'EXECUTION' } })
     expect(screen.getByText('Controller/EXECUTION')).toBeTruthy()
@@ -754,10 +755,10 @@ describe('Metric Catalog — search', () => {
 
   it('lets a group the search opened be closed', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: false })).toBeTruthy())
 
     fireEvent.change(search(), { target: { value: 'EXECUTION' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Controller', expanded: true }))
+    fireEvent.click(screen.getByRole('button', { name: /^Controller, \d+ metrics?$/, expanded: true }))
     expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
   })
 })
@@ -961,7 +962,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
 
     expect(listed()).toEqual([])
     expect(unmappedButton().getAttribute('aria-pressed')).toBe('true')
-    fireEvent.click(within(catalogTable()).getByRole('button', { name: 'OEE', expanded: false }))
+    fireEvent.click(within(catalogTable()).getByRole('button', { name: /^OEE, \d+ metrics?$/, expanded: false }))
     expect(listed()).toEqual(['OEE/MTBF'])
   })
 

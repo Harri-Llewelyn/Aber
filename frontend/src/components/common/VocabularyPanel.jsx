@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react'
+import React, { useMemo } from 'react'
 import { IconBookOpen, IconFileCode } from './Icons'
 import { CardHeading } from './CardHeading'
 import { TabStrip } from './TabStrip'
 import { SearchInput } from './SearchInput'
 import { EmptyState } from './EmptyState'
 import { ExpandAllToggle } from './ExpandAllToggle'
+import { useOpenGroups } from '../../hooks/useOpenGroups'
 import { useUrlState, useUrlTab, pathSlug } from '../../hooks/useUrlState'
 import { VocabularySections } from './VocabularySections'
 
@@ -40,13 +41,14 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
   const activeId = available.find(t => pathSlug(t.id) === activeSlug)?.id
   const setActiveId = (id) => setActiveSlug(pathSlug(id))
   const [search, setSearch] = useUrlState('search')
-  const [expanded, setExpanded] = useState({})
 
   // Falls back to the first tab rather than rendering nothing: the vocabularies load
   // asynchronously, so the selected id can briefly name a tab that does not exist yet.
   const active = available.find(t => t.id === activeId) || available[0]
 
   const query = search.trim().toLowerCase()
+  // Section keys are namespaced per standard, so one record serves every tab without collisions.
+  const { isOpen, toggle, setOpen } = useOpenGroups(query !== '')
 
   // Matches the tooltip as well as the name: an ISO KPI is far more findable by "scrap" or by its
   // formula than by the exact token, and the tooltip is where that text lives.
@@ -71,16 +73,8 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
 
   if (!active) return null
 
-  // While searching, a section is open unless explicitly collapsed -- the matches are the point.
-  // Section keys are namespaced per standard, so one map serves every tab without collisions.
-  const isOpen = (key) => (query ? expanded[key] !== false : expanded[key] === true)
-  const toggle = (key) => setExpanded(prev => ({ ...prev, [key]: !isOpen(key) }))
-  // Writes every section of this standard explicitly, `false` included, so Collapse all also
-  // closes the sections a search opened.
-  const setAll = (open) => setExpanded(prev => ({
-    ...prev,
-    ...Object.fromEntries((active.sections || []).map(s => [s.key, open]))
-  }))
+  // Every section of this standard, not only those shown: Collapse all also closes what a search opened.
+  const setAll = (open) => setOpen((active.sections || []).map(s => s.key), open)
 
   // The tab names the standard on show, so nothing below repeats it. The search text survives a
   // switch, so one query asks every standard.

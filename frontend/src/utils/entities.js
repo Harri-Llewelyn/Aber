@@ -1,6 +1,7 @@
 import { DERIVED_TAG_TITLE } from '../components/common/DerivedTag'
 import { KNOWN_PRINCIPALS } from './serviceIdentities'
 import { SCHEMA_STATUS } from './schemaVersion'
+import { formatDay } from './format'
 import { isSparkplugId } from './sparkplugId'
 import { inferSemanticIdType } from './standards'
 
@@ -31,8 +32,49 @@ const KIND_ORDER = new Map(ENTITY_KINDS.map((k, i) => [k.kind, i]))
 /** A kind's one-record name, or its own word for a kind this build does not know. */
 export const kindLabel = (kind) => ENTITY_KINDS[KIND_ORDER.get(kind)]?.label ?? String(kind ?? '')
 
+/** A kind's name for several, as its group's heading has it, or its own word for a kind this build does not know. */
+export const kindPlural = (kind) => ENTITY_KINDS[KIND_ORDER.get(kind)]?.plural ?? String(kind ?? '')
+
+/** How many of a kind, in words: "81 gateways", "1 person". */
+export const kindCount = (kind, n) => `${n} ${(n === 1 ? kindLabel(kind) : kindPlural(kind)).toLowerCase()}`
+
 /** Where a kind comes in the page's order: last, for one this build does not know. */
 export const kindRank = (kind) => KIND_ORDER.get(kind) ?? ENTITY_KINDS.length
+
+/** Rows as `{ kind, rows }` groups, one for each kind they are of, in the page's order. A group keeps the order its rows came in. */
+export function groupByKind(rows) {
+  const byKind = new Map()
+  for (const row of rows) {
+    if (!byKind.has(row.kind)) byKind.set(row.kind, [])
+    byKind.get(row.kind).push(row)
+  }
+  return [...byKind].map(([kind, of]) => ({ kind, rows: of })).sort((a, b) => kindRank(a.kind) - kindRank(b.kind))
+}
+
+/** How close the auto-purge may come before a row and a drawer warn of it. */
+const PURGE_SOON_DAYS = 7
+
+/** True when the purge is due within PURGE_SOON_DAYS, or already overdue. */
+export function purgeIsSoon(at, now = Date.now()) {
+  return new Date(at).getTime() - now <= PURGE_SOON_DAYS * 24 * 60 * 60 * 1000
+}
+
+/** Whether a playback holds an archived gateway whose timer runs: neither the purge nor Permanent Delete removes it. */
+export const purgeIsHeld = (row) => Boolean(row?.auto_delete_at) && row.playbacks > 0
+
+/** What an archived group's heading says of its timers: the soonest purge, and how many a playback holds. Null where none runs. */
+export function nextPurge(rows) {
+  const due = rows.filter(row => row.auto_delete_at && !purgeIsHeld(row)).map(row => new Date(row.auto_delete_at).getTime())
+  const held = rows.filter(purgeIsHeld).length
+  return [due.length > 0 && `next purge ${formatDay(Math.min(...due))}`, held > 0 && `${held} held by a playback`]
+    .filter(Boolean).join(', ') || null
+}
+
+/** What a retired group's heading says: the day of the last deletion. */
+export function lastDeleted(rows) {
+  const at = Math.max(...rows.map(row => new Date(row.retired_at).getTime()).filter(Number.isFinite))
+  return Number.isFinite(at) ? `last deleted ${formatDay(at)}` : null
+}
 
 /** One row's key among every row of the page. A deleted entity's id is not used again, and a test's may be. */
 export const entityKey = (row) => `${row.state}:${row.kind}:${row.id}`

@@ -8,6 +8,19 @@ This page lists every entity this site has. An entity is anything Aber keeps und
 
 It has three tabs. **Active** lists what is in service. **Archived** lists what was taken out of service and can come back. **Retired** lists what was deleted.
 
+## Open a group
+
+Each tab lists its entities in groups, one for each kind, such as **Devices**.
+
+1. Select a group's heading to open it. Select it again to close it.
+2. Select **Expand all**, at the start of the line above the list, to open every group. It reads **Collapse all** while any is open.
+
+- **A group starts closed.** Its heading says how many rows it holds. A tab with one group starts with it open.
+- **A group draws 200 rows at a time.** A button at its end, such as **Show 200 more**, draws the next.
+- **A search opens the groups it finds something in.** You can close any of them. When you clear the search, the groups are as they were.
+- **A heading says one date as well,** on two of the tabs. On **Archived** it is the next auto-purge. On **Retired** it is the last deletion.
+- **A column's heading sorts the rows of each group** by that column, on every tab. Click it again to reverse the order, and a third time to go back to the usual order. An empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
+
 ## Find what an ID names
 
 1. Open **Entities** in the sidebar.
@@ -20,7 +33,6 @@ If the whole of the ID names one entity, that entity opens. For an entity in ser
 - **Any part of a name works.** Capitals make no difference.
 - **The search covers all three tabs.** When it finds something on a tab you are not on, a line under the search says how many, as links. The search stays when you change tab.
 - **A search lists 200 matches at most,** and says when there are more. Type more of the ID or the name.
-- **Kind** narrows the list to some kinds, such as devices. Each kind shows how many it has.
 - **The address keeps the search,** so you can send a link to what you found.
 
 **The search bar finds entities from any page.** Press **Ctrl+K** (**Cmd+K** on a Mac) and type two or more characters of a name, or paste an ID. Entities come after pages and help, 10 of a kind at most, so type more to narrow them. Select one to open it on its own page. If your role can't open that page, or the entity was deleted, it opens on this page. An ID adds two rows below. **View in Entities** searches this page for it. **Find This ID in the Audit Trail** opens its history, for a role that may read it. Both are there even when nothing is found, because the Audit Trail records more kinds than this page lists.
@@ -29,8 +41,7 @@ If the whole of the ID names one entity, that entity opens. For an entity in ser
 
 The **Active** tab lists what is in service:
 
-- **Name** is what the entity is called. A capture is named for what it recorded, and a backup by its stamp.
-- **Kind** says what it is. A metric that Aber computes is marked **Derived**, and a schema version that a newer one replaced is marked **Archived version**.
+- **Name** is what the entity is called. A capture is named for what it recorded, and a backup by its stamp. A metric that Aber computes is marked **Derived** beside its name. A schema version that a newer one replaced is marked **Archived version**.
 - **UUID** is the entity's own ID. Select it to copy it. Nothing changes it, and a deleted entity's is not used again.
 - **Second IDs** are the other IDs it goes by. An ID too long for its column slides into view when you point at it.
 
@@ -65,7 +76,6 @@ Taking something out of service has two steps. Archiving is the step you can und
 - **Held** takes the place of the date on a gateway that a playback was published as. The record of each playback is kept, and it names that gateway. So neither the timer nor **Permanent Delete** removes the gateway. Restore it, or leave it archived.
 - Archiving a gateway also disables its broker credential and archives its repository in the forge. Restore brings the repository back, but not the credential: issue a new one once the gateway is restored.
 - **UUID** and **Archived At** are the two facts to quote when the question is whether something was taken out on purpose.
-- **A column's heading sorts the table** by that column, on every tab. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
 - Without the archive permission (Administrator or Shopfloor Manager), the buttons are disabled and say who can use them.
 
 Archiving an area changes nothing beneath it. Its cells stay filed in it, and every topic under its name keeps that name. The Site Map leaves it off unless archived areas are shown there. Only deleting an area takes its cells out of it.

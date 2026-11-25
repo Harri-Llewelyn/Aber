@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { EntitiesTab, ACTIVE_PAGE } from '../components/tabs/EntitiesTab'
+import { EntitiesTab } from '../components/tabs/EntitiesTab'
 import { PERMISSION_UUIDS, ENTITY_FIND_LIMIT } from '../constants'
 import { DEFAULT_ROLE_PERMISSIONS_MAP } from '../hooks/usePermissions'
 import { KNOWN_PRINCIPALS } from '../utils/serviceIdentities'
@@ -11,7 +11,8 @@ import { tabLink } from '../test/tabBar'
 /**
  * The Entities page's Active tab, the search the three tabs share, and an entity's drawer. The rows
  * are entity_directory's (0321), which the database narrows to each reader; what is held here is what the
- * page does with them, and that it asks for people only where the reader has a read of them.
+ * page does with them, and that it asks for people only where the reader has a read of them. The groups
+ * the rows are in are entitiesGroups.test.jsx's, so every group is opened here.
  */
 
 vi.mock('../api', async (importOriginal) => ({
@@ -67,13 +68,19 @@ const ofArchived = (r) => row(`${r.entity_type}s`, r.entity_id, r.name, { state:
 const holds = (role) => (permission) => (DEFAULT_ROLE_PERMISSIONS_MAP[role] || []).includes(permission)
 const at = (url) => window.history.replaceState(null, '', url)
 const address = () => window.location.pathname + window.location.search
-const names = () => [...document.querySelectorAll('tbody tr')].map(tr => tr.querySelector('strong').textContent)
+const names = () => [...document.querySelectorAll('tbody tr:not(.table-group-row)')].map(tr => tr.querySelector('strong').textContent)
 const search = () => screen.getByRole('searchbox', { name: 'Search entities by any ID or name' })
 const panel = () => document.querySelector('.context-panel')
 const drawer = () => within(panel())
 const fieldsOf = () => [...panel().querySelectorAll('.context-panel-fields .context-field')]
   .map(f => [f.querySelector('dt').textContent.trim(), f.querySelector('dd').textContent.trim()])
 const actions = () => [...panel().querySelectorAll('.context-panel-actions a, .context-panel-actions button')]
+
+/** Opens every group: a tab that has one starts with it open. */
+const expandAll = async () => {
+  const button = await screen.findByRole('button', { name: /^(Expand|Collapse) all$/ })
+  if (button.textContent === 'Expand all') fireEvent.click(button)
+}
 
 const show = async ({ role = 'Administrator', entities = EVERY, archives = [], retired = [], url = '/entities' } = {}) => {
   at(url)
@@ -86,6 +93,8 @@ const show = async ({ role = 'Administrator', entities = EVERY, archives = [], r
   })
   const showToast = vi.fn()
   render(<EntitiesTab showToast={showToast} userRole={role} hasPermission={holds(role)} onViewTrail={vi.fn()} />)
+  // A search and an address that names a kind or a row open the groups themselves.
+  if (url === '/entities') await expandAll()
   return { showToast }
 }
 const openRow = async (name) => {
@@ -112,50 +121,29 @@ describe('the Active tab', () => {
       'Coolant is low', 'Lathe 10', '20261124T031500Z', 'Line 4 report'])
   })
 
-  it('shows each one\'s kind, its uuid, its second ids, and what sets it apart within its kind', async () => {
+  it('shows each one\'s uuid, its second ids, and what sets it apart within its kind', async () => {
     await show({ role: 'Operator' })
     await screen.findByText('Machine Shop')
-    expect([...document.querySelectorAll('thead th')].map(th => th.textContent)).toEqual(['Name', 'Kind', 'UUID', 'Second IDs'])
+    expect([...document.querySelectorAll('thead th')].map(th => th.textContent)).toEqual(['Name', 'UUID', 'Second IDs'])
     const cells = (name) => [...(screen.getAllByText(name).find(el => el.closest('tbody')).closest('tr')).cells]
-    expect(cells('Axes/TEMP')[1]).toHaveTextContent('Metric')
-    expect(within(cells('Axes/TEMP')[2]).getByRole('button', { name: `Copy uuid ${METRIC.id}` })).toBeInTheDocument()
-    expect(cells('Axes/TEMP')[3]).toHaveTextContent('0112/2///61987#ABA951#009 · https://example.org/temp')
-    expect(cells('Axes/TEMP')[3].querySelector('.overflow-text')).not.toBeNull()
-    expect(cells('Machine Shop')[3]).toHaveTextContent('—')
+    expect(within(cells('Axes/TEMP')[1]).getByRole('button', { name: `Copy uuid ${METRIC.id}` })).toBeInTheDocument()
+    expect(cells('Axes/TEMP')[2]).toHaveTextContent('0112/2///61987#ABA951#009 · https://example.org/temp')
+    expect(cells('Axes/TEMP')[2].querySelector('.overflow-text')).not.toBeNull()
+    expect(cells('Machine Shop')[2]).toHaveTextContent('—')
     for (const [name, badge] of [['Lathe 9', 'Quarantined'], ['Lathe_Schema', 'Archived version'], ['Parts/RATE', 'Derived'], ['Coolant is low', 'Disabled']]) {
       expect(cells(name)[0]).toHaveTextContent(badge)
     }
-  })
-
-  it('narrows to the kinds chosen, with each kind\'s count, and offers only the kinds it holds', async () => {
-    await show({ role: 'Operator', entities: [AREA, GATEWAY, DEVICE, HELD] })
-    await screen.findByText('Machine Shop')
-    fireEvent.click(screen.getByRole('button', { name: 'Kind: Any kind' }))
-    const list = within(await screen.findByRole('dialog', { name: 'Kind' }))
-    expect(list.getAllByRole('checkbox').map(b => b.closest('label').textContent)).toEqual(['Areas 1', 'Gateways 1', 'Devices 2'])
-    fireEvent.click(list.getByRole('checkbox', { name: 'Devices 2' }))
-    expect(names()).toEqual(['Lathe 9', 'Lathe 10'])
-    expect(address()).toBe('/entities?kind=devices')
-    fireEvent.click(screen.getByRole('button', { name: /Clear filters \(1\)/ }))
-    expect(names()).toHaveLength(4)
   })
 
   it('sorts by a column, held in the address', async () => {
     await show({ role: 'Operator', entities: [AREA, DEVICE, HELD] })
     await screen.findByText('Machine Shop')
     fireEvent.click(screen.getByRole('button', { name: 'Name' }))
-    expect(names()).toEqual(['Lathe 9', 'Lathe 10', 'Machine Shop'])
+    expect(names()).toEqual(['Machine Shop', 'Lathe 9', 'Lathe 10'])
     expect(address()).toBe('/entities?sort=name')
-  })
-
-  it(`draws ${ACTIVE_PAGE} rows at a time, and says how many there are`, async () => {
-    const many = Array.from({ length: ACTIVE_PAGE + 5 }, (_, i) => row('devices', uuid(1000 + i), `Press ${i}`))
-    await show({ role: 'Operator', entities: many })
-    await screen.findByText('Press 0')
-    expect(names()).toHaveLength(ACTIVE_PAGE)
-    expect(screen.getByText(`${ACTIVE_PAGE} of ${ACTIVE_PAGE + 5}`)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Show 5 more' }))
-    expect(names()).toHaveLength(ACTIVE_PAGE + 5)
+    fireEvent.click(screen.getByRole('button', { name: 'Name' }))
+    expect(names()).toEqual(['Machine Shop', 'Lathe 10', 'Lathe 9'])
+    expect(address()).toBe('/entities?sort=-name')
   })
 
   it('says when the entities could not be read, rather than that there are none', async () => {
@@ -171,8 +159,7 @@ describe('people and the platform\'s own identities', () => {
   it('are beside the rows for an Administrator, with whose access was removed', async () => {
     await show({ entities: [AREA] })
     const ada = (await screen.findByText('Ada Lovelace')).closest('tr')
-    expect(ada.cells[1]).toHaveTextContent('Person')
-    expect(ada.cells[3]).toHaveTextContent('ada@example.test')
+    expect(ada.cells[2]).toHaveTextContent('ada@example.test')
     expect(screen.getByText('bob@example.test', { selector: 'strong' }).closest('tr')).toHaveTextContent('Access removed')
     for (const known of Object.values(KNOWN_PRINCIPALS)) expect(screen.getByText(known.name)).toBeInTheDocument()
     expect(api.listUserAccounts).not.toHaveBeenCalled()
@@ -203,12 +190,13 @@ describe('people and the platform\'s own identities', () => {
 describe('the search', () => {
   const type = (text) => fireEvent.change(search(), { target: { value: text } })
 
-  it('asks the database, and lists what it answered in the order it answered', async () => {
+  it('asks the database, and lists what it answered, each kind in the order it answered', async () => {
     api.findEntities.mockResolvedValue([CAPTURE, DEVICE, HELD])
     await show({ role: 'Operator' })
     await screen.findByText('Machine Shop')
     type('Lathe')
-    await waitFor(() => expect(names()).toEqual(['Lathe 10', 'Lathe 10', 'Lathe 9']))
+    // The devices' group comes before the captures', and the devices are in the answer's order.
+    await waitFor(() => expect(names()).toEqual(['Lathe 10', 'Lathe 9', 'Lathe 10']))
     expect(api.findEntities).toHaveBeenCalledWith('lathe')
     expect(address()).toBe('/entities?find=Lathe')
     // Several rows, and no whole id: nothing opens.
