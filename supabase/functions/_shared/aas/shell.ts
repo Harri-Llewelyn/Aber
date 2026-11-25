@@ -1054,6 +1054,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
 
   /** The idShortPaths of the nameplate elements this device has a value for. */
   const present = new Set<string>();
+  const hasText = (value: unknown) => value !== null && value !== undefined && String(value).trim() !== "";
 
   /**
    * One nameplate element as its template types it, or null when there is no value. A value of spaces
@@ -1067,8 +1068,8 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     value: unknown,
     opts: { semanticId: string | null; description: string },
   ) => {
-    const text = value === null || value === undefined ? "" : String(value);
-    if (text.trim() === "") return null;
+    if (!hasText(value)) return null;
+    const text = String(value);
     const multiLanguage = element?.model_type === "MultiLanguageProperty";
     if (multiLanguage && text.length > MAX_LANG_STRING_LENGTH) return null;
     present.add(path);
@@ -1080,9 +1081,9 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
   const RECORDED = "Recorded against the asset by an operator.";
 
   /**
-   * One nameplate element, sourced device-first and carrying its published id. `source` is recorded in
-   * the description rather than as a sibling property, which a consumer would read as a second
-   * nameplate field.
+   * One nameplate element, sourced device-first and carrying its published id. A device that publishes
+   * an empty value answers nothing, so the operator's stands. `source` is recorded in the description
+   * rather than as a sibling property, which a consumer would read as a second nameplate field.
    */
   const nameplateElement = (
     idShort: string,
@@ -1090,9 +1091,11 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     opcSemanticId?: string,
   ) => {
     const published = opcSemanticId ? publishedValue(opcSemanticId) : null;
-    return templateElement(idShort, idShort, nameplateElements.get(idShort), published ?? operatorValue ?? null, {
-      semanticId: nameplateSemanticId.get(idShort) ?? null,
-      description: published !== null ? "Published by the device at DBIRTH." : RECORDED,
+    const answered = hasText(published);
+    const element = nameplateElements.get(idShort);
+    return templateElement(idShort, idShort, element, answered ? published : operatorValue, {
+      semanticId: nameplateSemanticId.get(idShort) ?? element?.semantic_id ?? null,
+      description: answered ? "Published by the device at DBIRTH." : RECORDED,
     });
   };
 
@@ -1124,7 +1127,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
         addressElement("NationalCode", nameplate?.address_national_code),
       ].filter((element) => element !== null),
       undefined,
-      nameplateSemanticId.get(ADDRESS_INFORMATION) ?? null,
+      nameplateSemanticId.get(ADDRESS_INFORMATION) ?? nameplateElements.get(ADDRESS_INFORMATION)?.semantic_id,
     ) ?? null,
     nameplateElement("ManufacturerProductType", nameplate?.manufacturer_product_type),
     nameplateElement("OrderCodeOfManufacturer", nameplate?.order_code_of_manufacturer),

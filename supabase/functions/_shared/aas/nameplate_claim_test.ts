@@ -186,6 +186,29 @@ Deno.test("a value the device publishes counts as its own", () => {
   ]);
 });
 
+Deno.test("a device that publishes an empty value answers nothing, so the operator's stands", () => {
+  for (const val_string of ["", "   "]) {
+    const rows = record(COMPLETE, {
+      catalog: [{ name: "Machine/Manufacturer", semantic_id: OPC_MACHINERY.Manufacturer, datatype: 12, deprecated: false }],
+      config: [{ metric_name: "Machine/Manufacturer", val_string }],
+    });
+    const name = element(nameplateOf(rows), "ManufacturerName");
+    assert.equal(
+      [name.value[0].text, name.description[0].text],
+      ["Acme & Sons", "Recorded against the asset by an operator."],
+    );
+    assert.equal(claim(rows), NAMEPLATE_TEMPLATE_ID);
+  }
+});
+
+Deno.test("each element keeps its id where the older table cannot be read", () => {
+  const nameplate = nameplateOf(record(COMPLETE, { templates: [] }));
+  assert.equal(
+    nameplate.submodelElements.map((e: Anything) => [e.idShort, e.semanticId?.keys?.[0]?.value]),
+    nameplate.submodelElements.map((e: Anything) => [e.idShort, NAMEPLATE_ROWS.find((r) => r.path === e.idShort)?.semantic_id]),
+  );
+});
+
 Deno.test("the device's own name never stands in for the manufacturer's designation", () => {
   const { manufacturer_product_designation: _gone, ...rest } = COMPLETE;
   const nameplate = nameplateOf(record(rest));

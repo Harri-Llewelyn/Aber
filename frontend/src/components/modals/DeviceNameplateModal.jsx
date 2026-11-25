@@ -47,7 +47,7 @@ const FIELDS = [
       + 'The broadest of the three identifiers: every machine of this model shares it. Product '
       + 'Type narrows it to a variant, and Serial Number narrows that to this individual unit.'
   },
-  { column: 'address_street', path: 'AddressInformation.Street', label: 'Street', placeholder: 'Musterstraße 1' },
+  { column: 'address_street', path: 'AddressInformation.Street', label: 'Street', placeholder: '1 Example Road' },
   { column: 'address_zipcode', path: 'AddressInformation.Zipcode', label: 'Postal Code' },
   { column: 'address_city_town', path: 'AddressInformation.CityTown', label: 'Town or City' },
   { column: 'address_state_county', path: 'AddressInformation.StateCounty', label: 'State or County' },

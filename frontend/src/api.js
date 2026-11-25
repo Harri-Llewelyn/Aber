@@ -23,7 +23,7 @@ import {
   modelStoragePath
 } from './utils/model3d';
 import { PICTURE_BUCKET, picturePath } from './utils/picture';
-import { mandatoryNameplatePaths } from './utils/nameplate';
+import { hasNameplateValue, mandatoryNameplatePaths } from './utils/nameplate';
 
 // A device has two relationships to a cell: `devices.gateway_id -> gateways.cell_id` is the data
 // path, and `devices.cell_id` is the cell the device is in when its `location_scope` is 'cell'
@@ -3473,7 +3473,7 @@ const apiMethods = {
         published = Object.fromEntries(
           [...NAMEPLATE_PUBLISHED_BY.entries()]
             .map(([field, semanticId]) => [field, byMetricName.get(bySemanticId.get(semanticId))])
-            .filter(([, value]) => value !== undefined && value !== null && value !== '')
+            .filter(([, value]) => hasNameplateValue(value))
         );
       }
 
