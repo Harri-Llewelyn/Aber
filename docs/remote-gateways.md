@@ -556,8 +556,8 @@ opening a shell:
 
 | Row | Reads | Means |
 | :--- | :--- | :--- |
-| **Platform** | `v1.9.0 · converged 40 minutes ago` | the playbook version this appliance is actually on. Different tags across the fleet mean a rollout in progress, which is what the per-gateway pointer is for |
-| **Platform** | `v1.9.0 · failed` | `ansible-pull` did not complete. The timer retries within the hour; the appliance's journal says why |
+| **Platform** | `v1.9.1 · converged 40 minutes ago` | the playbook version this appliance is actually on. Different tags across the fleet mean a rollout in progress, which is what the per-gateway pointer is for |
+| **Platform** | `v1.9.1 · failed` | `ansible-pull` did not complete. The timer retries within the hour; the appliance's journal says why |
 | **Custom** | *(empty)* | this gateway's repository carries no playbook of its own. The ordinary case |
 | **Custom** | `converged at a1b2c3d` | its adapter is running, from that commit |
 | **Custom** | `failed at a1b2c3d` | its adapter is **not** running |
@@ -571,6 +571,16 @@ the only place its absence shows. Check it after any change to a gateway's own p
 in its repository. To seed one, use the forge's **Use this template** on
 `platform/gateway-custom-example`, before the appliance is commissioned. Enrolment adopts a repository
 that already exists, and sets it up the same way as an empty one.
+
+**Whoever makes it holds it only until the gateway enrols.** The forge makes them its administrator.
+Enrolment removes them, and anybody they added, before it does anything else, and every pass of the
+sweep does the same. From then on they have what their team has. Enrolment also replaces the branch
+rules and the tag rules they set, dismisses the approvals given under them, and makes `main` the default
+branch. An appliance is always told `main`. A repository that mirrors another one is refused.
+
+**Read `main` before you set the appliance up.** What it holds when the gateway enrols is deployed as it
+is, `custom.yml` included, and nobody approved it. Every change after that needs an Administrator's
+approval.
 
 ## Related
 

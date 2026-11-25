@@ -92,10 +92,10 @@ index to go stale. A clone of the release tag supplies only `npm run setup` and 
 this directory.
 
 ```bash
-git clone --branch v1.9.0 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
+git clone --branch v1.9.1 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
 
 # Is the version published? The repository's Releases page lists every one.
-helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.9.0
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.9.1
 
 # Once per cluster: cert-manager and the internal CA (TLS, steps 0 and 1, below).
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
@@ -130,7 +130,7 @@ mosquitto:
 EOF
 
 helm install aber oci://ghcr.io/harri-llewelyn/aber/aber \
-  --version 1.9.0 \
+  --version 1.9.1 \
   --namespace aber --create-namespace \
   --values deploy/helm/aber/values-local.yaml \
   --values site.yaml \
@@ -222,7 +222,7 @@ doesn't change them. A replay lane has none, because a lane is a recording of a 
 second device.
 
 The twelve built images resolve automatically to the chart's `appVersion`, which the release sets
-equal to the chart version. Chart 1.9.0 can only pull images 1.9.0, so there is nothing to line up
+equal to the chart version. Chart 1.9.1 can only pull images 1.9.1, so there is nothing to line up
 by hand and no `latest` tag to drift onto.
 
 #### Verify what you are about to install
@@ -234,7 +234,7 @@ its registry index. [`SECURITY.md`](../../SECURITY.md#what-a-release-carries-and
 says what each is and how to read it.
 
 ```bash
-V=1.9.0
+V=1.9.1
 ID="https://github.com/Harri-Llewelyn/Aber/.github/workflows/release.yml@refs/tags/v$V"
 ISSUER=https://token.actions.githubusercontent.com
 
@@ -326,7 +326,7 @@ beats the `appVersion` default:
 ingestion:
   image:
     repository: registry.internal/aber/ingestion
-    tag: "1.9.0-hotfix.2"
+    tag: "1.9.1-hotfix.2"
 ```
 
 Do this for a hotfix, a bisect or an air-gapped mirror. Do not use it to run one component a

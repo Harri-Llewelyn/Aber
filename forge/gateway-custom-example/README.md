@@ -32,7 +32,8 @@ to everything it produces. A workload that needs its own identity is a second ga
 enrol as one.
 
 **It is reviewed like a flow.** `main` is protected; a change is a pull request an administrator
-approves. The appliance converges hourly, so a merged change is running within the hour.
+approves. The appliance converges hourly, so a merged change is running within the hour. That starts
+when the gateway enrols: what the repository already holds is run as it is, so read it first.
 
 **It cannot take the platform with it.** The platform playbook runs first and this one second.
 A failure here is recorded separately and never reads as the platform failing to converge — but it

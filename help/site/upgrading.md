@@ -121,6 +121,11 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   [*the dashboard's and Node-RED's images are built with `licenses/`*](#from-190-the-dashboards-and-node-reds-images-are-built-with-licenses).
 - **A Grafana panel or alert rule of your own that reads `aber_ingestion_messages_total`?** Check it
   first: see [*`aber_ingestion_messages_total` is labelled by gateway*](#from-190-aber_ingestion_messages_total-is-labelled-by-gateway).
+- **A Remote gateway?** Plan one pull request for each after the upgrade, and read what the forge's sweep puts
+  right by itself: see [*a tag cannot stand in for a gateway's branch*](#from-191-a-tag-cannot-stand-in-for-a-gateways-branch)
+  and [*nobody holds a gateway's repository by name*](#from-191-nobody-holds-a-gateways-repository-by-name).
+- **A mirror or a migration in the forge?** It stops: the forge no longer fetches from another host or pushes to
+  one. See [*nobody holds a gateway's repository by name*](#from-191-nobody-holds-a-gateways-repository-by-name).
 
 ### The command
 
@@ -2795,6 +2800,157 @@ changes no metric. There is nothing to run.
 - **A script that reads `/rest/v1/mtconnect_vocabulary`** finds a new `description` field. It is null
   for subtypes, units and components, and for `ELEVATION`, which MTConnect 2.7 does not describe.
 - **A tool that compares exports** sees the new text as a change. Re-baseline it.
+
+### From 1.9.1, a tag cannot stand in for a gateway's branch
+
+An appliance deploys what its repository's `main` holds. It fetched `main` by its short name, and Git
+takes a short name for a tag before a branch. So a tag named `main` decided what the appliance
+deployed: its flow, and the repository's own `custom.yml`, which runs as root. No approval stood in the
+way. The gateway's own key could make such a tag, and so could anybody who can write the repository,
+which a Shopfloor Manager can on every gateway. The advisory is
+[GHSA-84xw-m29x-9r4r](https://github.com/Harri-Llewelyn/Aber/security/advisories/GHSA-84xw-m29x-9r4r),
+which also covers [who holds a gateway's repository](upgrading.md#from-191-nobody-holds-a-gateways-repository-by-name).
+
+It is closed at both ends. The forge's end needs nothing from you. The appliance's needs one pull
+request for each Remote gateway.
+
+#### What changes by itself
+
+Within fifteen minutes of the upgrade, the forge's sweep does this in each gateway's repository:
+
+- **It adds two rules for tags.** Nobody can make a tag named `main` or `appliance`, in any case. A
+  gateway's key can make no tag at all. Administrators and Shopfloor Managers make every other tag, and
+  releases, as before.
+- **It removes a tag rule of your own**, if you added one in the forge's settings. The forge admits
+  whoever any rule admits, so a second rule could only let more people in.
+- **It deletes a tag named `main` or `appliance`** that is already there, and the release made from it.
+
+A new gateway gets the rules when it enrols, before its key is registered.
+
+#### What you do for each Remote gateway
+
+Move the gateway to this release's platform. Until you do, the forge's rules protect it, and the
+appliance still reads a short name.
+
+1. In the forge, change `tag` in the gateway's `platform.yml` to `v1.9.1` by pull request.
+2. Another Administrator approves it, because the forge does not let an author approve their own. On a
+   site with one Administrator, add a second on **Access Control** with **Add Person**. Approve as
+   them in a private window, merge, then choose **Remove Access**.
+3. The appliance converges within the hour. The drawer's **Platform** row then shows `v1.9.1`.
+
+#### What to look at
+
+See whether the sweep deleted a tag. The log names the repository and the commit:
+
+```bash
+kubectl -n aber logs deploy/supabase-functions --since=24h | grep 'carries a tag named'
+```
+
+No line means that no repository had one. Aber makes no such tag, so for each line:
+
+1. Open the commit in the forge, at `<the forge>/gateways/<the repository>/commit/<the commit>`. It
+   opens there although the tag is gone.
+2. Compare what the appliance runs with `main`. In the gateway's drawer, use **Running vs approved**,
+   and read the **Flow** row.
+3. If the appliance followed the tag, its log says that the branch *no longer contains* the commit. It
+   then fetches nothing more, `v1.9.1` included, and still runs the commit's own `custom.yml` every
+   hour. [Remote gateways, *Troubleshooting*](remote-gateways.md#troubleshooting) says
+   how to decide, and how to start it again from `main`. If you do not know the commit and it changed
+   `custom.yml` or `platform.yml`, rebuild the machine: the appliance ran that as root.
+
+If the log says a tag *could not be removed*, the sweep tries again every fifteen minutes. A tag on a
+file or a folder is the one the forge's API cannot delete. Delete it on the forge's volume, with the
+repository's name in place of `<repository>` and the tag's name at the end:
+
+```bash
+kubectl -n aber exec deploy/gitea -c gitea -- su-exec git \
+  git -C /data/git/repositories/gateways/<repository>.git tag -d main
+```
+
+#### The forge's and Studio's doors resolve `..` in an address
+
+Their admission step was asked about the address as it was sent, so `/../<function>` asked another
+edge function whether the request was admitted. A person whose role had been removed, with a session
+still open, was let through to a page that is not there. Nothing was found that it exposes. Both doors
+now resolve the address first, and no page's address changes.
+
+### From 1.9.1, nobody holds a gateway's repository by name
+
+Enrolment makes a gateway's repository. A person can also make it in the forge first, for example with
+**Use this template** for a custom gateway. The forge made that person its administrator, and nothing
+took that away. So a Shopfloor Manager who had made one could merge past the Administrator's approval on
+`main`, or change the rule that asks for it. A person whose role had been removed still could, with a
+token of their own. They could also move the repository's default branch, which enrolment told the
+appliance to follow. The advisory is
+[GHSA-84xw-m29x-9r4r](https://github.com/Harri-Llewelyn/Aber/security/advisories/GHSA-84xw-m29x-9r4r),
+as for [the tags](upgrading.md#from-191-a-tag-cannot-stand-in-for-a-gateways-branch).
+
+A gateway whose repository enrolment made was not affected, unless an operator gave somebody the
+repository by name.
+
+#### What changes by itself
+
+Within fifteen minutes of the upgrade, the forge's sweep does this in the repository of each gateway in
+service, and the first of it in an archived gateway's. Enrolment does the same, before the gateway's key
+is registered.
+
+- **It removes everybody who holds the repository by name**, a person you added yourself included. What
+  a person may do comes from their role.
+- **It puts back what makes the approval real**, where the rule on `main` is looser:
+  - no push, and no bypass list;
+  - no file left unprotected;
+  - at least one approval, from the `administrators` team and from nobody else;
+  - an approval dismissed when the proposal changes.
+
+  A looser setting of your own is put back too. A tighter one stays: more approvals, other required
+  checks, protected files, a list of who may merge.
+- **It dismisses the approvals on open proposals** where the rule asked for less than that. Approve them
+  again.
+- **It removes any other branch rule.** One on a single other branch, which asks what `main`'s asks,
+  stays.
+- **It makes `main` the default branch again.** The branch it was asks for the approval too, from then on.
+- **It removes a deploy key that is not the gateway's own**, and a gateway's key from any other repository.
+- **It gives a renamed repository its name back**, and turns proposals on where they were off.
+
+The forge no longer fetches from another host or pushes to one. A migration, a pull mirror and a push mirror
+are refused, in every repository of the forge, one that already stands included.
+
+#### What you do
+
+Nothing, unless you gave somebody a gateway's repository by name. Give that person a role on
+**Access Control** instead.
+
+#### What to look at
+
+The log names each repository where one of these was needed:
+
+```bash
+kubectl -n aber logs deploy/supabase-functions --since=24h \
+  | grep -E 'was held by|put back|admitted pushes|removed the branch rule|the default branch of|dismissed an approval|and is again|took no proposals|deploy keys are removed'
+```
+
+No line means that every repository was as enrolment makes it. For each repository named:
+
+1. Read its commits on `main` in the forge. A change merged past the approval is still there, and where
+   somebody held the repository it need not have left a looser rule. To undo one, revert it by pull
+   request. If you do not know it and it changed `custom.yml` or `platform.yml`, rebuild the machine: the
+   appliance ran that as root.
+2. If the line says it was renamed (*was … and is again*), set the gateway up again, so that its appliance
+   has the repository's own address.
+3. If the line says its deploy keys are removed, it is a mirror, or it has a branch rule that cannot be
+   removed. The appliance goes on running what it has. Remove the rule as
+   [`supabase/README.md`](../../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-archived-migration-0104)
+   says, or keep a clone of the repository and delete it. A new name is not enough: it would have its name
+   back. Then set the gateway up again.
+4. If the line says the default branch was another one, the appliance may have enrolled on it. Put what it
+   should run on `main`, and set the gateway up again. Until then, an appliance on this release's platform
+   says *REFUSING TO SYNC* and goes on running what it has. One on an earlier platform follows that
+   branch, which now needs the approval.
+
+#### What an approval does not cover
+
+A repository made by hand arrives as its maker left it. **What `main` holds when the gateway enrols is
+deployed as it is**, and nobody approved it. Read it before you set the appliance up.
 
 ## Backups
 
