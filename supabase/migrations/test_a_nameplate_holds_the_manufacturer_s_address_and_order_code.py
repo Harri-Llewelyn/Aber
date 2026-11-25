@@ -40,6 +40,22 @@ NEW = {
     "address_state_county": "West Glamorgan",
     "address_national_code": "GB",
 }
+# The dashboard's save: an upsert of the fields, a missing one as NULL.
+UPSERT = """
+INSERT INTO public.device_nameplate (device_id, serial_number, order_code_of_manufacturer, address_street,
+                                     address_zipcode, address_city_town, address_state_county, address_national_code)
+VALUES (%(device_id)s, %(serial_number)s, %(order_code_of_manufacturer)s, %(address_street)s, %(address_zipcode)s,
+        %(address_city_town)s, %(address_state_county)s, %(address_national_code)s)
+ON CONFLICT (device_id) DO UPDATE SET
+  serial_number = EXCLUDED.serial_number, order_code_of_manufacturer = EXCLUDED.order_code_of_manufacturer,
+  address_street = EXCLUDED.address_street, address_zipcode = EXCLUDED.address_zipcode,
+  address_city_town = EXCLUDED.address_city_town, address_state_county = EXCLUDED.address_state_county,
+  address_national_code = EXCLUDED.address_national_code
+"""
+STORED = """
+SELECT order_code_of_manufacturer, address_street, address_zipcode, address_city_town, address_state_county,
+       address_national_code FROM public.device_nameplate WHERE device_id = %s
+"""
 # The address elements' ids, as Contact Information's file gives them.
 ADDRESS_IDS = {
     "Street": "0173-1#02-AAO128#002",
@@ -94,16 +110,13 @@ class NameplateCase(unittest.TestCase):
         return self.cur.fetchall()
 
     def stored(self):
-        rows = self.fetch(f"SELECT {', '.join(NEW)} FROM public.device_nameplate WHERE device_id = %s", (DEVICE,))
+        rows = self.fetch(STORED, (DEVICE,))
         return dict(zip(NEW, rows[0])) if rows else None
 
     def write(self, user, values):
-        """The dashboard's save: an upsert of the fields, as the caller."""
+        """One save of the dialog, as the caller."""
         self.as_user(user)
-        self.cur.execute(
-            f"INSERT INTO public.device_nameplate (device_id, {', '.join(values)})"
-            f" VALUES (%s, {', '.join(['%s'] * len(values))}) ON CONFLICT (device_id) DO UPDATE SET "
-            + ", ".join(f"{c} = EXCLUDED.{c}" for c in values), (DEVICE, *values.values()))
+        self.cur.execute(UPSERT, {"device_id": DEVICE, "serial_number": None, **dict.fromkeys(NEW), **values})
         self.as_owner()
 
     def propose(self, patch, user=OPERATOR):

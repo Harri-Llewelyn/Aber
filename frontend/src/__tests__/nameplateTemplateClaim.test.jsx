@@ -48,7 +48,7 @@ const open = (props = {}) => {
   render(<DeviceNameplateModal asset={asset} canManage onClose={onClose} showToast={vi.fn()} {...props} />)
   return onClose
 }
-const field = label => screen.getByLabelText(new RegExp(`^${label}`))
+const field = label => screen.getByLabelText(text => text.startsWith(label))
 const line = () => document.querySelector('.modal-problem')
 const standing = () => document.querySelector('.modal-problem > .nameplate-standing')
 const primary = () => screen.getByRole('button', { name: /^(Save Nameplate|Propose a Change)$/ })
