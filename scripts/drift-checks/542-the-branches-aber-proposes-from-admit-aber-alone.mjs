@@ -29,6 +29,7 @@ export default function check() {
     'merge_whitelist_usernames: [cfg.user],',
     'merge_whitelist_teams: [],',
     'enable_bypass_allowlist: false,',
+    'unprotected_file_patterns: "",',
   ]) {
     if (!rule.includes(line)) problems542.push(`ensureBumpProtection() does not ask for \`${line.slice(0, -1)}\``);
   }
@@ -37,7 +38,7 @@ export default function check() {
   const put = provision.indexOf('await ensureBumpProtection(');
   const keyed = provision.indexOf('await ensureOnlyDeployKey(');
   if (put === -1 || keyed === -1 || put > keyed) problems542.push("enrolment does not put the rule on before the appliance's key");
-  if (!read('supabase/functions/forge-sweep/index.ts').includes('await ensureBumpProtection(cfg, name)')) {
+  if (!read('supabase/functions/forge-sweep/index.ts').includes('ensureBumpProtection(cfg, name)')) {
     problems542.push('forge-sweep does not put the rule on the repositories it finds');
   }
 
