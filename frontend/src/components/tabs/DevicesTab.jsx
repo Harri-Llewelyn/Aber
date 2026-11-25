@@ -72,6 +72,7 @@ import {
 } from '../../utils/deviceTags'
 import { oldDevicesLinkChanges, STATUS_OUT_OF_VOCABULARY, STATUS_UNMODELLED } from '../../utils/devicesAddress'
 import { assignableSchemas, isAssignableSchema } from '../../utils/schemaVersion'
+import { isHeldAgain } from '../../utils/quarantineHold'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
@@ -846,7 +847,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     selectedDevice.is_quarantined && {
       id: 'quarantined',
       tone: 'warning',
-      text: 'In quarantine: Aber could not match it to a registered device. Its readings are dropped until it is approved on the Quarantine tab.'
+      text: isHeldAgain(selectedDevice)
+        ? 'In quarantine: this device is registered, and is held again. The Quarantine tab says why. Its readings are dropped until it is approved there.'
+        : 'In quarantine: Aber could not match it to a registered device. Its readings are dropped until it is approved on the Quarantine tab.'
     },
     isProvisioningOverdue(selectedDevice) && {
       id: 'overdue',

@@ -260,16 +260,23 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
 
     def test_database_errors_are_not_relayed_to_the_caller(self):
         """
-        A raw Postgres message discloses table, column and constraint names. The one exception is a
-        merge the RPC refuses: raise_exception (P0001) carries a sentence written for the person, and
-        is answered 409 as it is worded.
+        A raw Postgres message discloses table, column and constraint names. refusals.ts answers two
+        kinds as they are worded, each a sentence written for the person: a merge the RPC refuses
+        (raise_exception, P0001), and a place that is archived (check_violation, by how it ends).
+        Its answers are tested in refusals_test.ts.
         """
-        self.assertNotIn("rpcError.message }", self.source)
-        self.assertIn("Approval failed", self.source)
-        self.assertRegex(self.source, r'rpcError\.code === "P0001"\s+\? 409\b')
-        self.assertRegex(self.source, r"error: status === 409\s+\? rpcError\.message\b")
-        # The log line and that answer: no other branch holds the message.
-        self.assertEqual(self.source.count("rpcError.message"), 2)
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "refusals.ts"), "r", encoding="utf-8") as handle:
+            refusals_source = handle.read()
+        self.assertIn("const refusal = refusalOf(rpcError);", self.source)
+        self.assertIn('if (!refusal) return serverError(req, "approve-quarantine", rpcError, { error: "Approval failed", context });', self.source)
+        self.assertIn("return jsonResponse({ error: refusal.error }, refusal.status);", self.source)
+        # The log line: no answer in this file holds the message.
+        self.assertEqual(self.source.count("rpcError.message"), 1)
+        # And no other branch of refusalOf() does.
+        self.assertEqual(refusals_source.count("error: message"), 2)
+        self.assertRegex(refusals_source, r'case "P0001":\s+return \{ status: 409, error: message \};')
+        self.assertRegex(refusals_source, r'case "23514":\s+return ARCHIVED_PLACE\.some\(')
         refusals = re.findall(r"RAISE EXCEPTION '((?:[^']|'')*)',\s+v_\w+\.name USING ERRCODE = '(\w+)'", self.rpc_sql)
         self.assertEqual({code for _, code in refusals}, {"raise_exception"})
         self.assertEqual(self.rpc_sql.count("'raise_exception'"), len(refusals))

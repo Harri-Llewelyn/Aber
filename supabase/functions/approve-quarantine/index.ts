@@ -6,6 +6,7 @@ import { secondFactorRefusal } from "../_shared/secondFactor.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { serverError } from "../_shared/failure.ts";
+import { refusalOf } from "./refusals.ts";
 
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
 
@@ -155,35 +156,12 @@ export default async function handler(req: Request): Promise<Response> {
     });
 
     if (rpcError) {
-      // Map the RPC's own SQLSTATEs onto HTTP codes, and do not relay the driver's message, which
-      // discloses table, column and constraint names. P0001 (raise_exception) is a merge the RPC
-      // refuses in a sentence written for the person, so that one is answered as it is worded.
-      const status = rpcError.code === "P0002" || rpcError.code === "no_data_found"
-        ? 404
-        : rpcError.code === "P0001"
-        ? 409
-        : rpcError.code === "42501"
-        ? 403
-        : rpcError.code === "22023"
-        ? 400
-        : 500;
-
       const context = `approve_quarantined_device failed for device ${device_id} (actor ${user.id})`;
-      if (status === 500) return serverError(req, "approve-quarantine", rpcError, { error: "Approval failed", context });
+      const refusal = refusalOf(rpcError);
+      if (!refusal) return serverError(req, "approve-quarantine", rpcError, { error: "Approval failed", context });
       console.error(`${context}, code ${rpcError.code}: ${rpcError.message}`);
 
-      return jsonResponse(
-        {
-          error: status === 409
-            ? rpcError.message
-            : status === 404
-            ? "Device not found"
-            : status === 403
-            ? "Forbidden: Insufficient privileges"
-            : "Invalid approval request",
-        },
-        status
-      );
+      return jsonResponse({ error: refusal.error }, refusal.status);
     }
 
     return jsonResponse({ success: true, data }, 200);

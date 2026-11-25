@@ -12,7 +12,7 @@ import { allFiles, fail, pass, read } from './lib.mjs';
 const MATCHING = 'frontend/src/utils/quarantineMatching.js';
 const NEVER_SEEN = 'frontend/src/utils/deviceProvisioning.js';
 const API = 'frontend/src/api.js';
-const FUNCTION = 'supabase/functions/approve-quarantine/index.ts';
+const FUNCTION = 'supabase/functions/approve-quarantine/refusals.ts';
 const DECLARES = 'CREATE OR REPLACE FUNCTION public.approve_quarantined_device(';
 
 /** What the merge refuses, as its condition is written, and what it says. */
@@ -71,7 +71,7 @@ export default function check() {
   if (!queue.includes('requarantined_at: d.requarantined_at || null')) problems597.push(`the Quarantine read in ${API} does not carry requarantined_at`);
 
   const fn = lf(FUNCTION);
-  if (!/rpcError\.code === "P0001"\s+\? 409\b/.test(fn) || !/error: status === 409\s+\? rpcError\.message\b/.test(fn)) {
+  if (!/case "P0001":\s+return \{ status: 409, error: message \};/.test(fn)) {
     problems597.push(`${FUNCTION} does not answer raise_exception (P0001) as a 409 with the database's sentence`);
   }
 

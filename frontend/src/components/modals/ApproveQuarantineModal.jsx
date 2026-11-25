@@ -9,6 +9,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { gatewayAcceptsDevices } from '../../utils/gatewayType'
+import { approvalGatewayId, approvalLocation, cameThroughLine } from '../../utils/quarantineHold'
 import {
   SCOPE_GATEWAY, SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, followedPlaceFix, followedPlaceLine, resolveDeviceLocation
 } from '../../utils/cellResolution'
@@ -25,17 +26,18 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
 
   const isGateway = item.entity_type === 'GATEWAY'
   const [assetName, setAssetName] = useState(item.asset_name)
-  // The gateway it arrived through, else the first the picker offers. An archived gateway is never
-  // the default: the picker leaves it out, and the database refuses it.
+  // The gateway it is on, which for a device nobody registered is the one it arrived through. An
+  // archived gateway is never the default: the picker leaves it out, and the database refuses it.
   const offered = gateways.filter(g => !g.is_archived)
-  const [gatewayId, setGatewayId] = useState(() =>
-    (offered.some(g => g.gateway_id === item.gateway_id) ? item.gateway_id : null) ||
-    offered.find(g => gatewayAcceptsDevices(g))?.gateway_id || '')
+  const [gatewayId, setGatewayId] = useState(() => approvalGatewayId(item, offered, gatewayAcceptsDevices))
+  // The picker stays on the gateway the device is bound to, whichever it came through: a message for it
+  // through another is also what a forged one looks like, so moving it is the operator's to choose.
+  const throughLine = cameThroughLine(item, gateways)
 
   // The location is chosen here because the operator is already looking at the device. The same
-  // picker as the Devices form: a device follows its gateway unless told otherwise, and forcing a
-  // place would pin it where it stops tracking the gateway.
-  const [location, setLocation] = useState({ cell_id: '', area_id: '', location_scope: SCOPE_GATEWAY })
+  // picker as the Devices form: a device nobody registered follows its gateway unless told otherwise,
+  // and one held again starts from its own place.
+  const [location, setLocation] = useState(() => approvalLocation(item))
   const scope = location.location_scope
   const cellId = scope === SCOPE_CELL ? location.cell_id : ''
 
@@ -161,7 +163,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
         <>
           <div className="form-group">
             <label className="form-label" htmlFor="approve-gateway">Serving Gateway</label>
-            <select id="approve-gateway" className="form-control" value={gatewayId} onChange={e => setGatewayId(e.target.value)}>
+            <select id="approve-gateway" className="form-control" value={gatewayId} onChange={e => setGatewayId(e.target.value)} aria-describedby={throughLine ? 'approve-gateway-hint' : undefined}>
               <option value="">— Unassigned Gateway —</option>
               {/* Disabled rather than absent, as at the Devices form's picker: a replay lane is
                   minted by a playback, never approved onto. */}
@@ -172,6 +174,11 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
                 </option>
               ))}
             </select>
+            {throughLine && (
+              <div id="approve-gateway-hint" className="form-hint hint-warning">
+                <IconAlertTriangle size={12} /> {throughLine}
+              </div>
+            )}
           </div>
 
           <div className="form-group">
