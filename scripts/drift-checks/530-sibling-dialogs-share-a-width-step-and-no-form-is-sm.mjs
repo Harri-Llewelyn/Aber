@@ -24,6 +24,7 @@ const FAMILIES = [
     ['tabs/GatewaysTab.jsx', 'Register Gateway'], ['tabs/DevicesTab.jsx', 'Register New Device'],
   ]],
   ['adding a metric', [['tabs/MetricsTab.jsx', 'Add Metric'], ['modals/AddDerivedMetricModal.jsx']]],
+  ['a schema', [['modals/SchemaBuilderModal.jsx'], ['modals/SchemaDetailModal.jsx']]],
   ['bringing back an entity or a metric', [['modals/RestoreEntityModal.jsx'], ['modals/RestoreMetricModal.jsx']]],
   ['a secret shown once, and the steps before it', [
     ['modals/AddPersonModal.jsx'], ['modals/RegisterAppModal.jsx'], ['modals/NewPasswordModal.jsx'],

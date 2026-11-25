@@ -14,14 +14,6 @@ import { dialogsIn, propAt, propText, tagEnd } from '../lib/jsx-dialogs.mjs';
 
 const COMPONENTS = 'frontend/src/components/';
 
-/** The dialogs left as they are, and why. A `disabled` in one is not read. */
-const NOT_READ = {
-  [`${COMPONENTS}modals/SchemaBuilderModal.jsx`]: 'rebuilt with the one schema editor',
-  [`${COMPONENTS}modals/SchemaDetailModal.jsx`]: 'rebuilt with the one schema editor',
-  [`${COMPONENTS}modals/SchemaForkModal.jsx`]: 'rebuilt with the one schema editor',
-  [`${COMPONENTS}modals/DeviceNameplateModal.jsx`]: 'draws its own footer, under the same rule',
-};
-
 /** A typed gate's hold: useTypedGate()'s `open`, and the gateway dialogs' typed name. */
 const TYPED = ['!gate.open', '!confirmed'];
 
@@ -31,6 +23,7 @@ const HELD = [
   ['modals/ApplyAutomationsModal.jsx', 'held', 'the file cannot be read or is refused, and is put right elsewhere: said from the start'],
   ['modals/ApplyDerivedMetricsModal.jsx', 'held', 'the file cannot be read or is refused, and is put right elsewhere: said from the start'],
   ['modals/ApplySchemasModal.jsx', 'held', 'the file cannot be read or is refused, and is put right elsewhere: said from the start'],
+  ['modals/DeviceNameplateModal.jsx', 'loading', 'the nameplate is still being read, so there is nothing to save: said from the start'],
 ];
 
 const RULE_IN_README = '**The primary is never disabled for what the form still needs.**';
@@ -48,7 +41,6 @@ export default function check() {
     .map((f) => [f, read(f).replace(/\r\n/g, '\n')]);
 
   for (const [file, src] of sources) {
-    if (file in NOT_READ) continue;
     const here = dialogsIn(src).filter((d) => !d.problem);
     if (!here.length) continue;
     // What makes a dialog of this file busy. ConfirmModal's own source names it `pending`.
