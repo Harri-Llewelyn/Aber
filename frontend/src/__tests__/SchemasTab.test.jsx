@@ -478,10 +478,12 @@ describe('the schema builder writes what the catalog and the ranges say', () => 
     tick('Axes/S/LOAD')
     fireEvent.change(bound('Minimum', 'Axes/S/LOAD'), { target: { value: '10' } })
     fireEvent.change(bound('Maximum', 'Axes/S/LOAD'), { target: { value: '5' } })
-    expect(tooltipOf(screen.getByRole('button', { name: /^Save Schema$/ }))).toMatch(/a valid range/)
+    const said = /Fix the range of Axes\/S\/LOAD: The minimum is above the maximum/
+    expect(screen.getByRole('alert')).toHaveTextContent(said)
 
     fireEvent.click(screen.getByRole('button', { name: /^Save Schema$/ }))
-    await waitFor(() => expect(screen.getByText(/Fix the range of Axes\/S\/LOAD: The minimum is above the maximum/)).toBeTruthy())
+    await waitFor(() => expect(document.querySelector('.modal-problem')).toHaveTextContent(said))
+    expect(document.activeElement).toBe(bound('Minimum', 'Axes/S/LOAD'))
     expect(api.post).not.toHaveBeenCalled()
   })
 })
@@ -510,7 +512,9 @@ describe('the builder says why it will not save', () => {
     fireEvent.click(screen.getByRole('checkbox'))
     fireEvent.click(screen.getByRole('button', { name: /^Save Schema$/ }))
 
-    await waitFor(() => expect(screen.getByText(/Give the schema a name/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Give the schema a name'))
+    expect(document.querySelector('.modal-problem')).toHaveTextContent('Give the schema a name')
+    expect(document.activeElement).toBe(screen.getByLabelText(/Schema Name/))
     expect(api.post).not.toHaveBeenCalled()
   })
 
@@ -519,14 +523,20 @@ describe('the builder says why it will not save', () => {
     fireEvent.change(screen.getByLabelText(/Schema Name/), { target: { value: 'Named_But_Empty' } })
     fireEvent.click(screen.getByRole('button', { name: /^Save Schema$/ }))
 
-    await waitFor(() => expect(screen.getByText(/Tick at least one metric/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Tick at least one metric/))
+    expect(document.activeElement).toBe(screen.getByLabelText('Search catalog metrics'))
     expect(api.post).not.toHaveBeenCalled()
   })
 
-  it('says what is still needed on the button itself, before it is clicked', async () => {
+  it('says everything that is missing at once, and names the first above the buttons', async () => {
     await openBuilder()
     const save = screen.getByRole('button', { name: /^Save Schema$/ })
-    expect(tooltipOf(save)).toMatch(/a name and at least one metric/)
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+    expect(screen.getAllByRole('alert').map(el => el.textContent.trim())).toEqual([
+      'Give the schema a name', 'Tick at least one metric. A schema with none constrains nothing.'
+    ])
+    expect(document.querySelector('.modal-problem')).toHaveTextContent('Give the schema a name')
   })
 
   it('saves once the form is complete', async () => {

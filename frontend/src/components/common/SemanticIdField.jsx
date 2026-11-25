@@ -119,7 +119,7 @@ export function SemanticIdField({
             <HelpTip text={HELP[subject]} label="What a semantic ID is for" />
           </div>
           {readOnly ? (
-            <div className="mono" style={{ fontSize: '12px', wordBreak: 'break-all', color: hasId ? 'var(--text-primary)' : 'var(--text-dim)' }}>
+            <div className={`form-static mono semantic-id-static${hasId ? '' : ' form-static-none'}`}>
               {hasId ? semanticId : '—'}
             </div>
           ) : (
@@ -147,7 +147,7 @@ export function SemanticIdField({
             <HelpTip text={TYPE_HELP} label="What the reference type says" />
           </div>
           {readOnly ? (
-            <div style={{ fontSize: '12px', color: hasId && semanticIdType ? 'var(--text-primary)' : 'var(--text-dim)' }}>
+            <div className={`form-static${hasId && semanticIdType ? '' : ' form-static-none'}`}>
               {hasId && semanticIdType ? semanticIdType : '—'}
             </div>
           ) : (

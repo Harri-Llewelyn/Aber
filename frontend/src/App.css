@@ -1980,6 +1980,8 @@ tbody tr:hover { background: var(--bg-glass); }
   font-size: 13px;
   color: var(--text-primary);
 }
+.form-static-none { color: var(--text-dim); }
+.semantic-id-static { font-size: 12px; overflow-wrap: anywhere; }
 
 /* A value to copy (CopyField): `.form-static`'s text, in mono, in the box a block of commands has
    (pre.gateway-code), so it reads as text to take rather than a field to fill. A click selects all of
@@ -2631,6 +2633,89 @@ main:focus { outline: none; }
 .modal-body-fill > * { flex-shrink: 0; }
 .modal-body-fill > .modal-fill { flex: 1 1 auto; flex-shrink: 1; min-height: 0; }
 
+/* The schema editor (SchemaEditor), the body of the dialogs that build a schema, edit a draft and show a
+   version. Its fields are two to a row while there is room, so that the metric list keeps the height:
+   the list and its search take what the rest leaves, and below 210px the body scrolls instead. */
+.schema-editor-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(max(240px, 34%), 100%), 1fr));
+  column-gap: 14px;
+}
+.schema-editor-fields > * { min-width: 0; }
+.schema-editor-fields .form-static { overflow-wrap: anywhere; }
+.schema-editor-metrics { display: flex; flex-direction: column; }
+.modal-body-fill > .schema-editor-metrics { min-height: 210px; }
+
+/* A read-only version's metrics: as tall as they are, and at least four of them where there is less. */
+.modal-body-fill > .schema-editor-metrics-static { min-height: min(var(--schema-metrics) * 36px + 2px, 146px); }
+.schema-editor-list {
+  flex: 0 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.schema-editor-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.schema-editor-list > li:last-child { border-bottom: none; }
+.schema-editor-range { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+
+/* A numeric metric's range, beside its row: the two bounds and the dash between them. */
+.property-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-block: 4px;
+}
+.form-control.property-range-bound { width: 84px; padding: 4px 8px; font-size: 12px; }
+.property-range-dash { color: var(--text-muted); }
+
+/* What a version adds to its metrics: the keys stored for each, and what an edit has changed. */
+.schema-stored-keys { font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
+.schema-counts { margin-left: 8px; letter-spacing: 0; text-transform: none; }
+.schema-count-added { color: var(--success-text); }
+.schema-count-removed { color: var(--danger-text); }
+.schema-from-catalog { margin: 0 0 6px; }
+.schema-publish-note { margin: 12px 0 0; }
+.schema-orphans { margin: 8px 0 0; overflow-wrap: anywhere; }
+.schema-orphans .mono { font-size: inherit; color: inherit; }
+
+/* The line of versions, closed until it is asked for. */
+.schema-history { margin-top: 16px; }
+.form-label.schema-history-summary { display: list-item; margin-bottom: 0; cursor: pointer; list-style: revert; }
+.schema-history-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.schema-history-summary:hover { color: var(--accent-text); }
+.schema-history-summary > svg { vertical-align: -2px; }
+.schema-history-list {
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.schema-history-list > li { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.schema-history-list > li:last-child { border-bottom: none; }
+.schema-history-this { background: var(--bg-glass); }
+.schema-history-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.schema-history-name,
+.schema-history-here,
+.schema-history-change { font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
+.schema-history-here { margin-left: auto; }
+.schema-history-change { margin-top: 3px; }
+.schema-history-change.form-static-none { color: var(--text-dim); }
+
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(16px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -2658,7 +2743,7 @@ main:focus { outline: none; }
 .modal-xl { max-width: 720px; }
 
 /* A table, or content that needs a table's width: a device's configuration parameters, the token
-   inventory, Play back capture's device map, the schema builder's metric list, the derived metrics'
+   inventory, Play back capture's device map, the schema editor's metric list, the derived metrics'
    YAML editor, and Keyboard shortcuts' groups two to a row. */
 .modal-wide { max-width: 900px; }
 
@@ -8018,7 +8103,9 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   gap: 8px;
   border-bottom: 1px solid var(--border);
 }
-.list-picker-row-extra { padding-right: 12px; }
+/* A row's extra goes under its label when the two do not fit side by side. */
+.list-picker-row-extra { flex-wrap: wrap; row-gap: 0; padding-right: 12px; }
+.list-picker-row-extra > .list-picker-label { flex-basis: 260px; }
 .list-picker-label {
   display: flex;
   align-items: center;
@@ -8287,6 +8374,24 @@ ol.gateway-steps {
   font-size: 11px;
   color: var(--text-muted);
 }
+
+/* A metric in the picker: its name, its facts, and its description at the row's end, or on a line of
+   its own where that is too long for it. */
+.metric-picker-standard { flex: 0 0 165px; }
+.metric-picker-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.metric-picker-name { font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.metric-picker-fact,
+.metric-picker-unit,
+.metric-picker-description { font-size: 11px; color: var(--text-muted); }
+.metric-picker-origin { font-size: 11px; color: var(--text-dim); }
+.metric-picker-description { margin-left: auto; }
 
 .validate-payload-input {
   height: 150px;

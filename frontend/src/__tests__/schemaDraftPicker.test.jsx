@@ -79,7 +79,7 @@ describe('a draft schema’s metric list', () => {
     fireEvent.change(within(dialog).getByLabelText('Standard'), { target: { value: 'MTConnect' } })
     expect(listed(dialog)).toEqual(['Axes/X/POSITION', 'Axes/Y/POSITION', 'Controller/EXECUTION'])
     expect(control(dialog, 'Axes/X/POSITION').checked).toBe(true)
-    expect(dialog.querySelector('.section-count').textContent).toBe('2')
+    expect(dialog.querySelector('.section-count').textContent).toBe('2 selected')
   })
 
   it('counts the ticked metrics of each group in its heading', () => {

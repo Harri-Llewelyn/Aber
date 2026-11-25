@@ -39,7 +39,7 @@ export function SchemaForkModal({ schema, deviceCount = 0, archivedCount = 0, re
     >
       <div className="form-group">
         <label className="form-label" htmlFor="schema-change-description">
-          Change Description (Optional)
+          Change Description (optional)
         </label>
         <textarea
           id="schema-change-description"

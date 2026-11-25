@@ -325,6 +325,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     ? schemas.find(s => s.parent_schema_id === selectedSchema.schema_uuid && schemaStatus(s) === SCHEMA_STATUS.DRAFT)
     : null
   const selectedForkBlocked = !canManageSchema || !!selectedDraft
+  // A role that may not manage schemas reads a draft as it reads any other version.
+  const selectedIsEdited = canManageSchema && isSchemaEditable(selectedSchema)
   const forkAttached = forkTarget ? attachedTo(forkTarget.schema_uuid) : []
 
   return (
@@ -646,11 +648,11 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         ] : []}
         actions={selectedSchema ? [
           {
-            label: isSchemaEditable(selectedSchema) ? 'Edit Draft' : 'View Schema Detail',
-            icon: isSchemaEditable(selectedSchema) ? <IconPencil size={13} /> : <IconClipboardList size={13} />,
+            label: selectedIsEdited ? 'Edit Draft' : 'View Schema Detail',
+            icon: selectedIsEdited ? <IconPencil size={13} /> : <IconClipboardList size={13} />,
             onClick: () => setDetailSchema(selectedSchema),
             primary: true,
-            title: isSchemaEditable(selectedSchema)
+            title: selectedIsEdited
               ? 'Edit this draft version and publish it'
               : 'View this version — its definition, change description and lineage'
           },

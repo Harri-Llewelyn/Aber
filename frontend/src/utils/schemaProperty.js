@@ -127,6 +127,15 @@ export function rangeError(range) {
   return null
 }
 
+/** A stored range in words ("-40 to 120", "0 or more"), or null where the entry has no bound. */
+export function rangeText(entry) {
+  const minimum = boundText(entry?.minimum)
+  const maximum = boundText(entry?.maximum)
+  if (minimum && maximum) return `${minimum} to ${maximum}`
+  if (minimum) return `${minimum} or more`
+  return maximum ? `${maximum} or less` : null
+}
+
 /**
  * A metric's `properties` entry. `stored` is the entry a saved definition holds, or undefined for a
  * metric being added. `description` and `enum` are always the catalog row's, and absent when it has
