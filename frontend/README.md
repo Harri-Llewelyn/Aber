@@ -3000,9 +3000,10 @@ in "building management system".
   archive has two numbering schemes, and two files numbered 0074), cite the file name.
 
 **Earlier decisions the 2026-10-01 review reversed**, recorded so the next audit does not undo them:
-counts always showing, including on headings (the count of a group that opens and closes came back on
-2026-11-25); Settings and Vocabulary keeping a `PageHeading`; Access Control, System and Approvals
-scrolling the page; the Devices queue as a card above the roster.
+counts always showing, including on headings (a group that opens and closes says its own again, since
+2026-11-25); Settings and Vocabulary keeping a `PageHeading`;
+Access Control, System and Approvals scrolling the page; the Devices queue as a card above the
+roster.
 
 ---
 

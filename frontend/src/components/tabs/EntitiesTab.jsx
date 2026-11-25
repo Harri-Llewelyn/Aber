@@ -143,6 +143,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, unmappedMetric
     () => (found.text === '' ? NONE : mergeFound(found.rows, local, found.text)),
     [found, local]
   )
+
   const everyActive = useMemo(
     () => [...active.rows, ...local].sort(byKindThenName),
     [active.rows, local]

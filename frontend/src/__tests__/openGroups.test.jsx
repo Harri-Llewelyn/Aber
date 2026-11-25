@@ -4,6 +4,8 @@
  * own, and the secondary colour for a remainder.
  */
 import React from 'react'
+import fs from 'node:fs'
+import path from 'node:path'
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import { GroupHeading } from '../components/common/GroupHeading'
@@ -90,5 +92,31 @@ describe('a GroupHeading', () => {
     expect(screen.getByText('Ungrouped')).toHaveClass('table-group-label', 'table-group-label-muted')
     rerender(<GroupHeading open={false} label="Axes" onToggle={() => {}} />)
     expect(screen.getByText('Axes')).not.toHaveClass('table-group-label-muted')
+  })
+})
+
+/** jsdom lays nothing out, so what a stylesheet rule does is read from it. */
+describe('the rules the groups are laid out by', () => {
+  const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
+  /** The body of the first rule whose selector is exactly `selector`. */
+  const ruleOf = (selector) => {
+    const at = APP_CSS.indexOf(`\n${selector} {`)
+    return at < 0 ? '' : APP_CSS.slice(APP_CSS.indexOf('{', at) + 1, APP_CSS.indexOf('}', at))
+  }
+
+  it('wrap a long name on a row of its own, which a lane\'s label column cuts', () => {
+    expect(ruleOf('.group-heading-label')).toContain('white-space: nowrap')
+    expect(ruleOf('.vocab-section-head .group-heading-label')).toContain('white-space: normal')
+    expect(APP_CSS).toContain('\n.table-group-row .group-heading-label,\n.vocab-section-head .group-heading-label {')
+    expect(ruleOf('.vocab-section-head > .table-group-button')).toContain('min-width: 0')
+  })
+
+  it('give the Entities page\'s tabs the same widths for the columns they share, scrollbar or none', () => {
+    expect(ruleOf('.table-entities')).toContain('table-layout: fixed')
+    expect(ruleOf('.table-entities th:nth-child(-n + 2)')).toMatch(/width: [0-9]+%/)
+    // The scroller also holds the rows' screen-reader words, or they lengthen the page.
+    const scroller = ruleOf('.table-wrap:has(> .table-entities)')
+    expect(scroller).toContain('scrollbar-gutter: stable')
+    expect(scroller).toContain('position: relative')
   })
 })
