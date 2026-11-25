@@ -370,7 +370,7 @@ export function SchemaDetailModal({
           <p className="form-hint hint-warning schema-orphans">
             <IconAlertTriangle size={12} />{' '}
             {orphanedNames.length} modelled metric{orphanedNames.length === 1 ? '' : 's'} no longer in the active
-            catalog ({orphanedNames.map(n => <span key={n} className="mono">{n} </span>)}) — kept as-is
+            catalog ({orphanedNames.map((n, i) => <React.Fragment key={n}>{i > 0 && ', '}<span className="mono">{n}</span></React.Fragment>)}) — kept as-is
             {editing ? ', and kept on save. This dialog cannot remove them; only the REST API can.' : '.'}
           </p>
         )}
