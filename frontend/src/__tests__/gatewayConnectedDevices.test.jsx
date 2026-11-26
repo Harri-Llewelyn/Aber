@@ -208,6 +208,7 @@ describe('the devices column counts by the shared status rules', () => {
       if (path.startsWith('/api/v1/gateways')) return Promise.resolve([playback])
       return Promise.resolve([])
     })
+    window.history.replaceState(null, '', '/gateways?playback=1')
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} />)
     await waitFor(() => expect(screen.getByText('Playback', { selector: 'tbody strong' })).toBeInTheDocument())
     expect(summary()).toBe('2 Online / 0 Offline')

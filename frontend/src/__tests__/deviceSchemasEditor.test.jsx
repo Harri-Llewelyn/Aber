@@ -113,7 +113,7 @@ describe('hover in a file of device schemas', () => {
   it('says what a metric is: its unit, that it is not in the catalogue, that it is derived', () => {
     expect(over(`${HEAD}    - name: Spindle/LO|AD\n`)).toMatchObject({ title: 'Spindle/LOAD', lines: ['Unit: %'] })
     expect(over(`${HEAD}    - name: Spindle/NO|PE\n`).lines[0]).toBe('Not in the metric catalogue. Register it on the Metrics page first.')
-    expect(over(`${HEAD}    - name: Spindle/LOAD_R|ATE\n`).lines[0]).toBe('A derived metric. Nothing publishes it, so a schema cannot model it.')
+    expect(over(`${HEAD}    - name: Spindle/LOAD_R|ATE\n`).lines[0]).toBe('A derived metric. Nothing publishes it, so a schema names it under derived_metrics.')
   })
 
   it('says what a value\'s key is, for a key with nothing more to say', () => {

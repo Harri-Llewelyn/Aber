@@ -57,7 +57,7 @@ meaning.
 A metric Aber computes from other metrics, instead of a device sending it. For example, parts per
 hour from a part counter, or a machine's total power from its three phases. It is added on the
 Derived tab of the Metrics page, and its definition cannot change
-([Metrics](../pages/metrics.md)).
+([Metrics](../pages/metrics.md)). A device has the derived metrics its schemas name.
 
 ### Schema
 

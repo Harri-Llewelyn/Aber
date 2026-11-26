@@ -14,7 +14,8 @@ export function RestoreMetricModal({ metric, replacement, onConfirm, onCancel })
       message={<>
         {metric.derivation ? (
           <>This returns <strong>{metric.name}</strong> to the Derived tab. Nothing about it changed
-            while it was deprecated: a derived metric is in no schema, and its definition is fixed.</>
+            while it was deprecated: a schema that names it kept it, and its definition is fixed. Any schema
+            may name it again.</>
         ) : (
           <>This returns <strong>{metric.name}</strong> to the schema builder's picker — it will be
             offered to schema authors for new schemas again. Schemas that already model it are

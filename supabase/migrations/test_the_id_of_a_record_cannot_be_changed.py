@@ -18,8 +18,8 @@ Requires the Supabase database (54322 by default) and the schema the chain decla
   * A device's and a gateway's sparkplug_id stay as they were.
   * Another column of the same row is accepted from the same person. So is an UPDATE that sets id to its
     own value, and an upsert on id, which is what a whole-row PATCH and a merge-duplicates POST send.
-  * The primary-key columns a person's session may write are these tables' ids and the ones KEPT names,
-    each with its reason.
+  * The primary-key columns a person's session may write are these tables' ids, the ones KEPT names, each
+    with its reason, and the ones another function holds.
   * No function in public sets an id, and a second boot changes nothing.
 
 Every test rolls back.
@@ -71,11 +71,13 @@ TABLES = {
 KEPT = {
     ("asset_config", "id"): "nothing outside the row holds it: a parameter is read by asset_id and metric_name",
     ("device_submodels", "id"): "nothing outside the row holds it: an attachment is read by its device and its schema",
-    ("device_nameplate", "device_id"): "a foreign key: which device the nameplate is for",
     ("metric_semantic_ids", "metric_id"): "enforce_metric_semantic_id() refuses a change of it",
     ("metric_semantic_ids", "semantic_id"): "enforce_metric_semantic_id() refuses a change of it",
     ("user_settings", "user_id"): "the policy's WITH CHECK keeps it the caller's own",
 }
+
+# Held by a trigger of another function: test_a_nameplate_and_an_attachment_stay_with_their_device.py.
+HELD_BY_ANOTHER = {("device_nameplate", "device_id"): "refuse_device_change()"}
 
 
 def get_connection():
@@ -345,7 +347,7 @@ class EveryKeyAPersonCouldChangeIsHeld(Base):
         writable = set(self.cur.fetchall())
         held = {(table, "id") for table in TABLES if table != "automations"}
         self.assertEqual(
-            writable, held | set(KEPT),
+            writable, held | set(KEPT) | set(HELD_BY_ANOTHER),
             "a person's session may write the key of a table 0325 does not hold, or one it named is no "
             "longer writable. Give the table refuse_key_change()'s trigger and a line in TABLES, or name it "
             "in KEPT with the reason")

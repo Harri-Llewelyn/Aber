@@ -218,6 +218,8 @@ Aber and people who connect another system to it.
   changes the `id` of a row of `areas`, `automations`, `cells`, `change_proposals`, `devices`,
   `directory_services`, `gateways`, `links`, `metric_catalog`, `metric_groups` or `schemas`, whoever sends
   it (`refuse_key_change()`).
+  It refuses one that changes the `device_id` of a row of `device_nameplate` or `device_submodels` too,
+  so a nameplate and an attached schema stay with their device (`refuse_device_change()`).
 - **A uuid key is its column's default**, `gen_random_uuid()`, unless a table below says otherwise. So
   each site has uuids of its own. A row a migration seeds with a fixed uuid has the same one on every
   site.

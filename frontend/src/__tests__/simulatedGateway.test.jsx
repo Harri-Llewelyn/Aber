@@ -47,6 +47,8 @@ const routeGet = (rows) => (path) => {
 }
 
 const show = async (rows) => {
+  // The Playback gateway is left off the list until its control is on.
+  if (rows.some(r => r.is_shadow)) window.history.replaceState(null, '', '/gateways?playback=1')
   api.get.mockImplementation(routeGet(rows))
   render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} />)
   await waitFor(() => expect(screen.getByText('Playback_Lab')).toBeTruthy())

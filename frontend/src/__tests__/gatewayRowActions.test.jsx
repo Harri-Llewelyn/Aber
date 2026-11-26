@@ -5,7 +5,7 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton } from '../test/cardHeading'
 import { PERMISSION_UUIDS } from '../constants'
-import { dropdownButton, openDropdown, pick, valueName } from '../test/listFilters'
+import { closePanel, pick } from '../test/listFilters'
 import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
@@ -43,6 +43,7 @@ const show = async (rows, hasPermission = () => true) => {
      lifecycle filter has its own test. */
   if (rows.some(r => r.is_archived)) {
     await waitFor(() => pick('Lifecycle', 'active', 'archived'))
+    closePanel()
   }
   await waitFor(() => expect(rowNamed(rows[0].gateway_name)).toBeTruthy())
 }
@@ -72,10 +73,10 @@ describe('the gateways card header', () => {
     expectToolbarButton(/New Gateway/)
   })
 
-  it('starts the toolbar with the search box, then the lifecycle', async () => {
+  it('starts the toolbar with the search box, then the status', async () => {
     await show([{ gateway_id: 'g1', gateway_name: 'Host_Gateway_NodeRED', type: 'HOST', status: 'ONLINE' }])
-    const lifecycle = expectSearchFirst('Search gateways by name, UUID or Sparkplug ID').nextElementSibling
-    expect(lifecycle).toHaveAccessibleName('Lifecycle: Active')
+    const status = expectSearchFirst('Search gateways by name, UUID or Sparkplug ID').nextElementSibling
+    expect(status).toHaveAccessibleName('Status: Any status')
   })
 })
 
@@ -279,12 +280,14 @@ describe('gateway row actions', () => {
 })
 
 /**
- * The playback gateway is visible and almost inert. It stays on this page because it holds a broker
- * credential an operator has to issue. It must not offer Archive (it is the only edge node playback
+ * The playback gateway is shown on request and almost inert. It is on this page because it holds a
+ * broker credential an operator has to issue. It must not offer Archive (it is the only edge node playback
  * can publish as; the database refuses it too) or Request Rebirth (the playback worker holds no
  * subscription, so the NCMD reaches nothing). Issuing a credential is not in that list.
  */
 describe('the playback gateway', () => {
+  beforeEach(() => window.history.replaceState(null, '', '/gateways?playback=1'))
+
   const playback = (overrides = {}) => gateway({
     gateway_id: 'gw-shadow',
     gateway_name: 'Playback',
@@ -397,88 +400,6 @@ describe('gateway document links', () => {
   })
 })
 
-
-/**
- * The Playback gateway is listed like any other: it holds a broker credential and publishes into
- * the historian, and hiding it made the lifecycle counts disagree with the list.
- */
-describe('the playback gateway is listed', () => {
-  const playbackRow = () => ({
-    ...gateway(),
-    gateway_id: 'gw-playback', gateway_name: 'Playback',
-    sparkplug_id: 'gwy160000000000400080000',
-    cell_id: null, is_simulated: true, is_shadow: true,
-    status: 'OFFLINE', last_heartbeat: null, access_url: null,
-  })
-  const retired = () => gateway({ gateway_id: 'gw-old', gateway_name: 'Retired_Gateway', is_archived: true })
-
-  const open = async (rows) => {
-    api.get.mockImplementation(routeGet(rows))
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
-    await waitFor(() => expect(screen.queryByText(/Loading gateways/)).toBeNull())
-  }
-  const listed = () => [...document.querySelectorAll('tbody tr td strong')].map(el => el.textContent)
-  /** A lifecycle value's name in the open list: its words and its count. */
-  const lifecycleOption = (words) => within(openDropdown('Lifecycle')).getByRole('checkbox', { name: valueName(words) }).closest('label').textContent
-
-  it('lists it by default, with no toggle to show it', async () => {
-    await open([gateway(), playbackRow()])
-
-    expect(listed()).toEqual(['Host_Gateway_NodeRED', 'Playback'])
-    expect(screen.queryByText(/Show playback gateway/)).toBeNull()
-    expect(screen.queryByText(/Clear filters/)).toBeNull()
-  })
-
-  it('counts the same rows in the lifecycle filter as the list shows', async () => {
-    await open([gateway(), playbackRow(), retired()])
-
-    expect(lifecycleOption('Active')).toBe('Active 2')
-    expect(lifecycleOption('Archived')).toBe('Archived 1')
-    expect(listed()).toHaveLength(2)
-
-    pick('Lifecycle', 'archived')
-    expect(listed()).toHaveLength(1)
-
-    pick('Lifecycle', 'active', 'archived')
-    expect(dropdownButton('Lifecycle')).toHaveTextContent('Any lifecycle')
-    expect(listed()).toHaveLength(3)
-  })
-
-  it('offers every type in the Type filter, Playback included', async () => {
-    await open([gateway(), playbackRow()])
-
-    expect([...openDropdown('Type').querySelectorAll('input[type="checkbox"]')].map(o => o.value))
-      .toEqual(['remote', 'third_party', 'host', 'simulated', 'playback'])
-    pick('Type', 'playback')
-    expect(listed()).toEqual(['Playback'])
-  })
-
-  it('is not surfaced by choosing Simulated in the Type filter', async () => {
-    /* The regression this guards: the Playback gateway is simulated too, so a Type filter that
-       matched on the flag rather than the derived type would list it under "Simulated". */
-    await open([gateway(), playbackRow()])
-    pick('Type', 'simulated')
-    expect(listed()).not.toContain('Playback')
-  })
-
-  it('is not listed under the Offline status filter while idle', async () => {
-    await open([gateway(), playbackRow()])
-    pick('Status', 'OFFLINE')
-    expect(listed()).not.toContain('Playback')
-  })
-
-  it('still prompts a new install for its first gateway, under the Playback row', async () => {
-    await open([playbackRow()])
-
-    expect(listed()).toEqual(['Playback'])
-    expect(screen.getByText('No gateways yet besides the Playback gateway.')).toBeInTheDocument()
-  })
-
-  it('drops the prompt once a gateway of its own exists', async () => {
-    await open([gateway(), playbackRow()])
-    expect(screen.queryByText(/No gateways yet/)).toBeNull()
-  })
-})
 
 describe('the Gateways list', () => {
   const live = () => gateway()
@@ -608,6 +529,7 @@ describe('Show Broker Credential', () => {
   })
 
   it('is not offered on the Playback gateway', async () => {
+    window.history.replaceState(null, '', '/gateways?playback=1')
     await showAs([gateway({ gateway_name: 'Playback', is_shadow: true, is_simulated: true, cell_id: null })], 'Administrator')
     expect(showButton(openPanel('Playback'))).toBeNull()
   })

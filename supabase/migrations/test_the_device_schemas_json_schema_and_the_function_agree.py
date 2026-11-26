@@ -25,8 +25,8 @@ WHAT IS HELD. Every file under supabase/device-schemas-fixtures/ is one document
   * invalid/, with "database": false: the schema refuses it, and the function reports a reason at
     the path the fixture names.
   * invalid/, with "database": true: what only the database can know (a metric that is not in the
-    catalogue, a derived one, a range on a metric that is not a number, a name used twice). The schema
-    accepts it, as it must, and the function reports a reason at the path the fixture names.
+    catalogue, a derived one, a range on a metric that is not a number, a derived metric whose input
+    the schema does not list, a name used twice). The schema accepts it, as it must, and the function reports a reason at the path the fixture names.
 
 The fixtures name the metrics they need as @METRIC_NUMBER@ and the like, and a long text as @X121@
 (121 characters), filled in from rows this suite makes. The schema is also held to its own rules:
@@ -61,6 +61,8 @@ METRIC_NUMBER_2 = "Test_0295_Guard/Bearing_Temperature"
 METRIC_TEXT = "Test_0295_Guard/Mode"
 METRIC_BOOL = "Test_0295_Guard/Door_Open"
 METRIC_DERIVED = "Test_0295_Guard/Parts_Per_Hour"
+METRIC_DERIVED_OLD = "Test_0295_Guard/Parts_Per_Hour_Old"
+METRIC_DERIVED_STATE = "Test_0295_Guard/Automatic"
 METRIC_DEPRECATED = "Test_0295_Guard/Old_Gauge"
 METRIC_UNKNOWN = "Test_0295_Guard/Nothing_Publishes_This"
 SEMANTIC_ID = "https://example.test/0295/guard/spindle-load"
@@ -68,6 +70,7 @@ SEMANTIC_ID = "https://example.test/0295/guard/spindle-load"
 PLACEHOLDERS = {
     "@METRIC_NUMBER@": METRIC_NUMBER, "@METRIC_NUMBER_2@": METRIC_NUMBER_2, "@METRIC_TEXT@": METRIC_TEXT,
     "@METRIC_BOOL@": METRIC_BOOL, "@METRIC_DERIVED@": METRIC_DERIVED, "@METRIC_DEPRECATED@": METRIC_DEPRECATED,
+    "@METRIC_DERIVED_OLD@": METRIC_DERIVED_OLD, "@METRIC_DERIVED_STATE@": METRIC_DERIVED_STATE,
     "@METRIC_UNKNOWN@": METRIC_UNKNOWN, "@SEMANTIC_ID@": SEMANTIC_ID,
     "@X121@": "x" * 121, "@X1001@": "x" * 1001, "@X4001@": "x" * 4001,
 }
@@ -84,10 +87,13 @@ REQUIRED = {
         "metrics-is-empty", "metric-name-missing", "metric-is-not-in-the-catalogue", "metric-is-derived",
         "metric-is-deprecated", "metric-is-listed-twice", "minimum-is-text", "maximum-is-a-boolean",
         "minimum-is-above-the-maximum", "a-range-on-a-text-metric", "a-range-on-a-boolean-metric",
-        "metric-semantic-id-differs", "the-second-schema-is-refused",
+        "metric-semantic-id-differs", "the-second-schema-is-refused", "derived-metrics-is-not-a-list",
+        "derived-metric-is-not-text", "derived-metric-is-not-in-the-catalogue", "derived-metric-is-measured",
+        "derived-metric-is-deprecated", "derived-metric-is-listed-twice", "derived-metric-lacks-an-input",
+        "derived-metric-counts-a-state-that-is-not-permitted",
     ],
     "valid": ["the-example", "minimal", "an-empty-list", "both-bounds", "only-a-minimum", "only-a-maximum",
-              "a-text-and-a-boolean-metric", "two-schemas"],
+              "a-text-and-a-boolean-metric", "two-schemas", "a-derived-metric", "no-derived-metrics"],
 }
 
 
@@ -146,6 +152,13 @@ class Agreement(unittest.TestCase):
         self.cur.execute("INSERT INTO public.metric_catalog (name, datatype, units, derivation)"
                          " VALUES (%s, 10, 'COUNT/HOUR', %s::jsonb);",
                          (METRIC_DERIVED, json.dumps({"kind": "counter_rate", "input": METRIC_NUMBER})))
+        # One that was deprecated after it was made, and one whose input's permitted values lost its state.
+        self.cur.execute("INSERT INTO public.metric_catalog (name, datatype, derivation) VALUES (%s, 10, %s::jsonb);",
+                         (METRIC_DERIVED_OLD, json.dumps({"kind": "counter_rate", "input": METRIC_NUMBER})))
+        self.cur.execute("UPDATE public.metric_catalog SET deprecated = true WHERE name = %s;", (METRIC_DERIVED_OLD,))
+        self.cur.execute("INSERT INTO public.metric_catalog (name, datatype, derivation) VALUES (%s, 10, %s::jsonb);",
+                         (METRIC_DERIVED_STATE, json.dumps({"kind": "time_in_state", "input": METRIC_TEXT, "states": ["AUTO"]})))
+        self.cur.execute("UPDATE public.metric_catalog SET permitted_values = '{MANUAL,SETUP}' WHERE name = %s;", (METRIC_TEXT,))
         # The Administrator's session, as PostgREST hands it to the database.
         self.cur.execute("SELECT set_config('request.jwt.claims', %s, true);",
                          (json.dumps({"sub": ADMIN_ID, "role": "authenticated", "email": "admin@guard.test"}),))

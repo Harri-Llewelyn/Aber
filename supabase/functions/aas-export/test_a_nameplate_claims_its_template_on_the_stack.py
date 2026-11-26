@@ -205,6 +205,15 @@ class TestACompleteNameplate(NameplateCase):
                 status, described = get_json(f"{API}/concept-descriptions/{b64url(identifier)}", TOKEN)
                 self.assertEqual((status, described.get("id")), (200, identifier))
 
+    def test_the_address_and_the_type_are_defined_by_what_they_are(self):
+        """Their rows' texts are exported as definitions (0334): no claim on the template, and no note of ours."""
+        definitions = {cd["idShort"]: cd["embeddedDataSpecifications"][0]["dataSpecificationContent"]["definition"][0]["text"]
+                       for cd in self.served.exported["conceptDescriptions"]}
+        self.assertTrue(definitions["AddressInformation"].startswith("Contact address of the manufacturer"))
+        self.assertTrue(definitions["ManufacturerProductType"].startswith("Type or variant of the product"))
+        for said in ("Mandatory unless", "the template still points"):
+            self.assertEqual([k for k, text in definitions.items() if said in text], [])
+
     def test_it_holds_no_element_of_the_platform_s(self):
         held = {e["idShort"] for e in self.served.nameplate["submodelElements"]}
         self.assertEqual(held & {"AssetSparkplugId", "EdgeGatewayName", "EdgeGatewaySparkplugId"}, set())

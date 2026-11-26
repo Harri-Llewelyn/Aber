@@ -169,7 +169,7 @@ describe('where a notification links to', () => {
     expect(metricUrl('m-1', true)).toBe('/metrics/deprecated?metric=m-1')
     expect(captureSubjectUrl('gateway', 'g-1')).toBe('/capture?subject=g-1')
     expect(captureSubjectUrl('device', 'd-1')).toBe('/capture/device?subject=d-1')
-    // The lanes Prepare replay lanes made, on the Devices page, which hides lanes by default.
+    // The lanes Prepare Replay Lanes made, on the Devices page, which hides lanes by default.
     expect(replayLanesUrl('g-1')).toBe('/devices?gateway=g-1&replay=1')
   })
 

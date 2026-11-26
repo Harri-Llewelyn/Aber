@@ -1,0 +1,19 @@
+{
+  "about": "One derived metric twice in a schema.",
+  "path": "$[0].derived_metrics[1]",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "derived_metrics": [
+        "@METRIC_DERIVED@",
+        "@METRIC_DERIVED@"
+      ]
+    }
+  ]
+}

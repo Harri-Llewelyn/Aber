@@ -11,6 +11,7 @@ import { reportSessionRefused, SESSION_REFUSED } from './lib/connectionState';
 import { AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_CLASSES, ENTITY_FIND_LIMIT, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
+import { derivedSchemaIds } from './utils/derivedMetric';
 import { lineageVersionLabel } from './utils/schemaVersion';
 import { readSetting } from './config';
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
@@ -3311,12 +3312,16 @@ const apiMethods = {
     }
 
     if (path.startsWith('/api/v1/archives')) {
-      const [areasRes, cellsRes, gatewaysRes, devicesRes] = await Promise.all([
+      const [areasRes, cellsRes, gatewaysRes, devicesRes, directoryRes] = await Promise.all([
         supabase.from('areas').select('*').eq('is_archived', true),
         supabase.from('cells').select('*').eq('is_archived', true),
         supabase.from('gateways').select('*').eq('is_archived', true),
-        supabase.from('devices').select('*').eq('is_archived', true)
+        supabase.from('devices').select('*').eq('is_archived', true),
+        // Each one's description, further ids and place, as the Active rows have them. Tolerated: without
+        // it a drawer has the row's own name and id.
+        supabase.from('entity_directory').select('*').eq('state', 'archived')
       ]);
+      const directory = new Map((directoryRes.data || []).map(row => [`${row.kind}:${row.id}`, row]));
 
       if (areasRes.error) throw areasRes.error;
       if (cellsRes.error) throw cellsRes.error;
@@ -3381,7 +3386,8 @@ const apiMethods = {
         auto_delete_at: d.auto_delete_at
       }));
 
-      const combined = [...areas, ...cells, ...gateways, ...devices];
+      const combined = [...areas, ...cells, ...gateways, ...devices]
+        .map(row => ({ ...row, directory: directory.get(`${row.entity_type}s:${row.entity_id}`) || null }));
       combined.sort((a, b) => new Date(b.archived_at || 0) - new Date(a.archived_at || 0));
       return combined;
     }
@@ -3572,7 +3578,9 @@ const apiMethods = {
       // gateway), and the resolved value is `effective_cell_id`.
       return (data || []).map(d => ({
         ...mapDeviceRow(d, d.gateways, locations?.get(d.id)),
-        submodel_schema_ids: schemasByDevice.get(d.id) || []
+        submodel_schema_ids: schemasByDevice.get(d.id) || [],
+        // Whose derived metrics it has: a replay lane has its original's.
+        derived_schema_ids: derivedSchemaIds(d, schemasByDevice)
       }));
     }
 
@@ -4000,6 +4008,8 @@ const apiMethods = {
         lineage_root_id: s.lineage_root_id ?? s.id,
         description: s.description,
         schema_definition: s.schema_definition,
+        // The derived metrics its devices get (0336).
+        derived_metrics: s.derived_metrics ?? [],
         semantic_id: s.semantic_id ?? null,
         semantic_id_type: s.semantic_id_type ?? null,
         // Defaulted here as well as in the column, so a client against a database that has not
@@ -4485,6 +4495,7 @@ const apiMethods = {
         schema_name: body.schema_name,
         description: body.description,
         schema_definition: body.schema_definition,
+        ...('derived_metrics' in body && { derived_metrics: body.derived_metrics }),
         ...semanticIdPair(body),
         // A newly built schema is v1 and in force immediately; `version` and `status` are left to their
         // column defaults because sending them is what the provenance trigger refuses.
@@ -4673,6 +4684,7 @@ const apiMethods = {
     if (path.startsWith('/api/v1/schemas/')) {
       const patch = {};
       if ('schema_definition' in body) patch.schema_definition = body.schema_definition;
+      if ('derived_metrics' in body) patch.derived_metrics = body.derived_metrics;
       if ('description' in body) patch.description = body.description;
       if ('change_description' in body) patch.change_description = emptyToNull(body.change_description);
       // The pair travels together, so clearing the id clears the type with it.
@@ -4942,37 +4954,16 @@ const apiMethods = {
 
   /**
    * The entities one text names, whatever their state: a whole id of any kind, the start of one, or any
-   * part of a name (find_entities(), 0321). At most `limit` rows, a whole id first.
-   *
-   * `share` is the search bar's, with the `kinds` it lists. A full answer can be all of one kind, since it
-   * goes by rank and then by name: four hundred devices before a cell, or two hundred deleted ones before
-   * one in service. Each kind with fewer than `share` rows in service is then read apart by name, its best
-   * `share`, all at once. One that is refused leaves the rows there are.
+   * part of a name (find_entities(), 0321). At most `limit` rows, a whole id first; with `perKind`, at
+   * most that many of each kind, its best, so one kind cannot fill the answer.
    */
-  findEntities: async (text, { limit = ENTITY_FIND_LIMIT, share = null, kinds = [] } = {}) => {
-    const wanted = String(text || '').trim();
-    if (!wanted) return [];
-    const { data, error } = await supabase.rpc('find_entities', { p_query: text, p_limit: limit });
-    if (error) throw new Error(error.message || 'Could not search the entities');
-    const rows = data || [];
-    if (!share || rows.length < limit) return rows;
-
-    const inService = (kind) => rows.filter(row => row.kind === kind && row.state === 'active').length;
-    // LIKE's wildcards are text here, as they are to find_entities().
-    const pattern = `%${wanted.replace(/([%_\\])/g, '\\$1')}%`;
-    const reads = kinds.filter(kind => inService(kind) < share).map(async kind => {
-      // The three states are in this order by their own letters: active, archived, retired.
-      const { data: found, error: refused } = await supabase.from('entity_directory').select('*')
-        .eq('kind', kind).ilike('name', pattern).order('state').order('name').limit(share);
-      return refused ? [] : found || [];
+  findEntities: async (text, { limit = ENTITY_FIND_LIMIT, perKind = null } = {}) => {
+    if (!String(text || '').trim()) return [];
+    const { data, error } = await supabase.rpc('find_entities', {
+      p_query: text, p_limit: limit, ...(perKind && { p_per_kind: perKind }),
     });
-    const keyOf = (row) => `${row.state}:${row.kind}:${row.id}`;
-    const all = new Map(rows.map(row => [keyOf(row), row]));
-    for (const row of (await Promise.all(reads)).flat()) {
-      // Checked again: PostgREST reads a `*` as a wildcard, and nothing escapes it.
-      if (String(row.name || '').toLowerCase().includes(wanted.toLowerCase())) all.set(keyOf(row), row);
-    }
-    return [...all.values()];
+    if (error) throw new Error(error.message || 'Could not search the entities');
+    return data || [];
   },
 
   delete: async (path, _options = {}) => {

@@ -214,6 +214,7 @@ const restoreFromArchives = async (row) => {
   api.displayNamesFor.mockResolvedValue(new Map())
   window.history.replaceState(null, '', '/entities/archived')
   render(<EntitiesTab showToast={vi.fn()} hasPermission={() => true} />)
+  fireEvent.click((await screen.findByText('Production_Flow', { selector: 'strong' })).closest('tr'))
   fireEvent.click(await screen.findByRole('button', { name: /Restore/ }))
   return (await screen.findByRole('dialog', { name: 'Restore Gateway' })).textContent
 }

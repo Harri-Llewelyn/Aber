@@ -29,8 +29,8 @@ import {
 } from '../../utils/semanticIdSources'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
 import {
-  DERIVED_DATATYPE, SHARE_UNIT_WORDS, appliesToDevices, appliesToNone, appliesToRule, isShare, describeDerivation, isDerived, kindLabel,
-  matchesDerivedSearch, derivationText, unitOf,
+  APPLIES_TO_RULE, DERIVED_DATATYPE, SHARE_UNIT_WORDS, appliesToDevices, appliesToNone, isShare, describeDerivation, isDerived, kindLabel,
+  matchesDerivedSearch, derivationText, schemasNaming, unitOf,
 } from '../../utils/derivedMetric'
 import { metricDevices } from '../../utils/history'
 import { unitAndCode } from '../../utils/units'
@@ -54,7 +54,7 @@ import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { RouteLink } from '../common/RouteLink'
 import { OverflowText } from '../common/OverflowText'
-import { deviceUrl, metricHistoryUrl, metricUrl, trailUrl } from '../../routes'
+import { deviceUrl, metricHistoryUrl, metricUrl, tabUrl, trailUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -66,12 +66,14 @@ import {
   parsePermittedValues, permittedValuesApply, permittedValuesText
 } from '../../utils/schemaProperty'
 import {
-  IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconRefreshCw,
+  IconPlus, IconAlertTriangle, IconArchive, IconRefreshCw,
   IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck, IconHistory, IconChartLine, IconDownload, IconUpload
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
+import { GroupHeading } from '../common/GroupHeading'
+import { useOpenGroups } from '../../hooks/useOpenGroups'
 import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
 import { FilterDropdown } from '../common/FilterChecklist'
 import { applyFacets } from '../../utils/listFilters'
@@ -205,9 +207,9 @@ const Definition = ({ derivation }) => (
 /**
  * A derived metric's Applies To: a chip for each device, in name order, that opens it on the Devices
  * page. It wraps with no cap, as the Schemas drawer's Devices field does, and a name too long for the
- * drawer is cut and slides on hover or focus. With none, what no device reports yet.
+ * drawer is cut and slides on hover or focus. With none, why: `naming` is how many schemas name the metric.
  */
-const AppliesTo = ({ devices, derivation }) => (devices.length === 0 ? appliesToNone(derivation) : (
+const AppliesTo = ({ devices, naming }) => (devices.length === 0 ? appliesToNone(naming) : (
   <div className="context-device-list">
     {appliesToDevices(devices).map(d => (
       <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} title={`Open ${d.asset_name} on the Devices page`}>
@@ -293,8 +295,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [editTarget, setEditTarget] = useState(null)
   // Which tab of the card is shown, one per VIEWS entry; the default is the catalog.
   const [view, setView, viewHref] = useUrlTab('metrics', VIEWS.map(v => v.id), 'catalog')
-  // Expansion state for the catalog's group sections, keyed by label; absent means collapsed.
-  const [expandedGroups, setExpandedGroups] = useState({})
   // Filters the catalog by metric name. With groups collapsed by default it is how one metric is
   // found without opening each group.
   const [catalogSearch, setCatalogSearch] = useUrlState('search')
@@ -313,14 +313,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     setCatalogSearch(''); setStandardFilter([]); setUnmappedOnly(false)
   }
 
-  /**
-   * A group is open when the operator opened it. While the search or a filter narrows the catalog it
-   * is open unless explicitly closed: a filter that left the groups shut would show headers and no
-   * matches.
-   */
-  const isGroupOpen = (label) => (catalogFilterCount > 0 ? expandedGroups[label] !== false : expandedGroups[label] === true)
-  const toggleGroup = (label) =>
-    setExpandedGroups(prev => ({ ...prev, [label]: !isGroupOpen(label) }))
+  // The catalog's groups start collapsed, and the search and the filters open what they match.
+  const openGroups = useOpenGroups(catalogFilterCount > 0)
 
   // Closing discards: half-finished input must not leak into the next open, including one started
   // from the Vocabulary page.
@@ -680,9 +674,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
   // Counts schemas that model the metric at all, not only those marking it `required`: this is the
   // impact warning on a destructive confirmation. Uses the same modelledMetrics() the device tags
-  // read.
-  const usageCountFor = (metricName) =>
-    schemas.filter(s => modelledMetrics(s)?.has(metricName)).length
+  // read. A derived metric is modelled by none: it is named.
+  const usageCountFor = (m) => (isDerived(m)
+    ? schemasNaming(m.name, schemas).length
+    : schemas.filter(s => modelledMetrics(s)?.has(m.name)).length)
 
   // Deprecate, Restore and Edit run from their dialogs, which show a refusal as it was worded and
   // stay open; each closes its dialog once the write has succeeded.
@@ -781,11 +776,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const selected = catalog.find(m => m.metric_uuid === selectedId) || null
   // Grouped by the name's first `/`-separated segment; ungrouped metrics fall into a trailing bucket.
   const catalogGroups = groupCatalog(activeCatalog)
-  // Writes every group explicitly, `false` included, so Collapse all also closes what a filter opened.
-  const setAllGroups = (open) => setExpandedGroups(prev => ({
-    ...prev,
-    ...Object.fromEntries(groupCatalog(currentCatalog).map(g => [g.label, open]))
-  }))
+  // Every group there is, not only those shown: Collapse all also closes what a filter opened.
+  const setAllGroups = (open) => openGroups.setOpen(groupCatalog(currentCatalog).map(g => g.label), open)
   // `superseded_by` is a uuid; the Deprecated Metrics tab and the restore modal show the name.
   const metricById = new Map(catalog.map(m => [m.metric_uuid, m]))
 
@@ -1040,7 +1032,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   })
 
   const selectedReplacement = selected?.superseded_by ? metricById.get(selected.superseded_by) : null
-  const selectedUsage = selected ? usageCountFor(selected.name) : 0
+  const selectedUsage = selected ? usageCountFor(selected) : 0
 
   /**
    * One column set for both tabs, fixed (`.metric-table`), so opening a group cannot move a column
@@ -1098,7 +1090,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           {view === 'catalog' && (
             <>
               {/* The groups start collapsed, so the search and the filters are how metrics are
-                  reached; they open the groups that matched (isGroupOpen). */}
+                  reached; they open the groups that matched. */}
               <div className="filter-bar">
                 <SearchInput
                   value={catalogSearch}
@@ -1144,7 +1136,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               {loaded && catalogGroups.length > 0 && (
                 <div className="groups-header">
                   <ExpandAllToggle
-                    anyOpen={catalogGroups.some(g => isGroupOpen(g.label))}
+                    anyOpen={catalogGroups.some(g => openGroups.isOpen(g.label))}
                     onExpandAll={() => setAllGroups(true)}
                     onCollapseAll={() => setAllGroups(false)}
                     noun="groups"
@@ -1168,36 +1160,37 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   <table className="metric-table">
                     {metricColumns(false)}
                     <thead><tr>{catalogHeaders(catalogSort)}</tr></thead>
-                    {catalogGroups.map(group => {
-                      const open = isGroupOpen(group.label)
+                    {catalogGroups.map((group, i) => {
+                      const open = openGroups.isOpen(group.label)
+                      const rowsId = `catalog-group-${i}`
                       return (
-                        <tbody key={group.label}>
-                          <tr className="table-group-row">
-                            <td colSpan={7}>
-                              {/* The whole header row is the control, as on the Vocabulary page. */}
-                              <Tooltip text={group.isUngrouped
-                                ? `${group.metrics.length} metric name${group.metrics.length === 1 ? '' : 's'} with no "Group/Metric" prefix, so in no component`
-                                : `${group.metrics.length} metric${group.metrics.length === 1 ? '' : 's'} named "${group.label}/…"`}>
-                                <button
-                                  type="button"
-                                  className="table-group-button"
-                                  onClick={() => toggleGroup(group.label)}
-                                  aria-expanded={open}
-                                >
-                                  {open ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
-                                  <span className={`table-group-label${group.isUngrouped ? ' table-group-label-muted' : ''}`}>
-                                    {group.label}
-                                  </span>
-                                </button>
-                              </Tooltip>
-                            </td>
-                          </tr>
-                          {open && catalogSort.apply(group.metrics).map(m => (
-                            <tr key={m.metric_uuid} {...rowProps(m)}>
-                              {metricCells(m)}
+                        <React.Fragment key={group.label}>
+                          <tbody>
+                            <tr className="table-group-row">
+                              <td colSpan={7}>
+                                <GroupHeading
+                                  open={open}
+                                  onToggle={() => openGroups.toggle(group.label)}
+                                  label={group.label}
+                                  muted={group.isUngrouped}
+                                  count={group.metrics.length}
+                                  countLabel={plural(group.metrics.length, 'metric')}
+                                  title={group.isUngrouped
+                                    ? 'Metric names with no "Group/Metric" prefix, so in no component'
+                                    : `Metrics named "${group.label}/…"`}
+                                  controls={rowsId}
+                                />
+                              </td>
                             </tr>
-                          ))}
-                        </tbody>
+                          </tbody>
+                          <tbody id={rowsId} hidden={!open}>
+                            {open && catalogSort.apply(group.metrics).map(m => (
+                              <tr key={m.metric_uuid} {...rowProps(m)}>
+                                {metricCells(m)}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </React.Fragment>
                       )
                     })}
                   </table>
@@ -1493,13 +1486,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             full: true,
             help: 'How Aber computes it from other metrics. It cannot be changed: a different definition is a new derived metric.'
           },
-          // The devices in service that report every input: the ones the Metric tab compares it across.
-          // The help names the inputs once; View in History compares the devices on one scale.
+          // The devices in service whose schemas name it: the ones the Metric tab compares it across.
+          // View in History compares them on one scale.
           isDerived(selected) && devices && {
             label: 'Applies To',
-            value: <AppliesTo devices={metricDevices(devices, schemas, selected.name, { catalog })} derivation={selected.derivation} />,
+            value: <AppliesTo devices={metricDevices(devices, schemas, selected.name, { catalog })} naming={selectedUsage} />,
             full: true,
-            help: `${appliesToRule(selected.derivation)} Each opens on the Devices page. Nothing is stored: the value is computed when it is drawn.`
+            help: `${APPLIES_TO_RULE} Each opens on the Devices page. Nothing is stored: the value is computed when it is drawn.`
           },
           !isDerived(selected) && { label: 'Standard', value: selected.standard_label || selected.standard || LOCAL_EXTENSION_LABEL },
           !isDerived(selected) && { label: 'Category', value: selected.category || null },
@@ -1529,7 +1522,14 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             mono: true,
             help: selectedReplacement ? undefined : 'No replacement was named'
           },
-          !isDerived(selected) && {
+          // A derived metric is named, not modelled: until a schema names it, no device has it.
+          isDerived(selected) ? {
+            label: 'Schemas',
+            value: selectedUsage > 0 ? `${selectedUsage} name${selectedUsage === 1 ? 's' : ''} it` : (
+              <>No schema names it yet. <RouteLink to={tabUrl('schemas')} className="count-link" title="Open the Schemas page, where a schema's editor names it">View in Schemas</RouteLink></>
+            ),
+            help: 'A device has the derived metrics its schemas name.'
+          } : {
             label: 'Schemas',
             value: selectedUsage === 0 ? 'None model it' : `${selectedUsage} model${selectedUsage === 1 ? 's' : ''} it`
           }
@@ -2010,7 +2010,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       {deprecateTarget && (
         <DeprecateMetricModal
           metric={deprecateTarget}
-          usageCount={usageCountFor(deprecateTarget.name)}
+          usageCount={usageCountFor(deprecateTarget)}
           catalog={catalog}
           onConfirm={handleDeprecate}
           onCancel={() => setDeprecateTarget(null)}
@@ -2020,7 +2020,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       {editTarget && (
         <EditMetricSemanticIdModal
           metric={editTarget}
-          usageCount={usageCountFor(editTarget.name)}
+          usageCount={usageCountFor(editTarget)}
           suggestion={suggestionForMetric(editTarget, {
             mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary, vda5050: vdaVocabulary
           })}

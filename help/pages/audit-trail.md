@@ -6,7 +6,7 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 
 ## What the controls do
 
-- **The search box** matches a name or an id. It takes the three ids shown in the event drawer: an entity ID, a mutation ID or a transaction ID. A term made only of digits also matches a mutation ID and a transaction ID. A deleted entity can be found by its name too, because the trail keeps the name it had.
+- **The search box** matches a name or an ID, or any part of one. It takes the three IDs shown in the event drawer: an entity ID, a mutation ID or a transaction ID. A term made only of digits also matches a mutation ID and a transaction ID. It also takes the further IDs an entity goes by. Those are a Sparkplug ID, a published ID, a semantic ID, an automation ID, a capture's file and a backup's stamp. Any of a metric's semantic IDs finds the metric's whole history. A deleted entity can be found by its name or its IDs too, because the trail keeps what it had.
 - **The time window** after the search box sets the stretch of time the timeline shows. **All time** is the default. [Moving through time](#moving-through-time) says how to use it.
 - **Zoom in** and **Zoom out**, after **Day | Week | Month | Year**, narrow or widen the window. You can also drag across the timeline. [Zooming in on a stretch](#zooming-in-on-a-stretch) says how.
 - **Filters** opens the filters used less often: the kind filter, the action filter, **Changed by** and **Show deleted entities**. Its number is how many of them are set, and its own **Clear** resets just those.

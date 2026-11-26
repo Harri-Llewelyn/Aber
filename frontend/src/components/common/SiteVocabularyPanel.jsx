@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { useDisplayNames } from '../../hooks/useDisplayNames'
+import { useOpenGroups } from '../../hooks/useOpenGroups'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { useUrlState } from '../../hooks/useUrlState'
 import { siteVocabularyUrl } from '../../routes'
@@ -57,7 +58,6 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
   const [loadError, setLoadError] = useState(null)
   const [search, setSearch] = useUrlState('search')
   const [focused] = useUrlState('file')
-  const [expanded, setExpanded] = useState({})
   const [importing, setImporting] = useState(false)
   const [removing, setRemoving] = useState(null)
   const [sharing, setSharing] = useState(null)
@@ -126,11 +126,9 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
       : undefined
   }), [used, onUseEntry, filesById])
 
-  // A file named in the address (a toast links to it) opens; otherwise a section is open when opened,
-  // and while a search narrows the tab it is open unless closed.
-  const isOpen = (key) => (query || key === `site:${focused}` ? expanded[key] !== false : expanded[key] === true)
-  const toggle = (key) => setExpanded(prev => ({ ...prev, [key]: !isOpen(key) }))
-  const setAll = (open) => setExpanded(Object.fromEntries(sections.map(s => [s.key, open])))
+  // A file named in the address (a toast links to it) starts open.
+  const { isOpen, toggle, setOpen } = useOpenGroups(query !== '', key => query !== '' || key === `site:${focused}`)
+  const setAll = (open) => setOpen(sections.map(s => s.key), open)
 
   const usedBy = (file) => metricsUsing(file, concepts, catalog).length
 

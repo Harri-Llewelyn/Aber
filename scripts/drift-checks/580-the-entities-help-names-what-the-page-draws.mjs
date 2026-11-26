@@ -36,7 +36,7 @@ export default function check() {
   else if (!help.includes(`**${placeholder}**`)) problems580.push(`${HELP} does not name the search as the page does: ${placeholder}`);
 
   const columns = [...tab.matchAll(/sort=\{activeSort\}[^>]*>([^<]+)<\/SortHeader>/g)].map((m) => m[1]);
-  if (columns.length !== 4) problems580.push(`read ${columns.length} columns of the Active table, not four`);
+  if (columns.length !== 3) problems580.push(`read ${columns.length} columns of the Active table, not three`);
   for (const name of columns) if (!help.includes(`- **${name}** `)) problems580.push(`${HELP} has no bullet for the Active table's ${name} column`);
 
   const badges = [...read('frontend/src/utils/entities.js').matchAll(/return \{ label: '([^']+)'/g)].map((m) => m[1]);

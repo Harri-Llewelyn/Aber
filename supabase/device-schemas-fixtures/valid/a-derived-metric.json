@@ -1,0 +1,16 @@
+{
+  "about": "A derived metric computed from a metric the schema lists.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "derived_metrics": [
+        "@METRIC_DERIVED@"
+      ]
+    }
+  ]
+}

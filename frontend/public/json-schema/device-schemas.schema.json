@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Aber device schemas",
-  "description": "A list of device schemas. A schema says which catalogue metrics a kind of device is expected to publish, and the valid range of each number. This file describes exactly what Aber accepts. Anything else is refused, not ignored. The database is the authority: it also checks that each metric is in the catalogue and is not a derived one, and that no `name` is used twice in the file.",
+  "description": "A list of device schemas. A schema says which catalogue metrics a kind of device is expected to publish, and the valid range of each number. This file describes exactly what Aber accepts. Anything else is refused, not ignored. The database is the authority: it also checks that each metric is in the catalogue and is not a derived one, that each derived metric is computed from metrics the schema lists, and that no `name` is used twice in the file.",
   "type": "array",
   "maxItems": 200,
   "items": { "$ref": "#/$defs/deviceSchema" },
@@ -50,6 +50,16 @@
           "minItems": 1,
           "maxItems": 1000,
           "items": { "$ref": "#/$defs/metric" }
+        },
+        "derived_metrics": {
+          "description": "The derived metrics a device bound to the schema gets, by name. Each must be computed only from metrics listed in `metrics`. A file says what is saved: leave it out and the schema names none. The order does not matter.",
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$"
+          },
+          "examples": [["Controller/PARTS_PER_HOUR"]]
         }
       }
     },
@@ -61,7 +71,7 @@
       "required": ["name"],
       "properties": {
         "name": {
-          "description": "The catalogue name of the metric, such as Spindle/LOAD. It must be in the metric catalogue and not be a derived metric. A deprecated one is accepted only where the schema already models it.",
+          "description": "The catalogue name of the metric, such as Spindle/LOAD. It must be in the metric catalogue and not be a derived metric, which goes in `derived_metrics`. A deprecated one is accepted only where the schema already models it.",
           "type": "string",
           "pattern": "^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$",
           "x-completes": "metric"

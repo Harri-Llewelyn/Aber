@@ -278,15 +278,16 @@ const derivedRow = (name: string, derivation: Record<string, unknown>) => ({
   derivation,
 });
 
-Deno.test("each derived metric a device reports the inputs of is in the shell, with no semantic id and no value", () => {
+Deno.test("each derived metric a device's schemas name is in the shell, with no semantic id and no value", () => {
   const rows = record(DEFINED);
-  rows.device = { ...rows.device, last_birth_metrics: ["Controller/PART_COUNT", "Controller/EXECUTION"] };
+  rows.device = { ...rows.device, last_birth_metrics: ["Power/A", "Power/B"] };
+  rows.schemas = [{ ...rows.schemas[0], derived_metrics: ["Controller/PARTS_PER_HOUR", "Controller/UPTIME"] }];
   rows.catalog = [
     ...rows.catalog,
     metric("Controller/PART_COUNT", null, "Parts made", { units: "COUNT", standard: null }),
     derivedRow("Controller/PARTS_PER_HOUR", { kind: "counter_rate", input: "Controller/PART_COUNT" }),
     derivedRow("Controller/UPTIME", { kind: "time_in_state", input: "Controller/EXECUTION", states: ["ACTIVE", "READY"] }),
-    // An input this device does not report: no row for it.
+    // No schema of this device names it, though the device reports its inputs: no row for it.
     derivedRow("Power/TOTAL", { kind: "sum", inputs: [{ metric: "Power/A", sign: 1 }, { metric: "Power/B", sign: -1 }] }),
   ];
   const built = buildEnvironment(rows);
@@ -310,8 +311,9 @@ Deno.test("each derived metric a device reports the inputs of is in the shell, w
   assert.equal([built.stats.derived_metrics, built.stats.unmapped_semantic_ids], [2, 2]);
 });
 
-Deno.test("a device that reports no input of a derived metric has no DerivedMetrics submodel", () => {
+Deno.test("a device none of whose schemas names a derived metric has no DerivedMetrics submodel", () => {
   const rows = record(DEFINED);
+  rows.device = { ...rows.device, last_birth_metrics: ["Controller/PART_COUNT"] };
   rows.catalog = [...rows.catalog, derivedRow("Controller/PARTS_PER_HOUR", { kind: "counter_rate", input: "Controller/PART_COUNT" })];
   const built = buildEnvironment(rows);
   // deno-lint-ignore no-explicit-any
@@ -319,13 +321,14 @@ Deno.test("a device that reports no input of a derived metric has no DerivedMetr
   assert.equal(built.stats.derived_metrics, 0);
 });
 
-Deno.test("a schema's modelled metrics count as reported, as History counts them", () => {
+Deno.test("a sum a schema names is worded with its inputs and signs", () => {
   const rows = record(DEFINED);
   rows.schemas = [{
     id: "s1",
     schema_name: "AHU",
     semantic_id: null,
     schema_definition: { properties: { "Power/A": {}, "Power/B": {} } },
+    derived_metrics: ["Power/TOTAL"],
   }];
   rows.catalog = [
     ...rows.catalog,

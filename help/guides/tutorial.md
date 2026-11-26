@@ -12,9 +12,10 @@ would repeat for real hardware.
 the password `aber123`. On a site, use the first administrator that `npm run setup` created.
 
 **A new install is empty.** It has no cells, gateways, devices or schemas, Node-RED opens on an empty
-editor, and Grafana's dashboards describe the platform rather than a shopfloor. The one gateway
-listed is the **Playback gateway**, which replays recorded data. You can ignore it until you record
-something. On a site the metric catalog is empty too. On a laptop it holds some example metrics.
+editor, and Grafana's dashboards describe the platform rather than a shopfloor. The one gateway it
+has, the **Playback gateway**, replays recorded data. The Gateways page leaves it off the list, and you
+can ignore it until you record something. On a site the metric catalog is empty too. On a laptop it
+holds some example metrics.
 
 | You will use | On a laptop | On a site |
 | :--- | :--- | :--- |

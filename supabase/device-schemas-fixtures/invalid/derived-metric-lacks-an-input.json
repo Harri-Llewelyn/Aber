@@ -1,0 +1,18 @@
+{
+  "about": "A derived metric computed from a metric the schema does not list.",
+  "path": "$[0].derived_metrics[0]",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER_2@"
+        }
+      ],
+      "derived_metrics": [
+        "@METRIC_DERIVED@"
+      ]
+    }
+  ]
+}
