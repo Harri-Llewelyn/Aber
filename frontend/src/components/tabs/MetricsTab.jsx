@@ -18,6 +18,7 @@ import {
 import { breakAfterSeparators, formatDateTime, plural } from '../../utils/format'
 import { DERIVED_METRICS_FILE_NAME } from '../../utils/derivedMetricsFile'
 import { modelledMetrics } from '../../utils/deviceTags'
+import { SCHEMA_STATUS, lineageVersionLabel, schemaStatus, schemaVersion, statusLabel } from '../../utils/schemaVersion'
 import {
   typesByCategory, subTypes, unitNames, categoryOfType, CATEGORY_WITH_UNITS, MTCONNECT_CATEGORIES
 } from '../../utils/mtconnect'
@@ -55,7 +56,7 @@ import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { RouteLink } from '../common/RouteLink'
 import { RecordChip } from '../common/RecordChip'
-import { deviceUrl, metricHistoryUrl, metricUrl, tabUrl, trailUrl } from '../../routes'
+import { allSchemaVersionsUrl, deviceUrl, metricHistoryUrl, metricUrl, schemaUrl, tabUrl, trailUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -218,6 +219,40 @@ const AppliesTo = ({ devices, naming }) => (devices.length === 0 ? appliesToNone
     ))}
   </div>
 ))
+
+// Schema versions the drawer's Schemas field draws as chips before one link to the rest.
+const SCHEMAS_SHOWN = 6
+
+/** Newest first: the later made, and of two made together the higher version. */
+const newestFirst = (a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || schemaVersion(b) - schemaVersion(a)
+
+/**
+ * The drawer's Schemas field: the schema versions that model a metric, or name a derived one, newest
+ * first, each a chip with its version that opens it on the Schemas page, and a flag for a draft or a
+ * superseded one. Past SCHEMAS_SHOWN the rest is one link to the Schemas page with every version listed.
+ */
+const SchemasUsing = ({ versions }) => {
+  const newest = [...versions].sort(newestFirst)
+  const rest = newest.length - SCHEMAS_SHOWN
+  return (
+    <div className="context-device-list">
+      {newest.slice(0, SCHEMAS_SHOWN).map(s => (
+        <RecordChip
+          key={s.schema_uuid}
+          kind="schemas"
+          to={schemaUrl(s.schema_uuid)}
+          name={lineageVersionLabel(s)}
+          flag={schemaStatus(s) !== SCHEMA_STATUS.ACTIVE && statusLabel(schemaStatus(s)).toUpperCase()}
+        />
+      ))}
+      {rest > 0 && (
+        <RouteLink className="count-link" to={allSchemaVersionsUrl()} title={`Open the Schemas page with every version listed, to find the other ${plural(rest, 'version')}`}>
+          and {rest} more
+        </RouteLink>
+      )}
+    </div>
+  )
+}
 
 /** The Uncatalogued table's sortable columns. Declared By is a list of devices; Devices counts it. */
 const UNCATALOGUED_SORT = {
@@ -671,12 +706,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     showToast(`Derived metric '${name}' added to the catalog`, 'success', { to: metricUrl(added?.metric_uuid, false, true) })
   }
 
-  // Counts schemas that model the metric at all, not only those marking it `required`: this is the
-  // impact warning on a destructive confirmation. Uses the same modelledMetrics() the device tags
-  // read. A derived metric is modelled by none: it is named.
-  const usageCountFor = (m) => (isDerived(m)
-    ? schemasNaming(m.name, schemas).length
-    : schemas.filter(s => modelledMetrics(s)?.has(m.name)).length)
+  // The schemas that model the metric at all, not only those marking it `required`: the drawer lists
+  // them, and their count is the impact warning on a destructive confirmation. Uses the same
+  // modelledMetrics() the device tags read. A derived metric is modelled by none: it is named.
+  const schemasUsing = (m) => (isDerived(m)
+    ? schemasNaming(m.name, schemas)
+    : schemas.filter(s => modelledMetrics(s)?.has(m.name)))
+  const usageCountFor = (m) => schemasUsing(m).length
 
   // Deprecate, Restore and Edit run from their dialogs, which show a refusal as it was worded and
   // stay open; each closes its dialog once the write has succeeded.
@@ -1034,7 +1070,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   })
 
   const selectedReplacement = selected?.superseded_by ? metricById.get(selected.superseded_by) : null
-  const selectedUsage = selected ? usageCountFor(selected) : 0
+  const selectedSchemas = selected ? schemasUsing(selected) : []
+  const selectedUsage = selectedSchemas.length
 
   /**
    * One column set for both tabs, fixed (`.metric-table`), so opening a group cannot move a column
@@ -1336,7 +1373,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                             {metricCells(m, true)}
                             <td>
                               {replacement
-                                ? <span className="mono">{breakAfterSeparators(replacement.name)}</span>
+                                ? <RecordChip kind="metric_catalog" to={metricUrl(replacement.metric_uuid, replacement.deprecated, isDerived(replacement))} name={replacement.name} />
                                 : <span className="cell-meta">—</span>}
                             </td>
                           </tr>
@@ -1512,20 +1549,25 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           },
           selected.deprecated && {
             label: 'Superseded By',
-            value: selectedReplacement ? selectedReplacement.name : null,
-            mono: true,
+            value: selectedReplacement
+              ? <RecordChip kind="metric_catalog" to={metricUrl(selectedReplacement.metric_uuid, selectedReplacement.deprecated, isDerived(selectedReplacement))} name={selectedReplacement.name} />
+              : null,
+            full: Boolean(selectedReplacement),
             help: selectedReplacement ? undefined : 'No replacement was named'
           },
           // A derived metric is named, not modelled: until a schema names it, no device has it.
           isDerived(selected) ? {
             label: 'Schemas',
-            value: selectedUsage > 0 ? `${selectedUsage} name${selectedUsage === 1 ? 's' : ''} it` : (
+            value: selectedUsage > 0 ? <SchemasUsing versions={selectedSchemas} /> : (
               <>No schema names it yet. <RouteLink to={tabUrl('schemas')} className="count-link" title="Open the Schemas page, where a schema's editor names it">View in Schemas</RouteLink></>
             ),
-            help: 'A device has the derived metrics its schemas name.'
+            full: selectedUsage > 0,
+            help: 'The schema versions that name it, newest first. A device has the derived metrics its schemas name.'
           } : {
             label: 'Schemas',
-            value: selectedUsage === 0 ? 'None model it' : `${selectedUsage} model${selectedUsage === 1 ? 's' : ''} it`
+            value: selectedUsage === 0 ? 'None model it' : <SchemasUsing versions={selectedSchemas} />,
+            full: selectedUsage > 0,
+            help: selectedUsage > 0 ? 'The schema versions that model it, newest first. Each opens on the Schemas page.' : undefined
           }
         ].filter(Boolean) : []}
         actions={selected ? metricActions(selected) : []}

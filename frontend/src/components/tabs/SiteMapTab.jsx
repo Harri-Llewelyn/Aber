@@ -680,6 +680,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
 
   /** The panel's contents for the selected cell: where it is, and what resolves to it. */
   const SelectedCellIcon = cellIconComponent(selectedCell?.icon)
+  const SelectedCellAreaIcon = areaIconComponent(selectedCellArea?.icon)
   const cellPanel = {
     type: 'CELL',
     title: selectedCell?.cell_name || '',
@@ -710,7 +711,17 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     fields: selectedCell ? [
       {
         label: 'Where',
-        value: selectedCellArea ? selectedCellArea.area_name : 'Unfiled',
+        // A chip that opens the area's panel, as an area's cell chips open theirs.
+        value: selectedCellArea
+          ? (
+            <RecordChip
+              icon={<SelectedCellAreaIcon size={11} />}
+              name={selectedCellArea.area_name}
+              title="Open its area's details in this panel"
+              onClick={() => toggleArea(selectedCellArea.area_id)}
+            />
+          )
+          : 'Unfiled',
         full: true,
         help: 'The area this cell is filed in, as set on the Cells page'
       },

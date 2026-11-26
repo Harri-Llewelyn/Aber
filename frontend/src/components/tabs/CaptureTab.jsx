@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Callout } from '../common/Callout'
-import { captureJobUrl, captureSubjectUrl, schemaUrl } from '../../routes'
+import { captureJobUrl, captureSubjectUrl, gatewayUrl, schemaUrl } from '../../routes'
 import { api, isMachineMetric } from '../../api'
 import { playbackWorkerDeployed } from '../../config'
 import { REALTIME_ENABLED } from '../../constants'
@@ -665,7 +665,12 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             help: 'The ID Aber issued. A capture is filed under this prefix.' },
           ...(selected.kind === 'device'
             ? [
-              { label: 'Via gateway', value: selected.context },
+              {
+                label: 'Via gateway',
+                value: gatewayName.has(selected.device.gateway_id)
+                  ? <RecordChip kind="gateways" to={gatewayUrl(selected.device.gateway_id)} name={selected.context} />
+                  : selected.context
+              },
               {
                 label: 'Schema',
                 // A chip that opens the schema, as the Devices drawer draws it: the schema says which

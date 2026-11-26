@@ -303,6 +303,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   // Resolved fresh every render, from the id.
   const selectedSchema = schemas.find(s => s.schema_uuid === selectedId) || null
   const selectedStatus = selectedSchema ? schemaStatus(selectedSchema) : null
+  // The version it was made from, a chip in its drawer; none for a first version.
+  const selectedParent = selectedSchema?.parent_schema_id
+    ? schemas.find(s => s.schema_uuid === selectedSchema.parent_schema_id) || null
+    : null
   // A lineage may hold at most one open draft (a partial unique index), so creating another
   // version before it is published or discarded is refused.
   const selectedDraft = selectedSchema
@@ -587,7 +591,9 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           {
             label: 'Parent Schema',
             value: selectedSchema.parent_schema_id
-              ? (schemas.find(s => s.schema_uuid === selectedSchema.parent_schema_id)?.schema_name || selectedSchema.parent_schema_id)
+              ? (selectedParent
+                ? <RecordChip kind="schemas" to={schemaUrl(selectedParent.schema_uuid)} name={selectedParent.schema_name} />
+                : selectedSchema.parent_schema_id)
               : null,
             full: true,
             help: 'The version this one was created from. Absent on the first version of a lineage.'

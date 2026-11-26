@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Callout } from '../common/Callout'
 import { RecordChip } from '../common/RecordChip'
-import { cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
+import { areaUrl, cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
@@ -28,6 +28,7 @@ import { inServiceDevices } from '../../utils/inService'
 import { alertIndex, alertForDevice, alertForGateway, statusSortRank } from '../../utils/alertSubjects'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import { CellIcon } from '../../utils/cellIcon'
+import { AreaIcon } from '../../utils/areaIcon'
 import { isShadowGateway } from '../../utils/fleetCounts'
 import { PLAYBACK_GATEWAY_LABEL, PLAYBACK_GATEWAY_PARAM, PLAYBACK_GATEWAY_TIP, playbackAlert, playbackProblem } from '../../utils/playbackGateway'
 import { flowDriftState, flowDriftLabel, flowEditedOnAppliance, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
@@ -585,6 +586,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const selectedDevices = selected?.devices || []
   const selectedCounted = countedDevices(selectedDevices)
   const selectedCell = selected ? cells.find(c => c.cell_id === selected.cell_id) : null
+  const selectedArea = selected ? areas.find(a => a.area_id === selected.area_id) : null
   const selectedGroupMismatch = gatewayGroupMismatch(selected)
   // What the health rows say is wrong: each row's colour and the closed Health block's summary.
   const healthProblems = selected ? gatewayHealthProblems(selected, { rootNotAfter: enrolment?.ca?.not_after }) : []
@@ -1190,14 +1192,26 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           },
           {
             label: 'Location',
-            // A link when there is a cell to open. Site-Wide stays plain text. Same cases as the
-            // column, since a simulated gateway's stored scope is inert.
+            // A link when there is a cell or an area to open, the area as the Devices drawer draws
+            // it. Site-Wide stays plain text. Same cases as the column, since a simulated gateway's
+            // stored scope is inert.
             value: !gatewayAcceptsCell(selected)
               ? `${gatewayTypeLabel(gatewayType(selected))} — no cell`
               : selected.location_scope === SCOPE_SITE_WIDE
                 ? 'Site-Wide'
                 : selected.location_scope === SCOPE_AREA_WIDE
-                  ? `Area-Wide — ${areas.find(ar => ar.area_id === selected.area_id)?.area_name || selected.area_id}`
+                  ? (
+                    <div className="device-location">
+                      <RecordChip
+                        kind="areas"
+                        to={areaUrl(selected.area_id)}
+                        icon={<AreaIcon area={selectedArea} size={11} />}
+                        name={selectedArea?.area_name || selected.area_id}
+                      />
+                      <span aria-hidden="true">›</span>
+                      <span>Area-Wide</span>
+                    </div>
+                  )
                 : selectedCell
                   ? (
                       <RecordChip

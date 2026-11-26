@@ -2692,8 +2692,10 @@ its current value; Export saves its values. The database's rules are in
   (`appliesToDevices()`) and with no cap, as the Schemas drawer's Devices field lists them. The field's
   help says the rule once (`APPLIES_TO_RULE`). With none, the field says why: no schema names the metric, or
   none in service is bound to one that does (`appliesToNone()`).
-- **Its Schemas field says how many versions name it** ("2 name it", `schemasNaming()`), as a measured
-  metric's says how many model it. With none it says "No schema names it yet", with a link to the Schemas
+- **Its Schemas field lists the versions that name it** (`schemasNaming()`), as a measured metric's lists
+  the versions that model it: a `RecordChip` each with its version, newest first, that opens it on the
+  Schemas page. Past six, "and N more" links to the Schemas page with every version listed, as the page
+  cannot search by a metric. With none it says "No schema names it yet", with a link to the Schemas
   page: until one does, no device has the metric.
 - `derivedMetricReads.test.js`, `historyDerivedMetric.test.jsx`, `devicesDerivedValues.test.jsx`,
   `derivedMetrics.test.jsx` and `metricAppliesToChips.test.jsx` hold the rule, the reads, the tag, the
@@ -3060,6 +3062,8 @@ in "building management system".
   stands at the end. A caller passes `icon` only with a reason, said beside it: the strip of a
   running recording, playback or backup names its job. Drift check 611 refuses a callout written by
   hand.
+- **A label that could be a link is one**: a label that names or counts records shows the records, each
+  a link to its page or drawer, and past a handful the rest is one link to their list.
 - **A chip that opens a record is a `RecordChip`.** `common/RecordChip.jsx` draws every one, in a
   drawer's field, a Site Map panel or a table's cell: the kind's icon, the name as an `OverflowText`, a
   status dot and flags in words where they apply, and the tooltip "Open {name} on the {page} page",
