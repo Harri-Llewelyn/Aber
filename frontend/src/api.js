@@ -3693,6 +3693,10 @@ const apiMethods = {
       rows.totalMatching = typeof payload.total_matching === 'number'
         ? payload.total_matching
         : null;
+      // How many entities those rows are about, each once (0339). NULL when the payload carries none.
+      rows.matchingEntities = typeof payload.matching_entities === 'number'
+        ? payload.matching_entities
+        : null;
       // NULL IS THE ONLY END-OF-DATA SIGNAL, and it comes from the server. A full page that happens
       // to be the last one is ordinary, so "fewer rows than I asked for" is not a reliable test and
       // callers must not invent one.

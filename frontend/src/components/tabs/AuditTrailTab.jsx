@@ -20,7 +20,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { FiltersPopover } from '../common/FiltersPopover'
 import { FilterCheck, FilterList } from '../common/FilterChecklist'
 import { TimeWindowControl } from '../common/TimeWindowControl'
-import { ListFoot } from '../common/ListFoot'
+import { ListFoot, countWords } from '../common/ListFoot'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
 import { GroupHeading } from '../common/GroupHeading'
 import { OverflowText } from '../common/OverflowText'
@@ -1274,6 +1274,8 @@ export function AuditTrailTab({ userRole, showToast }) {
   // How many events match the current filters in total, so the page can say what fraction of them
   // it is holding. Null when the response carries none: the counts then name the loaded events.
   const [totalMatching, setTotalMatching] = useState(null)
+  // How many entities those events are about, each once, from the server; null when it did not say.
+  const [matchingEntities, setMatchingEntities] = useState(null)
   // Whether the row limit bit, which the page cannot tell otherwise.
   const [truncated, setTruncated] = useState(false)
   // Each class's, kind's and action's events under every filter but its own, from the first page and
@@ -1388,6 +1390,8 @@ export function AuditTrailTab({ userRole, showToast }) {
   const footTotal = typeof totalMatching === 'number'
     ? totalMatching
     : events.length + (nextCursor ? PAGE_SIZE : 0)
+  /** What the foot's total is about ("for 57 entities"), once the server has counted them. */
+  const footAbout = matchingEntities === null ? undefined : `for ${countWords(matchingEntities, 'entity', 'entities')}`
 
   /**
    * The loaded events, mirrored into a ref so the poll can merge without putting `allEvents` in
@@ -1458,6 +1462,7 @@ export function AuditTrailTab({ userRole, showToast }) {
         // facts about everything the filters select, so a poll's answer is the current one whether
         // or not it replaced the list.
         setTotalMatching(typeof d?.totalMatching === 'number' ? d.totalMatching : null)
+        setMatchingEntities(typeof d?.matchingEntities === 'number' ? d.matchingEntities : null)
         setCounts(d?.counts && typeof d.counts === 'object' ? d.counts : null)
         // Only when the list was replaced. After a merge the cursor still points past the oldest
         // row held.
@@ -2477,9 +2482,9 @@ export function AuditTrailTab({ userRole, showToast }) {
                    the view is incomplete and the reader is told so. */
                 <div className="list-foot">
                   <span className="list-foot-end">
-                    Showing the newest {allEvents.length}
-                    {typeof totalMatching === 'number' && ` of ${totalMatching}`} events — there are
-                    older ones this view cannot reach.
+                    Showing the newest {countWords(allEvents.length, 'event')}
+                    {typeof totalMatching === 'number' && ` of ${countWords(totalMatching, 'event')}`}
+                    {footAbout && ` ${footAbout}`} — there are older ones this view cannot reach.
                   </span>
                 </div>
               ) : (
@@ -2487,10 +2492,12 @@ export function AuditTrailTab({ userRole, showToast }) {
                   shown={events.length}
                   total={footTotal}
                   step={PAGE_SIZE}
+                  noun="event"
+                  about={footAbout}
                   onMore={loadMore}
                   pending={loadingMore || windowPaging}
-                  /* "200 of 242" beside Show more, only against the server's own total: without
-                     one, `footTotal` is an estimate. */
+                  /* "200 events of 242 events" beside Show more, only against the server's own
+                     total: without one, `footTotal` is an estimate. */
                   counted={typeof totalMatching === 'number'}
                 />
               )}

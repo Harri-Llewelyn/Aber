@@ -37,7 +37,7 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { hadEnrolled } from '../../utils/credentialState'
 import {
-  ENTITY_KINDS, archivedRow, byKindThenName, entityKey, findText, groupByKind, isWholeId, kindCount, kindPlural, lastDeleted, mergeFound,
+  ENTITY_KINDS, archivedRow, byKindThenName, entityKey, findText, groupByKind, isWholeId, kindCount, kindLabel, kindPlural, lastDeleted, mergeFound,
   nextPurge, purgeIsHeld, purgeIsSoon, retiredRow, variantBadge,
 } from '../../utils/entities'
 import { KIND_ICONS } from '../../utils/entityPages'
@@ -335,6 +335,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, unmappedMetric
           {isOpen && (
             <KindRows
               key={found.text}
+              kind={group.kind}
               rows={group.rows}
               columns={columns}
               sort={sort}
@@ -575,10 +576,10 @@ export function EntitiesTab({ showToast, userRole, hasPermission, unmappedMetric
 }
 
 /**
- * An open group's rows, GROUP_PAGE at a time. Memoised, as each row is: a keystroke in the search draws
+ * An open group's rows, GROUP_PAGE at a time, its foot counting them by their kind's name. Memoised, as each row is: a keystroke in the search draws
  * none of them again, and a selection draws the two it changes.
  */
-const KindRows = memo(function KindRows({ rows, columns, sort, Row, selectedId, ...shared }) {
+const KindRows = memo(function KindRows({ kind, rows, columns, sort, Row, selectedId, ...shared }) {
   const [drawn, setDrawn] = useState(GROUP_PAGE)
   const sorted = useMemo(() => sort.apply(rows), [sort, rows])
   return (
@@ -591,6 +592,8 @@ const KindRows = memo(function KindRows({ rows, columns, sort, Row, selectedId, 
               shown={Math.min(drawn, sorted.length)}
               total={sorted.length}
               step={GROUP_PAGE}
+              noun={kindLabel(kind).toLowerCase()}
+              plural={kindPlural(kind).toLowerCase()}
               counted
               onMore={() => setDrawn(n => n + GROUP_PAGE)}
             />

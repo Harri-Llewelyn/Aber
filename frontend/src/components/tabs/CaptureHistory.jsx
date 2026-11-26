@@ -191,6 +191,7 @@ function JobList({ kind, refreshKey, subjectName, search }) {
               shown={rows.length}
               total={more ? Math.max(total, rows.length + 1) : rows.length}
               step={HISTORY_PAGE}
+              noun={nounOf(kind)}
               pending={paging}
               counted={more && total > rows.length}
               onMore={() => readOlder()}

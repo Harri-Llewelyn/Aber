@@ -16,7 +16,7 @@ Each tab lists its entities in groups, one for each kind, such as **Devices**.
 2. Select **Expand all**, at the start of the line above the list, to open every group. It reads **Collapse all** while any is open.
 
 - **A group starts closed.** Its heading says how many rows it holds. A tab with one group starts with it open.
-- **A group draws 200 rows at a time.** A button at its end, such as **Show 200 more**, draws the next.
+- **A group draws 200 rows at a time.** A button at its end, such as **Show 200 More Devices**, draws the next. Beside it, "200 devices of 543 devices" says how many are drawn.
 - **A search opens the groups it finds something in.** You can close any of them. When you clear the search, the groups are as they were.
 - **A heading says one date as well,** on two of the tabs. On **Archived** it is the next auto-purge. On **Retired** it is the last deletion.
 - **A column's heading sorts the rows of each group** by that column, on every tab. Click it again to reverse the order, and a third time to go back to the usual order. An empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.

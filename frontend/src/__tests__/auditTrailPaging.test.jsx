@@ -143,7 +143,7 @@ describe('AuditTrailTab paging', () => {
     render(<AuditTrailTab />)
     await waitFor(() => expect(trailCalls().length).toBeGreaterThan(0))
     await waitFor(() => expect(screen.queryByText(/Loading the Audit Trail/)).not.toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: /Show \d+ more/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Show \d+ More Events/ })).not.toBeInTheDocument()
   })
 
   it('sends BOTH halves of the cursor, because recorded_at alone is not unique', async () => {
@@ -153,7 +153,7 @@ describe('AuditTrailTab paging', () => {
       : page([event(42), event(41)], { nextCursor: cursor, truncated: true }))
 
     render(<AuditTrailTab />)
-    const button = await screen.findByRole('button', { name: /Show \d+ more/ })
+    const button = await screen.findByRole('button', { name: /Show \d+ More Events/ })
     fireEvent.click(button)
 
     await waitFor(() => expect(trailCalls().some(u => u.includes('before_id'))).toBe(true))
@@ -172,10 +172,10 @@ describe('AuditTrailTab paging', () => {
         }))
 
     render(<AuditTrailTab />)
-    fireEvent.click(await screen.findByRole('button', { name: /Show \d+ more/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Show \d+ More Events/ }))
 
     // Four events across two pages, and the foot is the page's own claim about itself.
-    expect(await screen.findByText('All 4 shown.')).toBeInTheDocument()
+    expect(await screen.findByText('All 4 events shown.')).toBeInTheDocument()
     expect(document.querySelectorAll('.trail-node')).toHaveLength(4)
   })
 
@@ -187,7 +187,7 @@ describe('AuditTrailTab paging', () => {
     ))
     render(<AuditTrailTab />)
     expect(await screen.findByText(/there are older ones this view cannot reach/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Show \d+ more/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Show \d+ More Events/ })).not.toBeInTheDocument()
   })
 
   it('says All N shown once every matching event is loaded', async () => {
@@ -196,7 +196,7 @@ describe('AuditTrailTab paging', () => {
       { nextCursor: null, truncated: false, totalMatching: 200 }
     ))
     render(<AuditTrailTab />)
-    expect(await screen.findByText('All 200 shown.')).toBeInTheDocument()
+    expect(await screen.findByText('All 200 events shown.')).toBeInTheDocument()
   })
 
   it('names the step the button takes, then closes with All N shown', async () => {
@@ -205,18 +205,18 @@ describe('AuditTrailTab paging', () => {
       ? page([event(40)], { nextCursor: null, totalMatching: 3 })
       : page([event(42), event(41)], { nextCursor: cursor, truncated: true, totalMatching: 3 }))
     render(<AuditTrailTab />)
-    const button = await screen.findByRole('button', { name: 'Show 1 more' })
+    const button = await screen.findByRole('button', { name: 'Show 1 More Event' })
     fireEvent.click(button)
-    expect(await screen.findByText('All 3 shown.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Show d+ more/ })).toBeNull()
+    expect(await screen.findByText('All 3 events shown.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Show \d+ More Events?/ })).toBeNull()
   })
 
   it('reads All N shown on a stack smaller than one page', async () => {
     respond(() => page([event(2), event(1)], { nextCursor: null, truncated: false }))
     render(<AuditTrailTab />)
-    expect(await screen.findByText('All 2 shown.')).toBeInTheDocument()
+    expect(await screen.findByText('All 2 events shown.')).toBeInTheDocument()
     // Everything is loaded, so the foot states no count beside it.
-    expect(screen.queryByText(/\d+ of \d+/)).toBeNull()
+    expect(screen.queryByText(/\d+ events? of \d+/)).toBeNull()
     expect(document.querySelector('.trail-pagination')).toBeNull()
   })
 
@@ -305,7 +305,7 @@ describe('AuditTrailTab section coverage', () => {
     await screen.findByLabelText('Gateways lanes')
     expect(document.querySelectorAll('.trail-section')).toHaveLength(3)
     expect(document.querySelectorAll('.trail-lane:not(.trail-axis)')).toHaveLength(3)
-    expect(screen.getByText('All 3 shown.')).toBeInTheDocument()
+    expect(screen.getByText('All 3 events shown.')).toBeInTheDocument()
   })
 })
 
@@ -404,11 +404,11 @@ describe('AuditTrailTab total', () => {
     }))
     render(<AuditTrailTab />)
 
-    expect(await screen.findByText('2 of 467')).toBeInTheDocument()
+    expect(await screen.findByText('2 events of 467 events')).toBeInTheDocument()
     // Once: not again above the timeline, where it used to sit beside the key.
-    expect(screen.getAllByText(/2 of 467/)).toHaveLength(1)
+    expect(screen.getAllByText(/2 events of 467 events/)).toHaveLength(1)
     expect(document.querySelector('.groups-header').textContent).not.toMatch(/\d/)
-    expect(screen.getByRole('button', { name: /Show \d+ more/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Show \d+ More Events/ })).toBeInTheDocument()
   })
 
   it('draws the count in the foot beside Show more, with only the key above the timeline', async () => {
@@ -418,9 +418,9 @@ describe('AuditTrailTab total', () => {
       nextCursor: cursor, truncated: true, totalMatching: 467,
     }))
     render(<AuditTrailTab />)
-    const count = await screen.findByText('2 of 467')
+    const count = await screen.findByText('2 events of 467 events')
     expect(count.parentElement).toHaveClass('list-foot')
-    expect(count.nextElementSibling).toHaveTextContent(/Show \d+ more/)
+    expect(count.nextElementSibling).toHaveTextContent(/Show \d+ More Events/)
     // The row above the timeline holds Collapse all and, at its right-hand end, the key, with the
     // scroller directly under it.
     const header = document.querySelector('.groups-header')
@@ -435,7 +435,7 @@ describe('AuditTrailTab total', () => {
   it('drops the count when the loaded page is the whole match', async () => {
     respond(() => page([event(2), event(1)], { nextCursor: null, totalMatching: 2 }))
     render(<AuditTrailTab />)
-    expect(await screen.findByText('All 2 shown.')).toBeInTheDocument()
+    expect(await screen.findByText('All 2 events shown.')).toBeInTheDocument()
     expect(screen.queryByText(/2\/2|2 of 2/, { ignore: '[role=tooltip]' })).not.toBeInTheDocument()
   })
 
@@ -444,8 +444,8 @@ describe('AuditTrailTab total', () => {
     // assert against; stated once, explicitly, so the fallback is a decision rather than a default.
     respond(() => page([event(2), event(1)], { nextCursor: cursor, truncated: true }))
     render(<AuditTrailTab />)
-    expect(await screen.findByRole('button', { name: /Show \d+ more/ })).toBeInTheDocument()
-    expect(screen.queryByText(/\d+ of \d+/)).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Show \d+ More Events/ })).toBeInTheDocument()
+    expect(screen.queryByText(/\d+ events? of \d+/)).not.toBeInTheDocument()
     expect(screen.queryByText(/of null|of undefined|NaN|\/null|\/undefined/)).not.toBeInTheDocument()
   })
 
@@ -457,11 +457,11 @@ describe('AuditTrailTab total', () => {
       : page([event(42), event(41)], { nextCursor: cursor, truncated: true, totalMatching: 4 }))
 
     render(<AuditTrailTab />)
-    await screen.findByText('2 of 4')
-    fireEvent.click(screen.getByRole('button', { name: /Show \d+ more/ }))
+    await screen.findByText('2 events of 4 events')
+    fireEvent.click(screen.getByRole('button', { name: /Show \d+ More Events/ }))
 
     // Four of four is the whole match, so the fraction goes.
-    expect(await screen.findByText('All 4 shown.')).toBeInTheDocument()
+    expect(await screen.findByText('All 4 events shown.')).toBeInTheDocument()
     expect(screen.queryByText(/4\/4/)).not.toBeInTheDocument()
   })
 
@@ -471,7 +471,7 @@ describe('AuditTrailTab total', () => {
       { nextCursor: null, truncated: true, totalMatching: 467 }
     ))
     render(<AuditTrailTab />)
-    expect(await screen.findByText(/newest 200 of 467 events/i)).toBeInTheDocument()
+    expect(await screen.findByText(/newest 200 events of 467 events/i)).toBeInTheDocument()
   })
 
   it('Export CSV says it writes the page rather than the match', async () => {

@@ -386,6 +386,7 @@ export function BackupsTab({ showToast, hasPermission }) {
               shown={runs.length}
               total={total}
               step={PAGE_SIZE}
+              noun="run"
               pending={paging}
               counted
               onMore={() => { setPaging(true); setLimit(l => l + PAGE_SIZE) }}

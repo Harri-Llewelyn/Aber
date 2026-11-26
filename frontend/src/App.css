@@ -1556,9 +1556,10 @@ main .filter-bar .search-input-kbd { display: inline-block; }
 main .filter-bar .search-input-field:focus ~ .search-input-kbd { display: none; }
 
 /* The foot of a list that loads in steps (ListFoot): a rule above, the button or the end line
-   inside. It sits after the scroller, not in it. */
+   inside. It sits after the scroller, not in it. On a narrow card the button wraps under the count. */
 .list-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 12px var(--inset);

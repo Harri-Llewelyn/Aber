@@ -3035,7 +3035,7 @@ in "building management system".
 - **Scroll.** Every page scrolls inside its card, Access Control, System and Approvals included.
 - **Counts.** None on a card's heading, a section that does not close, or a tab. A group that opens and
   closes says how many rows it holds, on every page, because a closed one hides them. A count stays
-  where it states what is loaded ("30 of 55" beside Show more), what a filter value or toggle holds
+  where it states what is loaded ("30 runs of 55 runs" beside Show 25 More Runs), what a filter value or toggle holds
   (Active 4 beside its checkbox, "Needs attention (3)"), what an export will write, or how much work is
   waiting (a Quarantine or Awaiting tab, the sidebar).
 - **Queues are tabs.** Devices' quarantine queue is its Quarantine tab, not a card above the roster;
@@ -3153,7 +3153,7 @@ that describes a component keeps the detail, and *Not* names what to use instead
 | `EmptyState` | What a list says with no rows: none yet, or none match | Rows not read yet: `LoadingState` |
 | `ExpandAllToggle` | Opens or closes every group of a list | One group: `GroupHeading` |
 | `GroupHeading` | A group's name and count, which opens and closes its rows | Every group at once: `ExpandAllToggle` |
-| `ListFoot` | Show more, under a list that loads in steps | |
+| `ListFoot` | Show 30 More Runs, under a list that loads in steps, naming what it counts | |
 | `LoadingState` | A list's first load | No rows: `EmptyState` |
 | `OverflowText` | One line that may not fit: cut, then slid on hover or focus | |
 | `SessionsTable` | Sessions, with End | |
