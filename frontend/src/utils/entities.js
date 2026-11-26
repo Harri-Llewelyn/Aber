@@ -89,7 +89,7 @@ export function variantBadge(row) {
     case SCHEMA_STATUS.ARCHIVED: return { label: 'Archived version', tone: 'neutral', title: 'A newer version replaced it. A device still on it has a migration to finish.' }
     case 'derived': return { label: 'Derived', tone: 'neutral', title: DERIVED_TAG_TITLE }
     case 'deprecated': return { label: 'Deprecated', tone: 'warning', title: 'Withheld from schema authors. Schemas that model it keep it.' }
-    case 'quarantined': return { label: 'Quarantined', tone: 'warning', title: 'Nobody has admitted it yet, so its readings are held' }
+    case 'quarantined': return { label: 'Quarantined', tone: 'warning', title: 'Its readings are held until somebody approves it' }
     case 'playback': return { label: 'Playback', tone: 'neutral', title: 'What a playback is published as' }
     case 'disabled': return { label: 'Disabled', tone: 'neutral', title: 'Not evaluated until it is turned on' }
     case 'withdrawn': return { label: 'Withdrawn', tone: 'warning', title: 'The API refuses every token naming it' }
@@ -117,8 +117,10 @@ export function purgeWarning(row, now = Date.now()) {
 export function entityWarnings(row) {
   return [
     purgeWarning(row),
-    row?.variant === 'quarantined'
-      && { id: 'quarantined', tone: 'warning', text: 'Quarantined: nobody has admitted this device yet, so its readings are held. Approve or reject it on the Devices page.' },
+    // The row cannot tell a device new to Aber from a registered one held again, so the words fit both.
+    row?.variant === 'quarantined' && (row.state === 'archived'
+      ? { id: 'quarantined', tone: 'warning', text: 'Held in quarantine when it was archived. Restore returns it to the Quarantine tab on the Devices page.' }
+      : { id: 'quarantined', tone: 'warning', text: 'Quarantined: its readings are held until somebody approves it on the Devices page\'s Quarantine tab. One new to Aber may be rejected there instead.' }),
     row?.variant === 'withdrawn'
       && { id: 'withdrawn', tone: 'warning', text: 'Withdrawn: the API refuses every token that names this machine identity.' },
   ].filter(Boolean)

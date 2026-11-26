@@ -37,7 +37,7 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { hadEnrolled } from '../../utils/credentialState'
 import {
-  ENTITY_KINDS, archivedRow, byKindThenName, entityKey, findText, groupByKind, isWholeId, kindCount, kindPlural, lastDeleted, mergeFound,
+  ENTITY_KINDS, archivedRow, byKindThenName, entityKey, findText, groupByKind, isWholeId, kindCount, kindLabel, kindPlural, lastDeleted, mergeFound,
   nextPurge, purgeIsHeld, purgeIsSoon, retiredRow, variantBadge,
 } from '../../utils/entities'
 import { KIND_ICONS } from '../../utils/entityPages'
@@ -260,7 +260,10 @@ export function EntitiesTab({ showToast, userRole, hasPermission, unmappedMetric
   const restore = async (item) => {
     await api.post(`/api/v1/${item.entity_type}s/${item.entity_id}/restore`, {})
     setConfirmRestore(null); setSelectedId(''); load(); setVersion(v => v + 1)
-    showToast(`Entity '${item.name}' restored to active service`, 'success', { to: entityUrl(item.entity_type, item.entity_id) })
+    // A device archived while held is back in the Quarantine queue, where its link (deviceUrl) lands.
+    const held = item.entity_type === 'device' && item.variant === 'quarantined'
+    showToast(held ? `Device '${item.name}' restored to the Quarantine queue` : `Entity '${item.name}' restored to active service`,
+      'success', { to: entityUrl(item.entity_type, item.entity_id) })
   }
 
   /**
@@ -335,6 +338,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, unmappedMetric
           {isOpen && (
             <KindRows
               key={found.text}
+              kind={group.kind}
               rows={group.rows}
               columns={columns}
               sort={sort}
@@ -575,10 +579,10 @@ export function EntitiesTab({ showToast, userRole, hasPermission, unmappedMetric
 }
 
 /**
- * An open group's rows, GROUP_PAGE at a time. Memoised, as each row is: a keystroke in the search draws
+ * An open group's rows, GROUP_PAGE at a time, its foot counting them by their kind's name. Memoised, as each row is: a keystroke in the search draws
  * none of them again, and a selection draws the two it changes.
  */
-const KindRows = memo(function KindRows({ rows, columns, sort, Row, selectedId, ...shared }) {
+const KindRows = memo(function KindRows({ kind, rows, columns, sort, Row, selectedId, ...shared }) {
   const [drawn, setDrawn] = useState(GROUP_PAGE)
   const sorted = useMemo(() => sort.apply(rows), [sort, rows])
   return (
@@ -591,6 +595,8 @@ const KindRows = memo(function KindRows({ rows, columns, sort, Row, selectedId, 
               shown={Math.min(drawn, sorted.length)}
               total={sorted.length}
               step={GROUP_PAGE}
+              noun={kindLabel(kind).toLowerCase()}
+              plural={kindPlural(kind).toLowerCase()}
               counted
               onMore={() => setDrawn(n => n + GROUP_PAGE)}
             />
@@ -625,7 +631,7 @@ const ActiveRow = memo(function ActiveRow({ row, selected, onSelect, notify }) {
       <td><CopyableId value={row.id} label="uuid" onNotify={notify} /></td>
       <td>
         {seconds
-          ? <Tooltip text={seconds}><span className="entity-second-ids mono"><OverflowText>{seconds}</OverflowText></span></Tooltip>
+          ? <Tooltip text={seconds} describe={false}><span className="entity-second-ids mono"><OverflowText>{seconds}</OverflowText></span></Tooltip>
           : <span className="cell-meta">—</span>}
       </td>
     </tr>

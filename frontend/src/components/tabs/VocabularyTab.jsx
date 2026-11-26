@@ -35,6 +35,8 @@ export function VocabularyTab({ onUseEntry, hasPermission, showToast }) {
   const [templateElements, setTemplateElements] = useState([])
   const [catalog, setCatalog] = useState([])
   const [loading, setLoading] = useState(true)
+  // Where the Imported tab draws a file's drawer: beside the card, as every page's drawer is.
+  const [drawerHost, setDrawerHost] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -134,11 +136,13 @@ export function VocabularyTab({ onUseEntry, hasPermission, showToast }) {
                 : undefined
             }),
             idtaTemplateTab({ elements: templateElements, onNotify: showToast }),
-            siteVocabularyTab({ canManage: canUse, onUseEntry, showToast })
+            siteVocabularyTab({ canManage: canUse, onUseEntry, showToast, drawerHost })
           ]}
         />
       )}
       </div>
+      {/* A box of its own would be a third column; `contents` makes the drawer a flex item of the row. */}
+      <div ref={setDrawerHost} style={{ display: 'contents' }} />
     </div>
   )
 }

@@ -18,6 +18,7 @@ import {
 import { breakAfterSeparators, formatDateTime, plural } from '../../utils/format'
 import { DERIVED_METRICS_FILE_NAME } from '../../utils/derivedMetricsFile'
 import { modelledMetrics } from '../../utils/deviceTags'
+import { SCHEMA_STATUS, lineageVersionLabel, schemaStatus, schemaVersion, statusLabel } from '../../utils/schemaVersion'
 import {
   typesByCategory, subTypes, unitNames, categoryOfType, CATEGORY_WITH_UNITS, MTCONNECT_CATEGORIES
 } from '../../utils/mtconnect'
@@ -54,8 +55,8 @@ import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { RouteLink } from '../common/RouteLink'
-import { OverflowText } from '../common/OverflowText'
-import { deviceUrl, metricHistoryUrl, metricUrl, tabUrl, trailUrl } from '../../routes'
+import { RecordChip } from '../common/RecordChip'
+import { allSchemaVersionsUrl, deviceUrl, metricHistoryUrl, metricUrl, schemaUrl, tabUrl, trailUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -69,7 +70,7 @@ import {
 } from '../../utils/schemaProperty'
 import {
   IconPlus, IconArchive, IconRefreshCw,
-  IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck, IconHistory, IconChartLine, IconDownload, IconUpload
+  IconPencil, IconBookOpen, IconTag, IconCheck, IconHistory, IconChartLine, IconDownload, IconUpload
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
@@ -214,13 +215,52 @@ const Definition = ({ derivation }) => (
 const AppliesTo = ({ devices, naming }) => (devices.length === 0 ? appliesToNone(naming) : (
   <div className="context-device-list">
     {appliesToDevices(devices).map(d => (
-      <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} title={`Open ${d.asset_name} on the Devices page`}>
-        <IconCpu size={11} />
-        <OverflowText className="chip-name">{d.asset_name}</OverflowText>
-      </RouteLink>
+      <RecordChip key={d.asset_id} kind="devices" to={deviceUrl(d.asset_id)} name={d.asset_name} />
     ))}
   </div>
 ))
+
+/**
+ * A metric this page names, as a chip that opens it on its tab. The icon and the page are given, not
+ * the kind: the kind's key is the catalogue's table name, which drift check 450 reads as a query of it.
+ */
+const MetricChip = ({ metric }) => (
+  <RecordChip icon={<IconTag size={11} />} page="Metrics" to={metricUrl(metric.metric_uuid, metric.deprecated, isDerived(metric))} name={metric.name} />
+)
+
+// Schema versions the drawer's Schemas field draws as chips before one link to the rest.
+const SCHEMAS_SHOWN = 6
+
+/** Newest first: the later made, and of two made together the higher version. */
+const newestFirst = (a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || schemaVersion(b) - schemaVersion(a)
+
+/**
+ * The drawer's Schemas field: the schema versions that model a metric, or name a derived one, newest
+ * first, each a chip with its version that opens it on the Schemas page, and a flag for a draft or a
+ * superseded one. Past SCHEMAS_SHOWN the rest is one link to the Schemas page with every version listed.
+ */
+const SchemasUsing = ({ versions }) => {
+  const newest = [...versions].sort(newestFirst)
+  const rest = newest.length - SCHEMAS_SHOWN
+  return (
+    <div className="context-device-list">
+      {newest.slice(0, SCHEMAS_SHOWN).map(s => (
+        <RecordChip
+          key={s.schema_uuid}
+          kind="schemas"
+          to={schemaUrl(s.schema_uuid)}
+          name={lineageVersionLabel(s)}
+          flag={schemaStatus(s) !== SCHEMA_STATUS.ACTIVE && statusLabel(schemaStatus(s)).toUpperCase()}
+        />
+      ))}
+      {rest > 0 && (
+        <RouteLink className="count-link" to={allSchemaVersionsUrl()} title={`Open the Schemas page with every version listed, to find the other ${plural(rest, 'version')}`}>
+          and {rest} more
+        </RouteLink>
+      )}
+    </div>
+  )
+}
 
 /** The Uncatalogued table's sortable columns. Declared By is a list of devices; Devices counts it. */
 const UNCATALOGUED_SORT = {
@@ -239,6 +279,72 @@ const catalogueDatatypeNote = (row) => {
     return `Its devices declare it as ${datatypeLabel(codes[0])}, which this form does not offer.`
   }
   return null
+}
+
+/**
+ * An Uncatalogued row's drawer: every field the row has, each device it names, and Catalogue, the act
+ * the page offers for it. A name, not a record, so it has no id of its own. `row` is null while closed.
+ */
+function UncataloguedDrawer({ row, canCatalogue, onCatalogue, onClose, onCopy }) {
+  const devices = row?.devices || []
+  const datatypes = row?.datatypes || []
+  const nameProblem = row ? metricNameError(row.metric_name) : null
+  const cannotHold = nameProblem && `The catalog cannot hold this name as the devices declare it. ${nameProblem} Rename it on the devices.`
+  return (
+    <ContextPanel
+      open={!!row}
+      onClose={onClose}
+      type="METRIC"
+      subject="metric"
+      onCopy={onCopy}
+      title={row?.metric_name || ''}
+      icon={<IconTag size={16} />}
+      subtitle={row && <Badge tone="warning" size="sm" title="No catalog row describes it">Uncatalogued</Badge>}
+      warnings={cannotHold ? [{ id: 'name', tone: 'warning', text: cannotHold }] : []}
+      fields={row ? [
+        { label: 'Name', value: row.metric_name, mono: true, copyable: true },
+        { label: 'Devices', value: String(row.device_count), help: 'How many devices declare this name' },
+        {
+          label: 'Declared By',
+          value: devices.length === 0 ? null : (
+            <div className="context-device-list">
+              {devices.map(d => (
+                <RecordChip
+                  key={d.id}
+                  kind="devices"
+                  to={deviceUrl(d.id)}
+                  name={d.name}
+                  note={d.quarantined && 'It is in quarantine, awaiting approval.'}
+                >
+                  {d.quarantined && <span className="cell-meta">quarantined</span>}
+                </RecordChip>
+              ))}
+            </div>
+          ),
+          full: true,
+          help: 'The devices that declare it. Each opens on the Devices page.'
+        },
+        {
+          label: 'Datatype',
+          value: datatypes.length ? datatypes.map(datatypeLabel).join(', ') : null,
+          help: "The datatype the devices' births gave it. Not set means none gave it a value; several mean they disagree."
+        },
+        {
+          label: 'Last Declared',
+          value: formatDateTime(row.last_declared_at),
+          help: 'The latest birth that changed what one of these devices declares. A rebirth declaring the same names does not count.'
+        }
+      ] : []}
+      actions={row ? [{
+        label: 'Catalogue', icon: <IconPlus size={13} />,
+        onClick: () => onCatalogue(row),
+        primary: true,
+        disabled: !canCatalogue || !!nameProblem,
+        title: !canCatalogue ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
+          : cannotHold || 'Add this name to the catalog as a Custom metric'
+      }] : []}
+    />
+  )
 }
 
 /**
@@ -290,6 +396,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [uncatalogued, setUncatalogued] = useState(null)
   const [uncataloguedError, setUncataloguedError] = useState(null)
   const [uncataloguedSearch, setUncataloguedSearch] = useUrlState('name')
+  // The Uncatalogued row whose drawer is open, by its name, which is all it has: `?declared=`. A name
+  // catalogued since leaves the list, and the address with it.
+  const [declaredName, setDeclaredName] = useUrlState('declared', '', { allowed: uncatalogued ? uncatalogued.map(u => u.metric_name) : null })
   // Rows showing every device chip, keyed by metric name.
   const [allDevicesShown, setAllDevicesShown] = useState({})
   // The Uncatalogued row Add Metric was opened from by Catalogue; null for any other opening.
@@ -674,12 +783,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     showToast(`Derived metric '${name}' added to the catalog`, 'success', { to: metricUrl(added?.metric_uuid, false, true) })
   }
 
-  // Counts schemas that model the metric at all, not only those marking it `required`: this is the
-  // impact warning on a destructive confirmation. Uses the same modelledMetrics() the device tags
-  // read. A derived metric is modelled by none: it is named.
-  const usageCountFor = (m) => (isDerived(m)
-    ? schemasNaming(m.name, schemas).length
-    : schemas.filter(s => modelledMetrics(s)?.has(m.name)).length)
+  // The schemas that model the metric at all, not only those marking it `required`: the drawer lists
+  // them, and their count is the impact warning on a destructive confirmation. Uses the same
+  // modelledMetrics() the device tags read. A derived metric is modelled by none: it is named.
+  const schemasUsing = (m) => (isDerived(m)
+    ? schemasNaming(m.name, schemas)
+    : schemas.filter(s => modelledMetrics(s)?.has(m.name)))
+  const usageCountFor = (m) => schemasUsing(m).length
 
   // Deprecate, Restore and Edit run from their dialogs, which show a refusal as it was worded and
   // stay open; each closes its dialog once the write has succeeded.
@@ -775,6 +885,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // By name only, as the catalog's search: a match on a device name could be in a chip not shown.
   const shownUncatalogued = (uncatalogued || []).filter(u =>
     !uncataloguedSearch || u.metric_name.toLowerCase().includes(uncataloguedSearch.trim().toLowerCase()))
+  // The Uncatalogued row whose drawer is open, on its own tab only.
+  const declared = (view === 'uncatalogued' && uncatalogued?.find(u => u.metric_name === declaredName)) || null
+  const selectDeclared = (u) => setDeclaredName(name => (name === u.metric_name ? '' : u.metric_name))
   const selected = catalog.find(m => m.metric_uuid === selectedId) || null
   // Grouped by the name's first `/`-separated segment; ungrouped metrics fall into a trailing bucket.
   const catalogGroups = groupCatalog(activeCatalog)
@@ -1037,7 +1150,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   })
 
   const selectedReplacement = selected?.superseded_by ? metricById.get(selected.superseded_by) : null
-  const selectedUsage = selected ? usageCountFor(selected) : 0
+  const selectedSchemas = selected ? schemasUsing(selected) : []
+  const selectedUsage = selectedSchemas.length
 
   /**
    * One column set for both tabs, fixed (`.metric-table`), so opening a group cannot move a column
@@ -1339,7 +1453,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                             {metricCells(m, true)}
                             <td>
                               {replacement
-                                ? <span className="mono">{breakAfterSeparators(replacement.name)}</span>
+                                ? <MetricChip metric={replacement} />
                                 : <span className="cell-meta">—</span>}
                             </td>
                           </tr>
@@ -1384,7 +1498,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                       <col />
                       <col className="metric-col-datatype fit-700" />
                       <col className="metric-col-declared fit-880" />
-                      {canManageSchema && <col className="metric-col-action" />}
                     </colgroup>
                     <thead>
                       <tr>
@@ -1393,7 +1506,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                         <ColumnHeader title="The devices that declare it. Each opens on the Devices page.">Declared By</ColumnHeader>
                         <SortHeader sort={uncataloguedSort} column="datatype" className="fit-700" title="The datatype the devices' births gave it. A dash means none gave it a value; several mean they disagree.">Datatype</SortHeader>
                         <SortHeader sort={uncataloguedSort} column="last_declared" className="fit-880" title="The latest birth that changed what one of these devices declares. A rebirth declaring the same names does not count.">Last Declared</SortHeader>
-                        {canManageSchema && <th className="row-actions" aria-label="Actions" />}
                       </tr>
                     </thead>
                     <tbody>
@@ -1402,33 +1514,40 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                         const showAll = allDevicesShown[u.metric_name] || devices.length <= UNCATALOGUED_DEVICES_SHOWN + 1
                         const hidden = devices.length - UNCATALOGUED_DEVICES_SHOWN
                         const datatypes = u.datatypes || []
-                        const nameProblem = metricNameError(u.metric_name)
+                        // A row opens its drawer, which holds Catalogue, from anywhere on it but a chip.
                         return (
-                          <tr key={u.metric_name}>
+                          <tr
+                            key={u.metric_name}
+                            className={`row-selectable${declaredName === u.metric_name ? ' row-selected' : ''}`}
+                            tabIndex={0}
+                            onClick={rowSelectHandler(() => selectDeclared(u))}
+                            onKeyDown={(e) => {
+                              if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+                              e.preventDefault()
+                              selectDeclared(u)
+                            }}
+                          >
                             <td><span className="mono">{breakAfterSeparators(u.metric_name)}</span></td>
                             <td className="cell-meta fit-1100">{u.device_count}</td>
                             <td>
                               <div className="context-device-list">
                                 {(showAll ? devices : devices.slice(0, UNCATALOGUED_DEVICES_SHOWN)).map(d => (
-                                  <RouteLink
+                                  <RecordChip
                                     key={d.id}
-                                    className="chip chip-link"
+                                    kind="devices"
                                     to={deviceUrl(d.id)}
-                                    title={`Open ${d.name} on the Devices page${d.quarantined ? '. It is in quarantine, awaiting approval.' : ''}`}
+                                    name={d.name}
+                                    note={d.quarantined && 'It is in quarantine, awaiting approval.'}
                                   >
-                                    <IconCpu size={11} />
-                                    <OverflowText className="chip-name">{d.name}</OverflowText>
                                     {d.quarantined && <span className="cell-meta">quarantined</span>}
-                                  </RouteLink>
+                                  </RecordChip>
                                 ))}
                                 {!showAll && (
-                                  <button
-                                    type="button"
-                                    className="chip chip-link"
+                                  <RecordChip
+                                    icon={null}
+                                    name={`${hidden} more`}
                                     onClick={() => setAllDevicesShown(prev => ({ ...prev, [u.metric_name]: true }))}
-                                  >
-                                    {hidden} more
-                                  </button>
+                                  />
                                 )}
                               </div>
                             </td>
@@ -1436,22 +1555,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                               {datatypes.length ? datatypes.map(datatypeLabel).join(', ') : '—'}
                             </td>
                             <td className="cell-meta fit-880">{formatDateTime(u.last_declared_at)}</td>
-                            {canManageSchema && (
-                              <td className="row-actions">
-                                <Tooltip text={nameProblem
-                                  ? `The catalog cannot hold this name as the devices declare it. ${nameProblem} Rename it on the devices.`
-                                  : 'Add this name to the catalog as a Custom metric'}>
-                                  <button
-                                    type="button"
-                                    className={`btn btn-sm btn-ghost${nameProblem ? ' btn-disabled' : ''}`}
-                                    disabled={!!nameProblem}
-                                    onClick={() => handleCatalogue(u)}
-                                  >
-                                    <IconPlus size={12} /> Catalogue
-                                  </button>
-                                </Tooltip>
-                              </td>
-                            )}
                           </tr>
                         )
                       })}
@@ -1518,23 +1621,36 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           },
           selected.deprecated && {
             label: 'Superseded By',
-            value: selectedReplacement ? selectedReplacement.name : null,
-            mono: true,
+            value: selectedReplacement
+              ? <MetricChip metric={selectedReplacement} />
+              : null,
+            full: Boolean(selectedReplacement),
             help: selectedReplacement ? undefined : 'No replacement was named'
           },
           // A derived metric is named, not modelled: until a schema names it, no device has it.
           isDerived(selected) ? {
             label: 'Schemas',
-            value: selectedUsage > 0 ? `${selectedUsage} name${selectedUsage === 1 ? 's' : ''} it` : (
+            value: selectedUsage > 0 ? <SchemasUsing versions={selectedSchemas} /> : (
               <>No schema names it yet. <RouteLink to={tabUrl('schemas')} className="count-link" title="Open the Schemas page, where a schema's editor names it">View in Schemas</RouteLink></>
             ),
-            help: 'A device has the derived metrics its schemas name.'
+            full: selectedUsage > 0,
+            help: 'The schema versions that name it, newest first. A device has the derived metrics its schemas name.'
           } : {
             label: 'Schemas',
-            value: selectedUsage === 0 ? 'None model it' : `${selectedUsage} model${selectedUsage === 1 ? 's' : ''} it`
+            value: selectedUsage === 0 ? 'None model it' : <SchemasUsing versions={selectedSchemas} />,
+            full: selectedUsage > 0,
+            help: selectedUsage > 0 ? 'The schema versions that model it, newest first. Each opens on the Schemas page.' : undefined
           }
         ].filter(Boolean) : []}
         actions={selected ? metricActions(selected) : []}
+      />
+
+      <UncataloguedDrawer
+        row={declared}
+        canCatalogue={canManageSchema}
+        onCatalogue={handleCatalogue}
+        onClose={() => setDeclaredName('')}
+        onCopy={showToast}
       />
 
       {showAddMetric && (

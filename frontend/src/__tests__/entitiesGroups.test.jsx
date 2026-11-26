@@ -198,13 +198,13 @@ describe('an open group', () => {
     await show({ entities: [...many('devices', 1000, GROUP_PAGE + 5, 'Press'), ...many('metric_catalog', 3000, GROUP_PAGE + 1, 'Axes/TEMP'), AREA] })
     fireEvent.click(heading(/^Devices/))
     expect(names()).toHaveLength(GROUP_PAGE)
-    expect(screen.getByText(`${GROUP_PAGE} of ${GROUP_PAGE + 5}`)).toBeInTheDocument()
+    expect(screen.getByText(`${GROUP_PAGE} devices of ${GROUP_PAGE + 5} devices`)).toBeInTheDocument()
     fireEvent.click(heading(/^Metrics/))
-    fireEvent.click(screen.getByRole('button', { name: 'Show 5 more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show 5 More Devices' }))
     // The devices' alone: the metrics have one still to show.
     expect(names()).toHaveLength(GROUP_PAGE + 5 + GROUP_PAGE)
-    expect(screen.getByText(`All ${GROUP_PAGE + 5} shown.`)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Show 1 more' })).toBeInTheDocument()
+    expect(screen.getByText(`All ${GROUP_PAGE + 5} devices shown.`)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show 1 More Metric' })).toBeInTheDocument()
   })
 
   it('has no foot where it holds no more than the first rows', async () => {
@@ -216,7 +216,7 @@ describe('an open group', () => {
   it('starts at the first rows again when it is opened again', async () => {
     await show({ entities: [...many('devices', 1000, GROUP_PAGE + 5, 'Press'), AREA] })
     fireEvent.click(heading(/^Devices/))
-    fireEvent.click(screen.getByRole('button', { name: 'Show 5 more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show 5 More Devices' }))
     fireEvent.click(heading(/^Devices/))
     fireEvent.click(heading(/^Devices/))
     expect(names()).toHaveLength(GROUP_PAGE)

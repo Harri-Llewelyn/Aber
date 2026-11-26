@@ -2849,8 +2849,8 @@ class TestAddressSpaceReads(unittest.TestCase):
         i3x_service._read_address_space(pg)
         self.assertEqual(
             sorted(relation for relation, _ in pg.calls),
-            ["areas", "cells", "device_locations", "device_schemas", "devices", "gateways",
-             "metric_catalog", "schemas", "system_settings"],
+            ["areas", "cells", "device_locations", "device_nameplate", "device_schemas", "devices",
+             "gateways", "metric_catalog", "schemas", "system_settings"],
         )
 
     def test_the_history_reads_name_real_columns(self):
@@ -3403,7 +3403,11 @@ class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
         # From the DBIRTH datatype; `{}` where none was seen and the catalog has no row.
         self.assertEqual(device["metadata"]["schemaExtensions"],
                          {"Environmental/HUMIDITY": {"type": ["number", "null"]}, "Vendor/COUNT": {}})
-        self.assertEqual(device["metadata"]["system"], {"quarantined": True})
+        self.assertEqual(device["metadata"]["system"], {
+            "quarantined": True,
+            "aasShellId": A.aas_shell_id("dev-ext", i3x_service.AAS_BASE_IRI),
+            "aasGlobalAssetId": A.aas_global_asset_id("dev-ext", i3x_service.AAS_BASE_IRI),
+        })
         self.assertNotIn("quarantined", device["metadata"], "a vendor key belongs in system")
 
     def test_schema_extensions_are_sent_exactly_when_the_device_is_extended(self):
@@ -3421,7 +3425,11 @@ class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
         _, objects, _ = self.space()
         for sid in ("dev-one", "dev-two", "dev-bare"):
             with self.subTest(device=sid):
-                self.assertEqual(objects[sid]["metadata"]["system"], {"quarantined": False})
+                self.assertEqual(objects[sid]["metadata"]["system"], {
+                    "quarantined": False,
+                    "aasShellId": A.aas_shell_id(sid, i3x_service.AAS_BASE_IRI),
+                    "aasGlobalAssetId": A.aas_global_asset_id(sid, i3x_service.AAS_BASE_IRI),
+                })
 
     def test_a_device_with_no_schema_is_the_unmodelled_device(self):
         _, objects, _ = self.space()
@@ -5838,7 +5846,7 @@ class ModelledMetricsContractTest(unittest.TestCase):
     no contract behind it.
 
     `modelledMetrics()` in frontend/src/utils/deviceTags.js, `modelled_metrics()` in
-    ingestion/validate.py and `modelledMetrics()` in supabase/functions/aas-export/index.ts answer
+    ingestion/validate.py and `modelledMetrics()` in supabase/functions/_shared/aas/shell.ts answer
     the same question -- which metrics a schema models. None can import another, so
     `test-harness/fixtures/modelled-metrics.json` is the seam, and each asserts it in its own runner.
 

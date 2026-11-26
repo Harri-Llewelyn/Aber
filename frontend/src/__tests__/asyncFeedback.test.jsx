@@ -292,12 +292,12 @@ describe('ArchiveModal while the archive runs', () => {
     const onArchive = vi.fn(() => new Promise(resolve => { release = resolve }))
     render(
       <ArchiveModal
-        entityType="cells" entityId="cell-1" displayName="Assembly Line 1"
+        type="cell" entityId="cell-1" displayName="Assembly Line 1"
         onArchive={onArchive} onCancel={vi.fn()}
       />
     )
 
-    const btn = screen.getByRole('button', { name: 'Archive' })
+    const btn = screen.getByRole('button', { name: 'Archive Cell' })
     fireEvent.click(btn)
     fireEvent.click(btn)
 

@@ -64,6 +64,11 @@ const filesTable = async () => {
   return table
 }
 const rowOf = (table, name) => within(table).getByText(name).closest('tr')
+/** Opens a file's drawer by its row, where its acts are, and answers the drawer. */
+const openFile = (table, name) => {
+  fireEvent.click(rowOf(table, name))
+  return within(document.querySelector('.context-panel-open'))
+}
 const cells = (row) => [...row.querySelectorAll('td')].map(td => td.textContent)
 
 beforeEach(() => {
@@ -93,7 +98,7 @@ describe('the Imported tab', () => {
     const table = await filesTable()
 
     expect(within(table).getAllByRole('columnheader').map(th => th.textContent)).toEqual([
-      'Vocabulary', 'What it is', 'Version', 'Imported by', 'Imported', 'Concepts', 'In use', 'Definitions', 'Actions'
+      'Vocabulary', 'What it is', 'Version', 'Imported by', 'Imported', 'Concepts', 'In use', 'Definitions'
     ])
     const iso = cells(rowOf(table, 'ISO 22400 KPIs'))
     expect(iso.slice(1, 4)).toEqual(['ISO 22400-2:2014, ISO', '2.1', 'Ada Admin'])
@@ -165,12 +170,13 @@ describe('who may import, remove and share', () => {
     const table = await filesTable()
     const requires = requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
 
+    const iso = openFile(table, 'ISO 22400 KPIs')
     const buttons = [
       screen.getByRole('button', { name: /Import Vocabulary/ }),
-      within(table).getByRole('button', { name: 'Share the definitions of ISO 22400 KPIs' }),
-      within(table).getByRole('button', { name: 'Stop sharing the definitions of Group naming standard' }),
-      within(table).getByRole('button', { name: 'Remove ISO 22400 KPIs' })
+      iso.getByRole('button', { name: 'Share Definitions' }),
+      iso.getByRole('button', { name: 'Remove' })
     ]
+    buttons.push(openFile(table, 'Group naming standard').getByRole('button', { name: 'Stop Sharing' }))
     for (const button of buttons) {
       expect(button).toBeDisabled()
       expect(button).toHaveClass('btn-disabled')
@@ -187,7 +193,7 @@ describe('who may import, remove and share', () => {
     const importButton = screen.getByRole('button', { name: /Import Vocabulary/ })
     expect(importButton).toHaveClass('btn-primary')
     expect(importButton.closest('.filter-bar-actions')).toBeTruthy()
-    expect(within(table).getByRole('button', { name: 'Remove ISO 22400 KPIs' })).not.toBeDisabled()
+    expect(openFile(table, 'ISO 22400 KPIs').getByRole('button', { name: 'Remove' })).not.toBeDisabled()
   })
 
   it('opens the Import dialog from the toolbar', async () => {
@@ -205,7 +211,7 @@ describe('removing a vocabulary', () => {
     const { showToast } = renderTab()
     const table = await filesTable()
 
-    fireEvent.click(within(table).getByRole('button', { name: 'Remove ISO 22400 KPIs' }))
+    fireEvent.click(openFile(table, 'ISO 22400 KPIs').getByRole('button', { name: 'Remove' }))
     const dialog = screen.getByRole('dialog', { name: /Remove Vocabulary/ })
     expect(dialog).toHaveTextContent('1 catalog metric use it')
     expect(dialog).toHaveTextContent('They keep their ids')
@@ -222,7 +228,7 @@ describe('removing a vocabulary', () => {
       : path.startsWith('/api/v1/site-vocabulary-concepts') ? CONCEPTS : []))
     renderTab()
     const table = await filesTable()
-    fireEvent.click(within(table).getByRole('button', { name: 'Remove Group naming standard' }))
+    fireEvent.click(openFile(table, 'Group naming standard').getByRole('button', { name: 'Remove' }))
 
     expect(screen.getByRole('dialog', { name: /Remove Vocabulary/ })).toHaveTextContent('No catalog metric uses it')
   })
@@ -231,7 +237,7 @@ describe('removing a vocabulary', () => {
     api.removeSiteVocabulary.mockRejectedValue(new Error('No imported vocabulary has that id. It may have been removed already.'))
     renderTab()
     const table = await filesTable()
-    fireEvent.click(within(table).getByRole('button', { name: 'Remove ISO 22400 KPIs' }))
+    fireEvent.click(openFile(table, 'ISO 22400 KPIs').getByRole('button', { name: 'Remove' }))
     fireEvent.click(within(screen.getByRole('dialog', { name: /Remove Vocabulary/ })).getByRole('button', { name: 'Remove Vocabulary' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('may have been removed already')
@@ -244,7 +250,7 @@ describe('sharing the definitions', () => {
     const { showToast } = renderTab()
     const table = await filesTable()
 
-    fireEvent.click(within(table).getByRole('button', { name: 'Share the definitions of ISO 22400 KPIs' }))
+    fireEvent.click(openFile(table, 'ISO 22400 KPIs').getByRole('button', { name: 'Share Definitions' }))
     const dialog = screen.getByRole('dialog', { name: /Share the Definitions/ })
     expect(dialog).toHaveTextContent("The licence is the site's responsibility")
     expect(api.setSiteVocabularySharing).not.toHaveBeenCalled()
@@ -261,7 +267,7 @@ describe('sharing the definitions', () => {
     const { showToast } = renderTab()
     const table = await filesTable()
 
-    fireEvent.click(within(table).getByRole('button', { name: 'Stop sharing the definitions of Group naming standard' }))
+    fireEvent.click(openFile(table, 'Group naming standard').getByRole('button', { name: 'Stop Sharing' }))
 
     await waitFor(() => expect(api.setSiteVocabularySharing).toHaveBeenCalledWith('v-own', false))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
@@ -276,7 +282,7 @@ describe('sharing the definitions', () => {
     })
     renderTab()
     const table = await filesTable()
-    fireEvent.click(within(table).getByRole('button', { name: 'Share the definitions of ISO 22400 KPIs' }))
+    fireEvent.click(openFile(table, 'ISO 22400 KPIs').getByRole('button', { name: 'Share Definitions' }))
     fireEvent.click(within(screen.getByRole('dialog', { name: /Share the Definitions/ })).getByRole('button', { name: 'Share Definitions' }))
 
     await waitFor(() => expect(cells(rowOf(screen.getByRole('table'), 'ISO 22400 KPIs'))[7]).toBe('Shared'))

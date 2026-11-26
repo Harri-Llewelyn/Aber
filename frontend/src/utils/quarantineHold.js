@@ -9,10 +9,17 @@ import { SCOPE_AREA_WIDE, SCOPE_CELL, SCOPE_GATEWAY, normaliseScope } from './ce
 export const isHeldAgain = (device) => Boolean(device?.requarantined_at)
 
 /**
- * Why such a device has no Reject, as its Quarantine row and Approve & Onboard say it. The database
- * refuses the delete as well (0337), until the device is archived.
+ * Whether a device is in the Quarantine queue: held, and not archived. An archived device's births are
+ * dropped rather than held, so it is listed with the archived, and Restore returns it to the queue.
  */
-export const HELD_AGAIN_ROW = 'Registered, so no Reject: approving keeps its schemas, nameplate and links.'
+export const isInQueue = (device) => Boolean(device?.is_quarantined) && !device?.is_archived
+
+/**
+ * Why such a device has no Reject, as its Quarantine row and Approve & Onboard say it. The database
+ * refuses the delete as well (0337), until the device is archived: the row's Archive Device.
+ */
+export const HELD_AGAIN_ROW = 'Registered, so no Reject: approving keeps its schemas, nameplate and links. '
+  + 'To delete it, archive it, then delete it from Entities.'
 export const HELD_AGAIN_APPROVAL = 'This device is registered and is held again. Approving lets it in where it was, '
   + 'and keeps its schemas, nameplate and links. It has no Reject, which would delete them.'
 

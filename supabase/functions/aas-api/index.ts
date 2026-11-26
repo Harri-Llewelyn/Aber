@@ -9,43 +9,26 @@
  * rather than looked up; changing AAS_BASE_IRI changes every identifier this deployment has
  * published. A schema's submodel ids carry the lineage's name, not the version's, and a submodel is
  * found by its exact id only. The ConceptDescriptions the shells reference are served from each
- * shell's Environment (conceptDescriptions.ts).
+ * shell's Environment (conceptDescriptions.ts), the Registry's descriptors are projected from the
+ * shells (registry.ts), and Discovery matches asset links against them (discovery.ts).
  * Not served: writes (the dashboard is the authoring interface, with its own audit
- * trail), inlined telemetry values (`LinkedSegment` points at the historian), `.aasx`
- * (aas-export), and the Registry and Discovery interfaces.
+ * trail), inlined telemetry values (`LinkedSegment` points at the historian) and `.aasx`
+ * (aas-export).
  */
 
 import { createClient } from "@supabase/supabase-js";
-import {
-  BASE_IRI,
-  buildEnvironment,
-  type BuiltShell,
-  loadDeviceRecord,
-} from "../_shared/aas/shell.ts";
+import type { BuiltShell } from "../_shared/aas/shell.ts";
 import { checkCaller } from "../_shared/callerCheck.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { logFailure, REQUEST_ID_HEADER, requestIdOf, SERVER_FAILURE } from "../_shared/failure.ts";
 import { conceptDescriptionRoute } from "./conceptDescriptions.ts";
-import { b64urlDecode, json, paged, pageSize, problem } from "./http.ts";
+import { discoveryRoute } from "./discovery.ts";
+import { ClientMistake, identifierIn, json, paged, pageSize, problem } from "./http.ts";
+import { registryRoute } from "./registry.ts";
+import { assetOf, devicePage, shellById, shellFor } from "./shells.ts";
 
 const SERVICE_NAME = "aas-api";
-
-// Identifiers
-
-/** A device's wire id, as `shell.ts` composes it into every identifier it mints. */
-const SPARKPLUG_RE = /^dev[0-9a-f]{21}$/;
-
-/**
- * The `sparkplug_id` an AAS identifier belongs to, or null when it is not one of ours. Accepts the
- * shell form (`<base><id>/shell`) and the submodel form (`<base><id>/submodel/<suffix>`).
- */
-function assetOf(identifier: string): string | null {
-  if (!identifier.startsWith(BASE_IRI)) return null;
-  const rest = identifier.slice(BASE_IRI.length);
-  const first = rest.split("/")[0] ?? "";
-  return SPARKPLUG_RE.test(first) ? first : null;
-}
 
 // ValueOnly serialisation ($value): IDTA-01002's form that strips the metamodel down to the values,
 // so reading a serial number is `body.SerialNumber`.
@@ -110,57 +93,12 @@ function routePath(url: URL): string {
   return path.replace(/\/+$/, "") || "/";
 }
 
-// deno-lint-ignore no-explicit-any
-type Client = any;
-
-/** Build one device's shell, or null when no device carries that wire id. */
-async function shellFor(client: Client, sparkplugId: string): Promise<BuiltShell | null> {
-  const { data, error } = await client
-    .from("devices")
-    .select("id")
-    .eq("sparkplug_id", sparkplugId)
-    .eq("is_archived", false);
-
-  if (error) throw new Error(error.message);
-  const id = data?.[0]?.id;
-  if (!id) return null;
-
-  const record = await loadDeviceRecord(client, id);
-  return record ? buildEnvironment(record) : null;
-}
-
 /**
  * The Submodel with exactly this id in a built shell, or null. Both submodel routes read through it,
  * so an id the shell does not carry, a previous version's among them, is a 404 on each.
  */
 function submodelIn(built: BuiltShell, identifier: string) {
   return built.submodels.find((s) => s.id === identifier) ?? null;
-}
-
-/**
- * One page of devices, keyset-paginated by `id` rather than `created_at`, so the cursor is stable
- * under insertion. A cursor of /shells and /submodels names the next device, and a page is every item
- * of the devices it covers, which stays stable while the data changes. It decides which shells are
- * published, so the ConceptDescription routes list devices through it too.
- */
-async function devicePage(client: Client, limit: number, cursor: string | null) {
-  let query = client
-    .from("devices")
-    .select("id, sparkplug_id")
-    .eq("is_archived", false)
-    .order("id", { ascending: true })
-    // One extra row, to learn whether a next page exists without a second count query.
-    .limit(limit + 1);
-
-  if (cursor) query = query.gt("id", cursor);
-
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-
-  const rows = data ?? [];
-  const hasMore = rows.length > limit;
-  const page = hasMore ? rows.slice(0, limit) : rows;
-  return { page, nextCursor: hasMore ? String(page[page.length - 1].id) : null };
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -177,12 +115,14 @@ export default async function handler(req: Request): Promise<Response> {
   if (path === "/description") {
     return json({
       profiles: [
-        // SSP-002 is the READ-ONLY service specification profile in both cases. Advertising the
+        // SSP-002 is the READ-ONLY service specification profile in each case. Advertising the
         // full SSP-001 would promise the write routes this deliberately does not serve. The
-        // ConceptDescription Repository has no read-only profile (its one is SSP-001, with writes),
-        // so its two GET routes are served and no profile is declared for them.
+        // ConceptDescription Repository and Discovery have no read-only profile (each one's only
+        // profile is SSP-001, with writes), so their GET routes are served and no profile is
+        // declared for them.
         "https://admin-shell.io/aas/API/3/0/AssetAdministrationShellRepositoryServiceSpecification/SSP-002",
         "https://admin-shell.io/aas/API/3/0/SubmodelRepositoryServiceSpecification/SSP-002",
+        "https://admin-shell.io/aas/API/3/0/AssetAdministrationShellRegistryServiceSpecification/SSP-002",
       ],
     });
   }
@@ -190,7 +130,11 @@ export default async function handler(req: Request): Promise<Response> {
   if (req.method !== "GET") {
     // 405 rather than 404: the path may well exist, and a client that gets 404 for a POST will
     // retry the URL rather than stop writing.
-    return problem(405, "This is a read-only AAS repository; only GET is served.", "405");
+    return problem(
+      405,
+      "This AAS service is read-only; only GET is served. Asset data is written in the dashboard, which keeps its Audit Trail.",
+      "405",
+    );
   }
 
   // Everything below is authenticated. Fail closed.
@@ -253,22 +197,13 @@ export default async function handler(req: Request): Promise<Response> {
       const rest = bare.slice("/shells/".length);
       const [encodedId, ...tail] = rest.split("/");
 
-      const identifier = b64urlDecode(decodeURIComponent(encodedId));
+      const identifier = identifierIn(encodedId);
       if (!identifier) {
         return problem(400, "aasIdentifier must be base64url-encoded", "400");
       }
 
-      const sparkplugId = assetOf(identifier);
-      if (!sparkplugId) return problem(404, `No shell with identifier '${identifier}'`, "404");
-
-      const built = await shellFor(supabase, sparkplugId);
+      const built = await shellById(supabase, identifier);
       if (!built) return problem(404, `No shell with identifier '${identifier}'`, "404");
-
-      // The identifier has to match the shell we built, not merely name a device that exists --
-      // otherwise `<base><id>/submodel/Nameplate` would resolve as a shell.
-      if (built.shell.id !== identifier) {
-        return problem(404, `No shell with identifier '${identifier}'`, "404");
-      }
 
       if (tail.length === 0) return json(built.shell);
 
@@ -286,7 +221,7 @@ export default async function handler(req: Request): Promise<Response> {
       // the shell. The submodel must belong to this shell, which is checked here and then handed
       // on.
       if (tail[0] === "submodels" && tail.length >= 2) {
-        const subIdentifier = b64urlDecode(decodeURIComponent(tail[1]));
+        const subIdentifier = identifierIn(tail[1]);
         if (!subIdentifier) {
           return problem(400, "submodelIdentifier must be base64url-encoded", "400");
         }
@@ -305,7 +240,7 @@ export default async function handler(req: Request): Promise<Response> {
       const rest = bare.slice("/submodels/".length);
       const [encodedId, ...tail] = rest.split("/");
 
-      const identifier = b64urlDecode(decodeURIComponent(encodedId));
+      const identifier = identifierIn(encodedId);
       if (!identifier) {
         return problem(400, "submodelIdentifier must be base64url-encoded", "400");
       }
@@ -319,6 +254,14 @@ export default async function handler(req: Request): Promise<Response> {
 
       return submodelResponse(submodel, tail, wantsValue);
     }
+
+    // GET /shell-descriptors[/...]: the Registry, a descriptor of each shell /shells serves.
+    const registered = await registryRoute(supabase, path, url, limit, cursor);
+    if (registered) return registered;
+
+    // GET /lookup/shells[/{aasIdentifier}]: Discovery, from asset links to shell ids and back.
+    const discovered = await discoveryRoute(supabase, path, url, limit, cursor);
+    if (discovered) return discovered;
 
     // GET /concept-descriptions[/{cdIdentifier}]: the ConceptDescriptions the shells reference.
     const described = await conceptDescriptionRoute(supabase, path, limit, cursor, devicePage);
@@ -347,6 +290,12 @@ export default async function handler(req: Request): Promise<Response> {
           "/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}",
           "/concept-descriptions",
           "/concept-descriptions/{cdIdentifier}",
+          "/shell-descriptors",
+          "/shell-descriptors/{aasIdentifier}",
+          "/shell-descriptors/{aasIdentifier}/submodel-descriptors",
+          "/shell-descriptors/{aasIdentifier}/submodel-descriptors/{submodelIdentifier}",
+          "/lookup/shells",
+          "/lookup/shells/{aasIdentifier}",
         ],
         note: "Identifiers are base64url-encoded. Append /$value for the ValueOnly serialisation.",
       }, 404);
@@ -354,6 +303,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     return problem(404, `Not found: ${path}`, "404");
   } catch (err) {
+    if (err instanceof ClientMistake) return err.answer;
     // The specification's shape, with the request id as the message's correlationId and in the
     // header; the error itself goes to the log under that id.
     const requestId = requestIdOf(req);

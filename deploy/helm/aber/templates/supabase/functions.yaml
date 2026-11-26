@@ -116,6 +116,12 @@ spec:
             # can reach: the ingress, not the in-cluster gateway.
             - name: AAS_HISTORIAN_ENDPOINT
               value: {{ .Values.supabaseFunctions.aas.historianEndpoint | default (printf "%s/rest/v1/telemetry" $supabasePublic) | quote }}
+            {{- /* The i3X server's history route, for a second LinkedSegment beside the one above.
+                   Blank while the chart routes no i3X server, as the dashboard's VITE_I3X_URL is,
+                   and then the shell carries the PostgREST segment alone. */}}
+            {{- $i3xUrl := ternary (include "aber.i3xUrl" .) "" (and .Values.i3xService.enabled (ne (index .Values.ingress.routes "i3x") false)) }}
+            - name: AAS_I3X_HISTORY_ENDPOINT
+              value: {{ ternary (printf "%s/v1/objects/history" $i3xUrl) "" (ne $i3xUrl "") | quote }}
             # Public base for the 3D models a VisualRepresentation submodel points at. It CANNOT be
             # derived from SUPABASE_URL above: in-cluster that is http://supabase-envoy:8000, which
             # resolves for this worker and for nothing outside the cluster, so a shell handed to a
@@ -129,6 +135,17 @@ spec:
                    back to a URL reference. The .aasx still validated, which is why nothing failed. */}}
             - name: AAS_MAX_BUNDLED_MODEL_BYTES
               value: {{ .Values.supabaseFunctions.aas.maxBundledModelBytes | int64 | quote }}
+            {{- /* Where a device's live readings are read, for the Asset Interfaces Description in
+                   aas-api's shells. main/index.ts gives them to aas-api alone. Each is blank while
+                   what it names is off: the UNS bridge's broker while ingestion publishes the bridge
+                   and the broker is published, and the i3X server while the chart routes one, as
+                   the dashboard's VITE_I3X_URL is. */}}
+            - name: AAS_UNS_BROKER_URL
+              value: {{ ternary (include "aber.brokerPublicUrl" .) "" (and .Values.ingestion.enabled (has (.Values.ingestion.unsMqttEnabled | toString | trim | lower) (list "1" "true" "yes" "on"))) | quote }}
+            - name: AAS_UNS_TOPIC_ROOT
+              value: {{ include "aber.unsTopicRoot" . | quote }}
+            - name: AAS_I3X_URL
+              value: {{ ternary (include "aber.i3xUrl" .) "" (and .Values.i3xService.enabled (ne (index .Values.ingress.routes "i3x") false)) | quote }}
             {{/*
               =====================================================================================
               REMOTE GATEWAY ENROLMENT (enroll-gateway, gateway-bundle).

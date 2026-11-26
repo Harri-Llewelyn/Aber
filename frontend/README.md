@@ -144,7 +144,8 @@ Only what acts looks clickable. `.mono` is a typeface and takes the text colour;
 means a real link (the System page's open chip, a `.count-link`). An id that copies is a
 `CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A value a
 dialog hands over is a `CopyField` ([A value to copy](#a-value-to-copy)). A long
-id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`). A cut value slides on
+id passes `truncate="start"` to keep its last 24 characters and cut the middle
+(`https://aber.lo…s/iso22400/EFFECTIVENESS`). A cut value slides on
 hover or focus (`OverflowText`); with `truncate="start"` the cut part slides towards the end it keeps.
 The copy and the aria label always carry the full value. The tooltip carries it whenever the chip is
 cut, measured as the pointer or focus arrives, and otherwise says "Click to copy this {label}". A read-only or disabled `.form-control` takes the page background and muted
@@ -344,8 +345,8 @@ page: "Gateways · 81 · last deleted 25 Nov". Drift check `600` refuses a page'
   goes the groups are as they were. Which are open is kept while the page is open, and not in the address.
 - **A closed group still shows what happened in it.** On the Audit Trail a closed section's heading
   row keeps one summary track, with every event of its lanes clustered as a lane's are. Opening an
-  event there opens the section too. The History page is to group its lanes by area and cell
-  under the same heading.
+  event there opens the section too. History's Overview groups its lanes by area and cell under the
+  same heading, and a closed group's row carries its devices' counts merged.
 - **Which groups are closed belongs to the viewer, in this browser.** The Audit Trail keeps its
   closed sections in localStorage (`aber_audit_trail_closed_sections`, read and written inside
   `try`), not in the address, so a shared link opens every section. Expand all and Collapse all
@@ -1129,6 +1130,14 @@ The event drawer moves along a lane and between lanes, like a cursor in a grid:
   Page Down still do.
 - **A lane's name opens its newest loaded event,** the change a reader most often wants, and ←
   steps back from there. The name is the label's button, named "Open the latest change to Line 1".
+- **An event the address names opens whatever is loaded,** as a run does on Backups. One the list does
+  not hold is read on its own (`api.auditTrailEvent()`): the row by id from `audit_trail`, then its
+  entity's newest page through the page's own read, or the page that ends at it, so it has a loaded
+  row's class and transaction size. ← and → step along what was read, and the tooltips at its ends
+  say when more was not read. On arrival (`useArrivalSelection`, once for each) a kind, action,
+  person or class filter, a window or the hidden deleted entities that leave it out are cleared. A
+  search is cleared only when the page's own read for its entity under the filters does not return
+  it. No row, or one the policies hide, opens the drawer to say so.
 - **They stand down** where `shortcutAllowed` (`shortcuts.js`) says, so a dialog in front, a field,
   a select and Ctrl, Cmd or Alt all keep them, and for a key a control has already taken. They are
   not character keys, so the Single-key shortcuts setting does not cover them.
@@ -1715,9 +1724,9 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`, `sort`; `device` |
 | Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
-| Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
+| Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort`; `declared`, the name a row's drawer is open on |
 | Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter; `built-in` for the Built-in tab | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new` and `/automations/built-in`, for an automation whose id is `new` or `built-in`. Built-in: `search`, `sort`, `rule` (a built-in alert's uid, which opens its drawer) |
-| Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
+| Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its drawer and its concepts |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
 | Entities | `archived`, `retired` | `find`, which the three tabs share; `kind`, the groups that start open; `sort`; `entity` |
@@ -1841,7 +1850,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Entities' Archived tab. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The toolbar is Devices': search, Status and the page's toggles in the row, and Lifecycle, Type and the Playback check in the Filters panel, so it keeps to one line at 1366px. The seeded Playback gateway, found by `is_shadow`, is left off the list until **Show Playback gateway** is on (`utils/playbackGateway.js`), as replay lanes are on Devices. Its drawer opening turns that on. Something wrong with it lists it with the check off, and the check says so. It is taken out after the facets have counted, so every count includes it. It reads Playing back or Idle rather than Offline. **Release waiting** lists the gateways with a platform release to approve (`releaseWaits()`, which the drawer's Platform row reads too). It is a facet of one value, so its count is of those the other filters let through, and it is drawn only while that is above zero or it is on |
-| `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. **Approve & Onboard** starts from the device's own location and gateway when it was registered before (`requarantined_at`), and from Follow Gateway when nobody registered it (`utils/quarantineHold.js`). For a `GATEWAY_MISMATCH` it names the gateway the device came through under the picker, which stays on the one it is bound to. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
+| `DevicesTab` | One card, tabs **Registered** and **Quarantine**. A device in the Quarantine queue renders **on the Quarantine tab only** — `filteredAssets` excludes it (`isInQueue()`) before every other filter, so no filter combination can list one twice. An archived device is not in the queue, whose births it no longer holds, and is listed with the archived. A registered device held again has **Archive Device** in its row for Reject, the details panel's `ArchiveModal`, and is then deleted from Entities. **Approve & Onboard** starts from the device's own location and gateway when it was registered before (`requarantined_at`), and from Follow Gateway when nobody registered it (`utils/quarantineHold.js`). For a `GATEWAY_MISMATCH` it names the gateway the device came through under the picker, which stays on the one it is bound to. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the form for a schema, and Upload the file** ([Schemas read and write YAML](#schemas-read-and-write-yaml)); changing one is versioning, not editing |
 | `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example. The page's second tab, **Built-in**, is `BuiltInAlerts` and its drawer `BuiltInAlertDrawer`: the alerts Aber raises about itself, read-only ([The Built-in tab](#the-built-in-tab-lists-the-alerts-aber-raises-about-itself)) |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
@@ -2692,8 +2701,10 @@ its current value; Export saves its values. The database's rules are in
   (`appliesToDevices()`) and with no cap, as the Schemas drawer's Devices field lists them. The field's
   help says the rule once (`APPLIES_TO_RULE`). With none, the field says why: no schema names the metric, or
   none in service is bound to one that does (`appliesToNone()`).
-- **Its Schemas field says how many versions name it** ("2 name it", `schemasNaming()`), as a measured
-  metric's says how many model it. With none it says "No schema names it yet", with a link to the Schemas
+- **Its Schemas field lists the versions that name it** (`schemasNaming()`), as a measured metric's lists
+  the versions that model it: a `RecordChip` each with its version, newest first, that opens it on the
+  Schemas page. Past six, "and N more" links to the Schemas page with every version listed, as the page
+  cannot search by a metric. With none it says "No schema names it yet", with a link to the Schemas
   page: until one does, no device has the metric.
 - `derivedMetricReads.test.js`, `historyDerivedMetric.test.jsx`, `devicesDerivedValues.test.jsx`,
   `derivedMetrics.test.jsx` and `metricAppliesToChips.test.jsx` hold the rule, the reads, the tag, the
@@ -2801,8 +2812,9 @@ page's help is `help/pages/automations.md`.
   `set_automation_enabled()` and ends with a toast that links to the automation. The toolbar is
   search, then **Upload**, **Export** and **New Automation** last. **Export** writes the rows ticked,
   or every automation when none is.
-- **One automation** is the YAML in the editor, its recent firings with each alert's labels and
-  values, and a link to its history in the Audit Trail by its row's uuid. **Save** opens
+- **One automation** is the YAML in the editor and its recent firings with each alert's labels and
+  values. Its toolbar's acts are Enable or Disable, Export, **View in Audit Trail** (its history by
+  its row's uuid, for a reader of the trail, drawn as the buttons beside it), Delete and Save. **Save** opens
   `ApplyAutomationsModal`, which parses the text, calls `apply_automations(doc, true)` and lists each
   automation as new, changed, unchanged or refused with every reason and its line. Its confirm repeats
   the act and the count (**Save 1 Automation**, **Apply 3 Automations**) and applies the same document with
@@ -3032,7 +3044,7 @@ in "building management system".
 - **Scroll.** Every page scrolls inside its card, Access Control, System and Approvals included.
 - **Counts.** None on a card's heading, a section that does not close, or a tab. A group that opens and
   closes says how many rows it holds, on every page, because a closed one hides them. A count stays
-  where it states what is loaded ("30 of 55" beside Show more), what a filter value or toggle holds
+  where it states what is loaded ("30 runs of 55 runs" beside Show 25 More Runs), what a filter value or toggle holds
   (Active 4 beside its checkbox, "Needs attention (3)"), what an export will write, or how much work is
   waiting (a Quarantine or Awaiting tab, the sidebar).
 - **Queues are tabs.** Devices' quarantine queue is its Quarantine tab, not a card above the roster;
@@ -3060,6 +3072,14 @@ in "building management system".
   stands at the end. A caller passes `icon` only with a reason, said beside it: the strip of a
   running recording, playback or backup names its job. Drift check 611 refuses a callout written by
   hand.
+- **A label that could be a link is one**: a label that names or counts records shows the records, each
+  a link to its page or drawer, and past a handful the rest is one link to their list.
+- **A chip that opens a record is a `RecordChip`.** `common/RecordChip.jsx` draws every one, in a
+  drawer's field, a Site Map panel or a table's cell: the kind's icon, the name as an `OverflowText`, a
+  status dot and flags in words where they apply, and the tooltip "Open {name} on the {page} page",
+  with a sentence after it where there is more to say (a device's state or alert). Without a link it
+  is a button that acts on the page: the Site Map's cell chip, the Audit Trail's Changed by, a list's
+  "N more". Drift check 620 refuses one written by hand.
 - **Callouts in a dialog.** A callout in a dialog's body leaves the gap it has above itself (12px)
   before a table, a list or a form, so a banner never sits flush on what it qualifies. One rule in
   `App.css` does it for every dialog. A replay lane that is offline gets an info callout, not the
@@ -3142,7 +3162,7 @@ that describes a component keeps the detail, and *Not* names what to use instead
 | `EmptyState` | What a list says with no rows: none yet, or none match | Rows not read yet: `LoadingState` |
 | `ExpandAllToggle` | Opens or closes every group of a list | One group: `GroupHeading` |
 | `GroupHeading` | A group's name and count, which opens and closes its rows | Every group at once: `ExpandAllToggle` |
-| `ListFoot` | Show more, under a list that loads in steps | |
+| `ListFoot` | Show 30 More Runs, under a list that loads in steps, naming what it counts | |
 | `LoadingState` | A list's first load | No rows: `EmptyState` |
 | `OverflowText` | One line that may not fit: cut, then slid on hover or focus | |
 | `SessionsTable` | Sessions, with End | |
@@ -3218,6 +3238,7 @@ The charts are History's alone so far, under [Used by one page](#used-by-one-pag
 | :--- | :--- | :--- |
 | `CardHeading` | A page's icon, title and one sentence, stated once | |
 | `GlobalSearch` | The top bar's search: pages, settings, help and records | One list's search: `SearchInput` |
+| `RecordChip` | A record another names, as a chip that opens it | A link in running text: `RouteLink` |
 | `RouteLink` | A link to a page of the dashboard | The help: `HelpLink` |
 | `Sidebar` | The rail of pages, with each page's tabs | |
 | `TabStrip` | A page's tabs, each with an address | A choice within a page: `SegmentedControl` |
@@ -3881,11 +3902,9 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
   | Capture | Gateways | Gateway, Stored capture | | | | Type | | Sparkplug ID |
   | Capture | Devices | Device, Stored capture | | | Gateway | Type | | Sparkplug ID |
   | Areas | areas | Area, Devices | | | | | Cells | Plan |
-  | Vocabulary | Imported | Vocabulary, Actions | | | Imported by, Imported | Concepts, In use | What it is, Version | Definitions |
+  | Vocabulary | Imported | Vocabulary | | | Imported by, Imported | Concepts, In use | What it is, Version | Definitions |
 
-  Uncatalogued and Imported rows have no drawer: a hidden column there is out of sight until the card
-  widens. Automations' rows open the automation's
-  own page, which has every field.
+  Automations' rows open the automation's own page, which has every field.
 - **Every table header, group band and section band is one opaque colour, `--bg-base`**, sticky or
   not. A tint (`--bg-glass`, or the card colour mixed with text) was tried and either vanished on a
   white card or showed rows through a pinned header. A header never takes an inline background.
@@ -3956,7 +3975,7 @@ shows it in the dialog's error slot, as it was worded. Nothing is toasted behind
 
 ## Testing
 
-Vitest with globals enabled and a jsdom environment. **3,851 tests across 162 files** at the last count (2026-10-11).
+Vitest with globals enabled and a jsdom environment. **462 test files** at the last count (2026-11-26).
 
 The suite treats an unhandled promise rejection as a defect, not noise — Vitest reports them
 separately and they can mask real failures.
