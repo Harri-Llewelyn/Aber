@@ -194,7 +194,7 @@ describe('proposing a change from a device', () => {
     await show(asOperator, [device({ active_gateway_id: 'gw-gone', gateway_name: null })])
     openPanel()
     clickAction('Propose a Change')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
     expect(fixedField('Serving Gateway').querySelector('.form-static')).toHaveTextContent(/^gw-gone$/)
   })
 
@@ -202,7 +202,7 @@ describe('proposing a change from a device', () => {
     await show(asOperator, [device({ active_gateway_id: null })])
     openPanel()
     clickAction('Propose a Change')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
     expect(fixedField('Serving Gateway').querySelector('.form-static')).toHaveTextContent(/^Not set$/)
   })
 
