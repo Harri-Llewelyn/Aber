@@ -2965,8 +2965,9 @@ level all say it. "Campus" may gloss it in running text and tooltips, as in "the
 campus", but never names a control, a setting or an identifier. "Area" is used everywhere except
 in "building management system".
 
-- **Look first.** Before building a feature or an element, look for something similar: `components/common`,
-  `hooks`, `utils`, `App.css` and the sibling pages. Use it, or extend it for every caller. A second one drawn
+- **Look first.** Before building a feature or an element, look for something similar: `components/common`
+  and `hooks` ([What the dashboard already has](#what-the-dashboard-already-has) lists them), `utils`, `App.css`
+  and the sibling pages. Use it, or extend it for every caller. A second one drawn
   apart is two looks for one thing. The pull request says what was found, and whether it was used, extended or
   could not be ([`CONTRIBUTING.md`](../CONTRIBUTING.md#three-rules-worth-stating-up-front)).
 - **Page identity.** A page has one card. Its icon, title and one-sentence description are the
@@ -3020,6 +3021,216 @@ counts always showing, including on headings (a group that opens and closes says
 2026-11-25); Settings and Vocabulary keeping a `PageHeading`;
 Access Control, System and Approvals scrolling the page; the Devices queue as a card above the
 roster.
+
+### What the dashboard already has
+
+Look here before you build one: in the group it belongs to, then under
+[Used by one page](#used-by-one-page). Every file of `src/components/common` is below once; the section
+that describes a component keeps the detail, and *Not* names what to use instead. A component added to
+`common` goes in the table, in its place by name (drift check 610).
+
+#### A dialog
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `Modal` | Every dialog's frame: header, body that scrolls, problem line, error slot, footer | A question with two answers: `ConfirmModal`, in `components/modals` |
+| `TypedGate` | The name typed before an act that cannot be undone | |
+
+#### A form field
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `AutomationEditor` | A YAML editor: highlighting, completion, each refusal marked on its line | |
+| `CredentialField` | A stored secret's field, which never shows what is stored | A secret shown once: `CopyField` |
+| `FieldError` | What is wrong with one field, under it | The form's first problem: `FormProblem` |
+| `FormProblem` | A form's first problem, above its buttons; `Modal` draws one | One field's error: `FieldError` |
+| `HoldToReveal` | Shows a typed password while its button is held | |
+| `RequiredMark` | The asterisk after a required field's label | |
+| `SaveDiscard` | Save and Discard for an unsaved choice, on a page or in a drawer | |
+| `SegmentedControl` | One choice from a few, as one pill of segments | A page's tabs: `TabStrip` |
+| `SemanticIdField` | A semantic id and its reference type, with the vocabulary search | |
+
+#### A picker
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `ListPicker` | A long list to choose from: search, filters and rows that scroll | Metrics: `MetricPicker`. Schemas: `SchemaPicker` |
+| `LocationPicker` | Where a device or gateway is: a cell, an area or the site | A place on a plan: `CellPlacementPicker` |
+| `MetricPicker` | The catalog's metrics to choose from, grouped, with a standard filter | |
+
+#### A file
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `ApplyResults` | What each item of an uploaded file would become, before it is applied | |
+| `DropZone` | One file, dropped or chosen; `useFilePicker` where a zone has no place | |
+
+#### A list or a table
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `AppApprovalsTable` | Approvals of apps that sign people in, with Revoke | |
+| `EmptyState` | What a list says with no rows: none yet, or none match | Rows not read yet: `LoadingState` |
+| `ExpandAllToggle` | Opens or closes every group of a list | One group: `GroupHeading` |
+| `GroupHeading` | A group's name and count, which opens and closes its rows | Every group at once: `ExpandAllToggle` |
+| `ListFoot` | Show more, under a list that loads in steps | |
+| `LoadingState` | A list's first load | No rows: `EmptyState` |
+| `OverflowText` | One line that may not fit: cut, then slid on hover or focus | |
+| `SessionsTable` | Sessions, with End | |
+| `SortHeader` | A column that sorts; `ColumnHeader` only says what its column holds | |
+| `SummaryCard` | The row of figures above a page's list (`SummaryCards`) | |
+| `TagList` | Tags in a cell, cut to a few with +N for the rest | |
+
+#### Filters
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `ClearFilters` | Clear filters (N), at the end of a toolbar | |
+| `FilterChecklist` | `FilterDropdown` in a toolbar; `FilterList` and `FilterCheck` in a Filters panel | A choice in a form: `ListPicker` |
+| `FiltersPopover` | The Filters button and panel; `ToolbarPopover` is any toolbar button's panel | |
+| `SearchInput` | A list's search box, which `/` focuses | The whole site's records: `GlobalSearch` |
+
+#### A drawer
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `ContextPanel` | Every drawer's frame: fields, warnings, sections and pinned actions | |
+| `GatewayRepositoryPanel` | A gateway's repository in the forge, and what its appliance runs | |
+| `SuppressionWindows` | The Suppression windows section | |
+| `UnsPlace` | The Unified Namespace rows, and a rename's note | |
+
+#### Status, badges and messages
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `AlertPill` | The top bar's alert counter, and the list behind it | |
+| `Badge` | A status or category chip; `ArchivedBadge` is ARCHIVED | A gateway's status: `StatusBadge`. A derived metric: `DerivedTag` |
+| `ConnectionStrip` | The row that says the page has stopped updating | |
+| `DerivedTag` | Marks a derived metric wherever one is named | |
+| `NotificationHistory` | The top bar's bell, and the list behind it | |
+| `PersonName` | A person's display name, with their email | The account's own mark: `AccountAvatar` |
+| `Toast` | The toasts in the corner; a page calls the showToast it is given | |
+
+#### A button, or a value to copy
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `ActionButton` | A button that says it is running, or who may press it | An icon alone: `TipButton` |
+| `ApplianceCommand` | A command to run on a gateway's appliance | Any other block of text: `CopyBlock` |
+| `CopyableId` | An id in a row or a drawer, copied by a click | A named value in a dialog: `CopyField` |
+| `CopyField` | A named value to copy; `CopyBlock` is a block of text | An id in a row: `CopyableId` |
+| `TipButton` | An icon-only button with its tooltip | A button with words: `ActionButton` |
+
+#### Time and charts
+
+The charts are History's alone so far, under [Used by one page](#used-by-one-page).
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `RefreshButton` | Refresh now, and how often it happens by itself | |
+| `TimeWindowControl` | The period a page shows: arrows, spans and a choice of range | |
+
+#### Help and tooltips
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `HelpBrowser` | What the help panel shows: its search, contents and pages | |
+| `HelpLink` | A link that opens the help; `OnlineLink` and `RepoLink` leave the dashboard | A link to a page: `RouteLink` |
+| `HelpMarkdown` | Draws one help file | |
+| `HelpPanel` | The help drawer | A page's drawer: `ContextPanel` |
+| `HelpTip` | The ? beside a label, explained on demand | A control's own tooltip: `Tooltip` |
+| `Tooltip` | The one tooltip on a control, never a `title` | A label's explanation: `HelpTip` |
+
+#### Navigation
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `CardHeading` | A page's icon, title and one sentence, stated once | |
+| `GlobalSearch` | The top bar's search: pages, settings, help and records | One list's search: `SearchInput` |
+| `RouteLink` | A link to a page of the dashboard | The help: `HelpLink` |
+| `Sidebar` | The rail of pages, with each page's tabs | |
+| `TabStrip` | A page's tabs, each with an address | A choice within a page: `SegmentedControl` |
+
+#### A picture or a plan
+
+| Component | What it is for | Not |
+| :--- | :--- | :--- |
+| `AberMark` | Aber's emblem | |
+| `AccountAvatar` | The account's round mark: its picture, initials or icon | Someone named in a list: `PersonName` |
+| `AreaPlan` | An area's plan, with an `AreaPlanPin` for each pin | |
+| `AreaPlanPreview` | A plan in a drawer, read-only, with Expand | |
+| `ExpandButton` | The corner button that opens a plan window-sized | |
+| `Icons` | Every icon, each with what it stands for | |
+| `PlanViewer` | A plan window-sized, to zoom and move | |
+
+#### Used by one page
+
+A page is an entry of `TABS` in `navigation.jsx`, with the tabs, drawers and dialogs that are its own.
+The sign-in screens count as one. What `App.jsx` draws round every page is in the groups above. When a
+second page uses one of these, its row moves to the group it belongs to.
+
+| Page | Component | What it is for | Not |
+| :--- | :--- | :--- | :--- |
+| Areas | `AreaPlanPanel` | An area's plan in its drawer: attach, turn, replace, remove | |
+| Automations | `BuiltInStateBadge` | A built-in alert's state, in words | |
+| Cells | `CellPlacementPicker` | A cell's place, by clicking its area's plan | Which cell or area: `LocationPicker` |
+| Devices | `DeviceDerivedValues` | The drawer's derived metrics, with their values now | |
+| Devices | `Model3DUploader` | A device's 3D model in a dialog: the viewer, or the drop zone | |
+| Devices | `Model3DViewer` | The 3D model itself, to turn | |
+| Devices | `QuarantinePayloadCell` | A held birth's metric names, in a cell | Any other tags: `TagList` |
+| Devices | `SchemaPicker` | Schemas to choose from, found by name or by a metric | |
+| Gateways | `StatusBadge` | A gateway's status chip | Any other status: `Badge` |
+| History | `alertBands` | When an alert was firing, as bands on a chart | |
+| History | `AlertKey` | The key to the alert bands, with a link to the alerts | |
+| History | `ChartTimeline` | One time axis over a page's charts | |
+| History | `DeviceStatusDot` | A device's status dot, as the Site Map draws it | |
+| History | `HistoryGroupHead` | A group of charts' heading, with its bucket choice | A group of rows: `GroupHeading` |
+| History | `HourHeatmap` | A row a machine and a column an hour of the day | |
+| History | `NumberKey` | A number chart's lowest, highest, mean and median, under it | |
+| History | `ReplayLanesCheck` | Show replay lanes, in a Filters panel | Any other check: `FilterCheck` |
+| History | `SmallMultiples` | One metric across several machines, a chart each on one scale | |
+| History | `StateBand` | A text or flag metric, as a band of its values | |
+| History | `TimeSeriesChart` | One metric over the window, drawn by uPlot | |
+| Metrics | `FurtherSemanticIds` | A metric's further semantic ids, as text or to edit | Its own id: `SemanticIdField` |
+| Metrics | `PermittedValuesField` | A metric's permitted values, as one line of text | |
+| Schemas | `PropertyRange` | A numeric metric's valid range, beside its row | |
+| Schemas | `SchemaDerivedMetrics` | A schema's derived metrics, chosen or read | |
+| Schemas | `SchemaEditor` | A schema's form, to build, edit or read | |
+| Sign-in | `AmbientPipeline` | The moving background behind the sign-in card | |
+| Vocabulary | `ASHRAE223VocabularyPanel` | The ASHRAE 223P tab | |
+| Vocabulary | `IDTATemplatePanel` | The Templates tab | |
+| Vocabulary | `ISO22400VocabularyPanel` | The ISO 22400 tab | |
+| Vocabulary | `MTConnectVocabularyPanel` | The MTConnect tab | |
+| Vocabulary | `OPCUAVocabularyPanel` | The OPC UA tab | |
+| Vocabulary | `QUDTVocabularyPanel` | The QUDT tab | |
+| Vocabulary | `SiteVocabularyPanel` | The Imported tab | |
+| Vocabulary | `VDA5050VocabularyPanel` | The VDA 5050 tab | |
+| Vocabulary | `VocabularyPanel` | The page's card: its tabs, search and sections | |
+| Vocabulary | `VocabularySections` | A vocabulary's sections, and a chip for each entry | |
+
+#### Hooks a page is built with
+
+The hooks of `src/hooks` that two pages or more call themselves. Left out are what `App.jsx` alone
+mounts, what one page uses, and what a component above calls for you.
+
+| Hook | What it is for | Not |
+| :--- | :--- | :--- |
+| `useApplyPreview` | A file's dry run, and what an apply dialog says of it | Reading the file: `useYamlFile` |
+| `useArrivalSelection` | Opens the drawer of the record a link named | The open drawer's address: `useUrlState` |
+| `useBandDrag` | A band dragged across a timeline | |
+| `useClockTick` | Draws again on an interval, for words such as "12s ago" | Reading again: `usePolling` |
+| `useDisplayNames` | The names of the people whose ids a page shows | |
+| `useFormCheck` | What a form still needs, said by the press that asks for it | |
+| `useOpenGroups` | Which groups of a list are open, for `GroupHeading` | |
+| `usePendingAction` | One button's running state, started once; `usePendingKey` for a list's | |
+| `usePermissions` | What the role may do; `requiresRolesTitle` says who may | |
+| `usePolling` | Reads again on an interval, and slows down after failures | As a row changes: `useRealtimeTable` |
+| `useRealtimeTable` | Reads again as a table's rows change | On an interval: `usePolling`, which it does not replace |
+| `useSettings` | `useSetting`: one runtime setting, or its default | |
+| `useTableSort` | A table's sort, in the address; `useLocalTableSort` in a dialog | |
+| `useTimeWindow` | A page's time window, in the address | |
+| `useUrlState` | A filter, tab or open record in the address (`useUrlList`, `useUrlTab`) | |
+| `useYamlFile` | The YAML file a dialog reads, for its `DropZone` | |
 
 ---
 
