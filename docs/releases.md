@@ -149,10 +149,14 @@ anything?" — is answered by the first section or by its absence:
 | Heading | What it holds |
 | :--- | :--- |
 | **Action required before upgrading** | Anything that is not `helm upgrade`. Absent when there is nothing |
-| **Deprecated** | What still works, what replaces it, and the release it goes away in |
+| **Deprecated** | What still works, what replaces it, and the issue that will remove it |
 | **Fixed** | Defects, each naming the symptom a site would have seen |
 | **Added** | New capability, and the values key that turns it on |
 | **Images and chart** | The published tags, so a pull can be checked against the release |
+
+**The notes make no promise about a later release.** Milestones and issues change, so a deprecation
+says it "will be removed in a later release" and links the issue, and names no version.
+[Deprecation](#deprecation) still sets the earliest release that may remove it.
 
 [`.github/RELEASE_TEMPLATE.md`](../.github/RELEASE_TEMPLATE.md) is that skeleton. The release
 workflow opens the release as a draft from it, with `aber-<version>-sbom.tar.gz` attached: every
