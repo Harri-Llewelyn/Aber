@@ -10,6 +10,7 @@ import { sparkplugToXsd } from "./sparkplugToXsd.ts";
 import { QUDT_UNIT_IDS } from "./qudtUnits.ts";
 import { modelContentType, modelFileName } from "./model3dContentType.ts";
 import { assignSubmodelKeys } from "./submodelKeys.ts";
+import { templateElementIds, templateSemanticIds } from "../schemaTemplate.ts";
 
 // Configuration, read at module load and so per worker: main/index.ts spawns one worker per
 // function with only the variables its registry entry names, so both aas-export and aas-api must
@@ -661,6 +662,7 @@ export function conceptIdsFor(
   const ids = new Set<string>();
   for (const schema of rows.schemas) {
     if (schema.semantic_id) ids.add(String(schema.semantic_id));
+    for (const id of templateElementIds([schema])) ids.add(id);
     const modelled = modelledMetrics(
       (schema.schema_definition as Record<string, unknown> | null) ?? null,
     );
@@ -985,15 +987,20 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
   let unmappedCount = 0;
 
   /**
-   * One AAS Property per catalogued metric name: the metric's own id is its semanticId and its
-   * further ids are its supplementalSemanticIds. Not here: a template's element id as the primary
-   * one inside a schema built from that template, which Build Schema from Template adds.
+   * One AAS Property per catalogued metric name, in the submodel of `schema`: the metric's own id is
+   * its semanticId and its further ids are its supplementalSemanticIds, except in a version built
+   * from a submodel template, where the element the metric fills gives the semanticId and the
+   * metric's own id is one of the further ones (templateSemanticIds()).
    */
-  const propertyFor = (name: string) => {
+  const propertyFor = (name: string, schema?: Record<string, unknown>) => {
     const metric = catalogByName.get(name);
-    const semanticId = (metric?.semantic_id as string | null) ?? null;
+    const { semanticId, supplementalSemanticIds: further } = templateSemanticIds(
+      schema,
+      name,
+      (metric?.semantic_id as string | null) ?? null,
+      supplementalByMetric.get(String(metric?.id)),
+    );
     if (!semanticId) unmappedCount += 1;
-    const further = supplementalByMetric.get(String(metric?.id));
     return {
       metric,
       element: property(
@@ -1221,7 +1228,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     const kpiProps: unknown[] = [];
 
     for (const name of modelled) {
-      const { metric, element } = propertyFor(name);
+      const { metric, element } = propertyFor(name, schema);
       if (isKpiMetric(metric, record.siteVocabularies)) kpiProps.push(element);
       else telemetryProps.push(element);
     }
