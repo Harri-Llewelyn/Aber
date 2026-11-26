@@ -49,7 +49,7 @@ import { pressHeld } from '../test/dialogs'
 const hoursAgo = (h) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString()
 
 const PINNED_BACKUP = {
-  id: 'b-1', stamp: '20260911T143000Z', origin: 'requested', note: 'before the areas migration',
+  id: 'b-1', job_id: 'j-1', stamp: '20260911T143000Z', origin: 'requested', note: 'before the areas migration',
   location: '/backups/20260911T143000Z', size_bytes: 3 * 1024 * 1024, pinned: true, released_at: null,
   taken_at: '2026-09-11T14:30:00.000Z',
   components: [
@@ -66,7 +66,7 @@ const PINNED = {
 const SCHEDULED = {
   ...PINNED, id: 'j-2', origin: 'scheduled', note: null,
   created_at: '2026-09-10T02:30:00.000Z', started_at: '2026-09-10T02:30:00.000Z', finished_at: '2026-09-10T02:33:00.000Z',
-  backup: { ...PINNED_BACKUP, id: 'b-2', stamp: '20260910T023000Z', origin: 'scheduled', note: null, pinned: false, taken_at: '2026-09-10T02:30:00.000Z' }
+  backup: { ...PINNED_BACKUP, id: 'b-2', job_id: 'j-2', stamp: '20260910T023000Z', origin: 'scheduled', note: null, pinned: false, taken_at: '2026-09-10T02:30:00.000Z' }
 }
 const FAILED = {
   id: 'j-3', status: 'FAILED', origin: 'scheduled', note: null,
@@ -1297,7 +1297,7 @@ describe('releasing', () => {
     fireEvent.click(within(modal).getByRole('button', { name: 'Release' }))
 
     await waitFor(() => expect(api.releaseBackup).toHaveBeenCalledWith('b-1'))
-    expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/retention window now applies/), 'success', { to: backupUrl('b-1') })
+    expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/retention window now applies/), 'success', { to: backupUrl('j-1') })
   })
 })
 

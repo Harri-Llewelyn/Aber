@@ -198,7 +198,7 @@ export function BackupsTab({ showToast, hasPermission }) {
       const released = await api.releaseBackup(backup.id)
       setReleaseFor(null)
       showToast(released ? `Released the backup from ${formatDateTime(backup.taken_at)}. The retention window now applies.` : 'That backup was not pinned.', released ? 'success' : 'info',
-        { to: backupUrl(backup.id) })
+        { to: backupUrl(backup.job_id) })
       await refresh()
     })
   }
