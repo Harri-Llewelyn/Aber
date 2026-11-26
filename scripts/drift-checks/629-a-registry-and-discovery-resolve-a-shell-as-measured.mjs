@@ -13,7 +13,10 @@ const PRODUCT = 'uriOfTheProduct';
 
 /** The arguments of buildEnvironment()'s nameplateElement() call for one element, or null. */
 function nameplateCall(shell, element) {
-  const at = shell.search(new RegExp(`nameplateElement\\(\\s*"${element}",`));
+  let at = -1;
+  for (let from = shell.indexOf('nameplateElement('); from >= 0; from = shell.indexOf('nameplateElement(', from + 1)) {
+    if (shell.slice(from + 'nameplateElement('.length).trimStart().startsWith(`"${element}",`)) { at = from; break; }
+  }
   if (at < 0) return null;
   let depth = 0;
   for (let i = shell.indexOf('(', at); i < shell.length; i++) {
@@ -23,9 +26,17 @@ function nameplateCall(shell, element) {
   return null;
 }
 
+/** The text between `start` and the next `end` after it, or ''. */
+function between(text, start, end) {
+  const at = text.indexOf(start);
+  if (at < 0) return '';
+  const stop = text.indexOf(end, at + start.length);
+  return stop < 0 ? '' : text.slice(at + start.length, stop);
+}
+
 /** One `{ [SPECIFIC_ASSET_ID_NAMES.x]: ... }` table of discovery.ts, as { name: text }. */
 function table(discovery, constant) {
-  const body = discovery.match(new RegExp(`const ${constant}[^=]*= \\{([\\s\\S]*?)\\n\\};`))?.[1] ?? '';
+  const body = between(discovery, `const ${constant}: Record<string, `, '\n};');
   const names = { serialNumber: SERIAL, productUri: PRODUCT };
   return Object.fromEntries([...body.matchAll(/\[SPECIFIC_ASSET_ID_NAMES\.(\w+)\]:\s*([^\n]*?),?$/gm)]
     .map((m) => [names[m[1]] ?? m[1], m[2].trim()]));
@@ -83,7 +94,7 @@ export default function check() {
   // The statement, the script and CI.
   const script = read('test-harness/aas_conformance.py');
   const pinned = script.match(/^PINNED = "([^"]+)"$/m)?.[1];
-  const passing = (profile) => (script.match(new RegExp(`"${profile}": \\[([\\s\\S]*?)\\]`))?.[1].match(/"[^"]+"/g) ?? []).length;
+  const passing = (profile) => (between(script, `"${profile}": [`, ']').match(/"[^"]+"/g) ?? []).length;
   const readme = supabaseReadme();
   const statement = readme.match(/- \*\*IDTA's own test engine, `aas-test-engines` ([\d.]+): ([^*]+)\.\*\*([\s\S]*?)\n- /);
   if (!pinned) problems629.push('test-harness/aas_conformance.py has no PINNED version');

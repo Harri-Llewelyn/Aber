@@ -2201,11 +2201,12 @@ jobs:
           python3 -m venv /tmp/aas-test-engines
           /tmp/aas-test-engines/bin/pip install --quiet "aas_test_engines==$PINNED"
 
+          # A Shopfloor Manager's token, through the stack lane's sign-in helper, which waits out the
+          # sign-in limit the lane's suites have just drawn on.
           KEY=$(kubectl -n $NS get secret $RELEASE-secrets -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d)
-          TOKEN=$(curl -s -X POST "http://127.0.0.1:18080/auth/v1/token?grant_type=password" \
-            -H "apikey: $KEY" -H "Content-Type: application/json" \
-            -d '{"email":"admin@aber.local","password":"aber123"}' \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+          TOKEN=$(python3 -c 'import sys; sys.path.insert(0, "test-harness"); import stack_sign_in
+          status, body = stack_sign_in.password_grant("http://127.0.0.1:18080", sys.argv[1], "manager@aber.local", "aber123")
+          print(body["access_token"] if status == 200 else "")' "$KEY")
           test -n "$TOKEN"
 
           /tmp/aas-test-engines/bin/python test-harness/aas_conformance.py \
