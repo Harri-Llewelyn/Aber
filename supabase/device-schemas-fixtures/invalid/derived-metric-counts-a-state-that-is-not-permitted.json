@@ -1,0 +1,18 @@
+{
+  "about": "A share of time in a state the input's permitted values no longer hold.",
+  "path": "$[0].derived_metrics[0]",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_TEXT@"
+        }
+      ],
+      "derived_metrics": [
+        "@METRIC_DERIVED_STATE@"
+      ]
+    }
+  ]
+}

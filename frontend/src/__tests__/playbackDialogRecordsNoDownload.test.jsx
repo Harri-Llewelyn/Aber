@@ -128,7 +128,7 @@ describe('the download call', () => {
 })
 
 /**
- * Prepare replay lanes writes: ensure_shadow_devices() makes a device row for each lane it has not
+ * Prepare Replay Lanes writes: ensure_shadow_devices() makes a device row for each lane it has not
  * made before, each with its Audit Trail row. It ends with one toast, which counts lanes rather
  * than recorded ids, because one device recorded under two of its ids has one lane.
  */

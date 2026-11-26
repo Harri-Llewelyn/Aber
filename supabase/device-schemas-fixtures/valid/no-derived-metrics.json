@@ -1,0 +1,14 @@
+{
+  "about": "An empty list of derived metrics, which is the same as none.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "derived_metrics": []
+    }
+  ]
+}

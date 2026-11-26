@@ -1,0 +1,16 @@
+{
+  "about": "The derived metrics as one name and not a list.",
+  "path": "$[0].derived_metrics",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "derived_metrics": "@METRIC_DERIVED@"
+    }
+  ]
+}

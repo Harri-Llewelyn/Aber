@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { isUuid } from '../../utils/isUuid'
 import {
-  DIRECTORY_KINDS, entityKey, findRank, idFoundBy, inactiveState, isIdShaped, isWholeId, kindLabel, mergeFound, shortlist,
+  entityKey, findRank, idFoundBy, inactiveState, isIdShaped, isWholeId, kindLabel, mergeFound, shortlist,
 } from '../../utils/entities'
 import { KIND_ICONS, recordUrl } from '../../utils/entityPages'
 import { plural } from '../../utils/format'
@@ -109,7 +109,7 @@ export function GlobalSearch({ tabs, currentTab, userRole, onNavigate, onSelectS
     let stale = false
     const timer = setTimeout(() => {
       Promise.resolve()
-        .then(() => api.findEntities(trimmed, { share: RECORD_KIND_LIMIT, kinds: DIRECTORY_KINDS }))
+        .then(() => api.findEntities(trimmed, { perKind: RECORD_KIND_LIMIT }))
         .then(
           rows => { if (!stale) setFound({ text: trimmed, rows: Array.isArray(rows) ? rows : [] }) },
           () => { if (!stale) setFound({ text: trimmed, rows: [] }) }

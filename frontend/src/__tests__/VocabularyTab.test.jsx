@@ -316,7 +316,7 @@ describe('Vocabulary page — the pointer to Metrics', () => {
     expect(description()).toMatch(/Requires Administrator to start a catalog metric/)
   })
 
-  it('counts nothing on the card or its section headings, and keeps "N in use"', async () => {
+  it('counts nothing on the card, says how many entries each section holds, and keeps "N in use"', async () => {
     renderTab()
     await ready()
 
@@ -324,7 +324,7 @@ describe('Vocabulary page — the pointer to Metrics', () => {
     fireEvent.change(screen.getByLabelText('Search the MTConnect vocabulary'), { target: { value: 'a' } })
     expect(document.querySelector('.card .section-count')).toBeNull()
     // The one figure that ties a standard to this stack's catalog: Axes names a catalog metric.
-    const components = card().getByRole('button', { name: /^Components/ }).closest('.vocab-section-head')
+    const components = card().getByRole('button', { name: 'Components, 1 entry' }).closest('.vocab-section-head')
     expect(within(components).getByText('1 in use')).toBeTruthy()
   })
 
@@ -431,7 +431,7 @@ describe('Vocabulary page — section headings', () => {
     renderTab()
     await ready()
 
-    const toggle = sectionToggle('Data Item Types — SAMPLE')
+    const toggle = sectionToggle('Data Item Types — SAMPLE, 1 entry')
     const tipButton = screen.getByRole('button', { name: 'About Data Item Types — SAMPLE' })
     // In the band, beside the toggle; a button cannot hold a button.
     expect(tipButton.closest('.vocab-section-head')).toBe(toggle.closest('.vocab-section-head'))
@@ -447,7 +447,7 @@ describe('Vocabulary page — section headings', () => {
     renderTab()
     await ready()
 
-    const toggle = sectionToggle('Components')
+    const toggle = sectionToggle('Components, 1 entry')
     fireEvent.click(screen.getByRole('button', { name: 'About Components' }))
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
 

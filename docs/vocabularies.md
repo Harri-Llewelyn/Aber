@@ -468,9 +468,9 @@ of each. A submodel that names the template's id claims to hold them. Built as m
   cardinality or an id it does not know, rather than dropping it. A block is written only while its migration is
   unreleased, as the OPC UA blocks are, so the next template goes in a block of the migration that adds it.
 - **A table of its own, beside `idta_submodel_templates`.** The older table is released, and its key,
-  `(template_id, id_short)`, cannot hold a nested element. Its 20 rows stay exactly as they are, with their
-  readers: the Nameplate dialog, the semantic id picker, `concept_definitions` and the AAS export. Drift check
-  567 holds them to the Nameplate's top-level elements here.
+  `(template_id, id_short)`, cannot hold a nested element. Its 20 rows stay, with their readers: the
+  Nameplate dialog, the semantic id picker, `concept_definitions` and the AAS export. Drift check 567 holds them
+  to the Nameplate's top-level elements here.
 - **What is mandatory is the template's own in both.** The released rows were typed from version 2.0, which
   asks for `YearOfConstruction` and not `OrderCodeOfManufacturer`. Version 3.0 swapped the two. Since `0323` a
   trigger gives each row its element's cardinality, whatever `0002` proposes on a boot.
@@ -514,6 +514,10 @@ its tests.
   IRDIs (`ManufacturerName` → `0112/2///61987#ABA565#009`), while a few are admin-shell.io IRIs
   (`UniqueFacilityIdentifier`, and `AddressInformation`, which still points at the **1/0**
   ContactInformations namespace even in the 3.0 template).
+- **A row's description is an exported definition.** The dialog and the semantic id picker show it, and an
+  export gives it as the definition of the element's ConceptDescription. So it says what the element is, in
+  our own words. It claims nothing of what is mandatory, and holds no note on the seed or on this platform.
+  Since `0334` the trigger gives ten of the 20 rows theirs, whatever `0002` proposes on a boot.
 - **The exporter already had a Nameplate submodel.** This was a retrofit: the existing one carried
   no semanticId on the submodel or on any property.
 - **The submodel claims the IDTA template id where it conforms, and not otherwise.** Naming

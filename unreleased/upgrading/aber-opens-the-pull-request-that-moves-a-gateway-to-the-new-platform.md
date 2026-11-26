@@ -14,7 +14,7 @@ line. A site with more than ten such gateways gets ten every fifteen minutes.
    health has no such row: choose **Open in the forge** in its drawer, then **Pull Requests**.
 2. As an Administrator, read the change and approve it. Nobody on your site wrote it, so you may.
 3. Merge it. The appliance converges within the hour, and the drawer's **Platform** row shows the new
-   release. Then do the others.
+   release. Then do the others: **Release waiting** on the Gateways page lists them.
 
 Nothing moves until you merge, so a gateway you leave alone keeps running as it is.
 

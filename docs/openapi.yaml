@@ -1406,7 +1406,7 @@ paths:
                 p_until: { type: string, format: date-time }
                 p_before_recorded_at: { type: string, format: date-time, description: 'The cursor, with `p_before_id`.' }
                 p_before_id: { type: integer, format: int64 }
-                p_search: { type: string, description: 'A substring of the entity id or the name the timeline shows; 1 to 18 digits also match the row id and the transaction id.' }
+                p_search: { type: string, description: 'A substring of the entity id, of the name the timeline shows, or of a further id the entity goes by (`Entity.second_ids`); 1 to 18 digits also match the row id and the transaction id. A further semantic id finds every row of its metric.' }
                 p_changed_by: { type: array, nullable: true, items: { type: string, format: uuid }, description: 'Only the rows these people or machine identities wrote: any of these `changed_by` ids. Null or empty is no constraint.' }
                 p_class: { type: array, nullable: true, items: { type: string, enum: [created, operational, configuration, lifecycle, read] }, description: 'Any of these classes. Null or empty is no constraint.' }
                 p_counts: { type: boolean, default: false, description: 'Also answer `counts`.' }
@@ -2733,7 +2733,8 @@ paths:
         `$[0].triggers[1].above`. All or nothing: with any refusal nothing is written, and with
         `p_dry_run` true nothing is written either, so a preview and an apply are the same call. It
         never deletes: an automation the document leaves out is left alone. An automation is found
-        by its `id`; a re-upload updates it. A change writes one `AUTOMATION_CREATED`,
+        by its `id`; a re-upload updates it. A threshold on a derived metric the device does not have is
+        refused, unless the automation watches it already. A change writes one `AUTOMATION_CREATED`,
         `AUTOMATION_CHANGED`, `AUTOMATION_ENABLED` or `AUTOMATION_DISABLED` row in the Audit Trail;
         an unchanged automation writes none.
 
@@ -2821,6 +2822,9 @@ paths:
         Each schema written is one `INSERT` row in the Audit Trail, by the `schemas` table's trigger; an
         unchanged schema writes none.
 
+        `derived_metrics` is the derived metrics the schema's devices get (`0336`). A document says what is
+        saved, so a schema without the key names none: the result's `derived_metrics` lists what that removes.
+
         An Administrator may call it, and with the second-factor switch on their session must have given
         its code. A machine identity may not.
       requestBody:
@@ -2863,7 +2867,7 @@ paths:
                 p_ids: { type: array, nullable: true, items: { type: string, format: uuid }, description: 'The schema ids to render. Null renders every schema in force.' }
       responses:
         '200':
-          description: The schemas, each with its name, description, semantic id and metrics.
+          description: The schemas, each with its name, description, semantic id, metrics and the derived metrics it names.
           content:
             application/json:
               schema:
@@ -3291,7 +3295,9 @@ paths:
 
         A draft inherits its parent's `semantic_id` and `semantic_id_type` from `fork_schema()`,
         so the draft is where a wrong claim is corrected or cleared. The dashboard's draft save
-        sends the pair together, with the type NULL whenever the id is.
+        sends the pair together, with the type NULL whenever the id is. It inherits
+        `derived_metrics` too. Every metric a derived one is computed from must be one the draft
+        models, so a draft that drops an input is refused until the derived metric goes too.
 
         `version` and `status` cannot be set directly: use the two RPCs below.
       parameters:
@@ -3309,9 +3315,10 @@ paths:
                 change_description: { type: string }
                 semantic_id: { type: string, nullable: true }
                 semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
+                derived_metrics: { type: array, items: { type: string }, description: 'The whole list: one it leaves out is no longer named.' }
       responses:
         '204': { description: Updated. }
-        '400': { description: The target is not a draft, or a frozen column was sent. }
+        '400': { description: 'The target is not a draft, a frozen column was sent, or `derived_metrics` names one the draft may not (`23514`, every reason in the message).' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
   /rest/v1/rpc/fork_schema:
@@ -5370,6 +5377,10 @@ paths:
         the text are ignored, and `%` and `_` are themselves. A whole id comes first, then a whole name,
         then the rest. Blank text answers no row.
 
+        With `p_per_kind` it answers at most that many rows of each kind, so one kind cannot fill the
+        answer. Among a kind's equals, what is in service comes first, then by name, a shorter one
+        first.
+
         **Runs as the caller** (`SECURITY INVOKER`): the rows they may read from the view.
       requestBody:
         required: true
@@ -5381,6 +5392,7 @@ paths:
               properties:
                 p_query: { type: string, example: dev220000000000400080000 }
                 p_limit: { type: integer, default: 200, minimum: 1, maximum: 500, description: 'A number outside the range is taken as the nearest in it.' }
+                p_per_kind: { type: integer, nullable: true, default: null, minimum: 1, description: 'The most rows of one kind. Left out or null, there is no such limit. A number below 1 is 1.' }
       responses:
         '200':
           description: The rows found, best first.
@@ -7753,8 +7765,12 @@ paths:
         not the gateway's, and a tag named as a branch the appliance reads, with the release made from
         it. It makes `main` the default branch, turns proposals on, and gives a repository that was
         renamed its name back. One that is a mirror, or has a rule the API cannot name, loses its deploy
-        keys and is an error. Nothing is created that enrolment would not create, and a repository is
-        never deleted.
+        keys and is an error. A repository is never deleted.
+
+        Last, each Remote gateway in service whose `main` names an older platform release than this one is
+        proposed the move, in one pull request from the machine account. An Administrator approves it. That
+        pull request and its branch are the one thing a pass makes that enrolment would not. One that a
+        person closed is not made again.
 
         Authorised by `FORGE_SWEEP_SECRET` in the `x-sweep-secret` header, **not** by the publishable key.
         The identities acted on come from `user_roles` and the forge's own lists, never from the
@@ -9022,6 +9038,14 @@ components:
         parent_schema_id: { type: string, format: uuid, nullable: true, readOnly: true }
         status: { type: string, enum: [draft, active, archived], readOnly: true, description: 'Changed only by the RPCs. A directly-flipped status is rejected for every role, including `postgres`.' }
         change_description: { type: string, nullable: true }
+        derived_metrics:
+          type: array
+          items: { type: string }
+          example: [Controller/PARTS_PER_HOUR]
+          description: >-
+            The derived metrics a device bound to this version gets, by catalogue name, in name order
+            (`0336`). Each is computed only from metrics the version models. Frozen with a published version.
+            Left out of an insert, it is the parent's, or none for a first version.
         semantic_id: { type: string, nullable: true, description: 'Deliberately MUTABLE, unlike `name` — it is an assertion about the schema, and crosswalks get corrected.' }
         semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
         created_at: { type: string, format: date-time, readOnly: true }
@@ -9933,7 +9957,7 @@ components:
         changes:
           type: array
           items: { type: string }
-          description: 'For a changed schema, the keys that differ: description, semantic_id, semantic_id_type, metrics.'
+          description: 'For a changed schema, the keys that differ: description, semantic_id, semantic_id_type, metrics, derived_metrics. A key the document leaves out is among them.'
         metrics:
           type: object
           nullable: true
@@ -9942,6 +9966,13 @@ components:
             added: { type: array, items: { type: string } }
             removed: { type: array, items: { type: string } }
             changed: { type: array, items: { type: string } }
+        derived_metrics:
+          type: object
+          nullable: true
+          description: 'For a changed schema, the derived metrics its draft would name and no longer name. A document without the key removes every one.'
+          properties:
+            added: { type: array, items: { type: string } }
+            removed: { type: array, items: { type: string } }
         reasons:
           type: array
           description: 'For a refusal, each reason with the JSON path it is at.'

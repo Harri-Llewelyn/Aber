@@ -440,7 +440,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, catalog, win, 
   const [exporting, setExporting] = useState(null)
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
-  // What each device reports, and the derived metrics it has the inputs of, for Export's metrics: read once, not on every move of a box.
+  // What each device reports, and the derived metrics its schemas name, for Export's metrics: read once, not on every move of a box.
   const metricsByKey = useMemo(() => new Map(placed.map(d => [telemetryKey(d), deviceMetrics(d, schemas, catalog)])), [placed, schemas, catalog])
 
   /** The width a track is drawn at: the axis track's, else the page's less the label column, else a default's. */

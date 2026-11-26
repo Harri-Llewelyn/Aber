@@ -1,0 +1,20 @@
+{
+  "about": "A derived metric written as a set of keys, as a metric is.",
+  "path": "$[0].derived_metrics[0]",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "derived_metrics": [
+        {
+          "name": "@METRIC_DERIVED@"
+        }
+      ]
+    }
+  ]
+}

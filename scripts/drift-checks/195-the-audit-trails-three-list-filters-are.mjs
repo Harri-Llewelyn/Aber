@@ -3,7 +3,7 @@ import { allFiles, fail, pass, read } from './lib.mjs';
 // -------------------------------------------------------------------------------------------------
 // 195. The Audit Trail's three list filters are arrays in every place that states them (0227).
 // 0001 and 0168 declare audit_trail_page() with p_entity_type text[], p_action text[] and
-// p_changed_by uuid[], and audit_trail_matching() (0228) matches each with = ANY; 0001's sweep of
+// p_changed_by uuid[], and audit_trail_matching() (its last file) matches each with = ANY; 0001's sweep of
 // stale overloads names that form, or it would drop it on every boot; 0227 drops the single-value
 // form; the API reference documents the three as arrays; and api.js sends each as an array from
 // listParam() or null. A copy left on one value either brings a second form back or sends a string
@@ -15,9 +15,9 @@ export default function check() {
   const LIST_IDENT = 'audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone, '
     + 'timestamp with time zone, timestamp with time zone, bigint, text, uuid[], text[], boolean)';
   // The rows the lists select are audit_trail_matching()'s, which the page calls once per class.
-  const m0228 = 'supabase/migrations/0228_the_audit_trail_sorts_events_into_classes_in_the_database.sql';
-  const helperSql = allFiles.includes(m0228) ? read(m0228) : '';
-  const helperAt = helperSql.indexOf('CREATE OR REPLACE FUNCTION public.audit_trail_matching(');
+  const HELPER = 'CREATE OR REPLACE FUNCTION public.audit_trail_matching(';
+  const helperSql = allFiles.filter((f) => /^supabase\/migrations\/\d{4}_.*\.sql$/.test(f)).sort().map(read).filter((sql) => sql.includes(HELPER)).at(-1) ?? '';
+  const helperAt = helperSql.indexOf(HELPER);
   const helper = helperAt < 0 ? '' : helperSql.slice(helperAt, helperSql.indexOf('$$;', helperSql.indexOf('AS $$', helperAt)));
   const problems195 = [];
 

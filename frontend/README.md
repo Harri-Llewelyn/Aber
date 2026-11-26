@@ -94,8 +94,8 @@ last definition of each function**, because migrations are replayed on every boo
 while the guard was reading the dead one.
 
 One more mirror — `modelledMetrics()` — is behaviour rather than a literal, so it has a **fixture
-contract** instead: `test-harness/fixtures/modelled-metrics.json`, asserted by four implementations in
-three languages. See [Migrated design notes](#migrated-design-notes) for what that fixture caught.
+contract** instead: `test-harness/fixtures/modelled-metrics.json`, asserted by five implementations in
+four languages. See [Migrated design notes](#migrated-design-notes) for what that fixture caught.
 
 `utils/payloadConformance.js`, Validate Payload's copy of `ingestion/conformance.py`, has one too:
 `test-harness/fixtures/payload-conformance.json`, asserted by vitest and by
@@ -324,9 +324,10 @@ slowness, so the list names every value the predicate reads, in the order it rea
 
 `common/GroupHeading.jsx` is the heading of a group of rows a reader can close. It is a disclosure
 button (the WAI-ARIA Disclosure pattern) with a chevron, an optional icon, the group's name and its
-count: "Devices · 12". The chevron points up while open and down while closed, as a table's group
-rows do, and the name takes `.table-group-label`'s look. In place of a count, `detail` takes words,
-cut before the name is (`OverflowText`): a Filters panel's section says what is chosen in its list.
+count: "Devices · 12". The chevron points up while open and down while closed, and the name takes
+`.table-group-label`'s look. `detail` takes words, cut before the name is (`OverflowText`): a Filters
+panel's section says what is chosen in its list. Beside a count they come after it, as on the Entities
+page: "Gateways · 81 · last deleted 25 Nov". Drift check `600` refuses a page's own heading.
 
 ```jsx
 <GroupHeading open={open} onToggle={() => toggle(kind)} label="Devices" count={12}
@@ -336,6 +337,10 @@ cut before the name is (`OverflowText`): a Filters panel's section says what is 
 - **The page keeps the state.** The button only reports a press. The page decides which groups are
   open, hides the element named in `controls` while its group is closed, and lays out the row the
   button sits in. A screen reader hears the name and `countLabel`: "Devices, 12 lanes".
+- **A list whose groups start closed keeps them with `useOpenGroups()`** (`hooks/useOpenGroups.js`): the
+  Metric Catalog, the Vocabulary page and the Entities page. A search or a filter opens every group it
+  matched, whatever a person had closed before it, and a person may close one of those. Once the search
+  goes the groups are as they were. Which are open is kept while the page is open, and not in the address.
 - **A closed group still shows what happened in it.** On the Audit Trail a closed section's heading
   row keeps one summary track, with every event of its lanes clustered as a lane's are. Opening an
   event there opens the section too. The History page is to group its lanes by area and cell
@@ -459,9 +464,17 @@ draft and of a read-only version, so a person meets one form. Drift check 592 ho
   their ranges. They are two to a row while there is room, at the `wide` step, so the dialog's body does
   not scroll at 1920 × 917. The metric list takes the height they leave, and below 210px the body scrolls
   instead. What is said about the list stands around it, so it never draws over what is below.
+- **Derived Metrics is under the metrics** (`common/SchemaDerivedMetrics.jsx`): the same picker, with the
+  derived metrics the ticked metrics cover (`schemaDerived()`). A ticked one whose input is unticked stays
+  ticked, so nothing is lost by mistake. It is said at once over the section, in the database's own words
+  (`derivedProblems()`, mirror check 174), and refuses the save. A save writes the metrics and the list in one
+  request, because the database judges them together.
 - **A version adds little:** its UUID and Change Description, the keys stored for each metric, the counts
   against the last saved draft, and its acts. Version History is a closed `<details>` under the metrics.
-  A section about the metrics goes there too: `SchemaEditor` draws its `children` below them.
+- **What stands under the metrics is a closed `<details>`,** in `.schema-asides`: closed ones share a line, so
+  the two take no more from the metric list than one, and the dialog's body does not scroll at 1920 × 917.
+  Opened, the Derived Metrics section takes its height from the metric list, which then goes below 210px.
+  Neither opens by itself, since the list would move under the pointer.
 - **A read-only version is the same body as text.** Each value is `.form-static` where its field was, a
   range is in words, and the list is as tall as its metrics, or scrolls inside itself. A draft is read the
   same way by a role that may not manage schemas.
@@ -791,7 +804,7 @@ SVG and every cell's `plan_x`/`plan_y` stay as uploaded; the arithmetic is in `u
   the saved turn, which the Site Map, the Cells page and the table read. While the draft differs
   from the saved turn the shared `SaveDiscard` pair (`components/common/SaveDiscard.jsx`, as on
   Profile) offers Save Turn, which calls `setAreaPlanRotation()` once and reloads, and Discard.
-  Replace plan and Remove plan are held until then. Opening another area or closing the panel
+  Replace Plan and Remove Plan are held until then. Opening another area or closing the panel
   drops the draft.
 
 ---
@@ -1000,10 +1013,10 @@ draws that order, so no page chooses its own.
 
 ### What the modelled-metrics fixture caught, twice
 
-`modelledMetrics()` answers "which metrics does this schema model?" and exists four times, in three
-languages, because it runs in four processes that cannot import one another:
-`utils/deviceTags.js`, `ingestion/validate.py`, `i3x/i3x_service.py` and
-`supabase/functions/_shared/aas/shell.ts`.
+`modelledMetrics()` answers "which metrics does this schema model?" and exists five times, in four
+languages, because it runs in five processes that cannot import one another:
+`utils/deviceTags.js`, `ingestion/validate.py`, `i3x/i3x_service.py`,
+`supabase/functions/_shared/aas/shell.ts` and the database's `schema_modelled_metrics()` (`0336`).
 
 `typeof [] === 'object'`, so a schema with `properties: ['Temp','Pressure']` reached `Object.keys`
 and came back modelling two metrics named **`'0'` and `'1'`**. The dashboard judged the device
@@ -1643,7 +1656,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | History | `overview` (the default, also the bare `/history`) or `device`, then the device's id (`/history/device/<id>`; `/history/device` is the picker) | the time window (`span` and `at`, `range`, or `from` and `to`); `replay`; the picker: `search`, `sort` |
 | Areas | | `search`, `lifecycle`, `sort`; `area` |
 | Cells | | `search`, `lifecycle`, `attention`, `empty`, `sort`; `cell` |
-| Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `sort`; `gateway` |
+| Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `release`, `playback`, `sort`; `gateway` |
 | Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`, `sort`; `device` |
 | Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
@@ -1652,7 +1665,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
-| Entities | `archived`, `retired` | `find`, which the three tabs share; `kind`, `sort`; `entity`, on Active |
+| Entities | `archived`, `retired` | `find`, which the three tabs share; `kind`, the groups that start open; `sort`; `entity` |
 | System | the group, `logs` | `sort`. Logs: `service`, `level`, `search`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)) |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
@@ -1673,14 +1686,33 @@ apart within its kind, and what each kind's further ids are called.
   else, so a tab and the search cannot disagree. `findRank()` applies the same rule to the rows the
   browser holds, and mirror check `159` holds the two to it.
 - **`?find=` is the search, and the three tabs share it.** It is the address of a "what is this?" link:
-  `/entities?find=<id>`. A whole id that names one row opens that row: an Active row's drawer, or the tab
-  that lists another. It opens once, as an arrival by id does (`useArrivalSelection`), so a drawer that is
-  closed stays closed.
-- **The Active table is the whole list, sorted in the browser,** and draws `ACTIVE_PAGE` rows at a time.
-- **`EntityDrawer` is the same for every kind.** It reads the row and nothing more, except how many
-  automations apply to a device. `entityUrl()` in `routes.js` knows each kind's own page (`ENTITY_PAGES` in
-  `utils/entityPages.js` is the rail's name for it), and `tabIsVisible()` decides whether this reader may
-  open it: an Auditor reads an identity here, and Access Control is an Administrator's.
+  `/entities?find=<id>`. A whole id that names one row opens that row's drawer, on the tab that lists it.
+  It opens once, as an arrival by id does (`useArrivalSelection`), so a drawer that is closed stays closed.
+- **Each tab's rows are groups by kind,** in `ENTITY_KINDS`' order and closed to begin with, as the Metric
+  Catalog's are. A tab that shows one group starts with it open. A tab is one table, so its columns line
+  up from group to group, and a column sorts inside each. Beside its count a heading says the one fact an
+  order across kinds used to show: on Retired the day of the last deletion (`lastDeleted()`), and on
+  Archived the next purge's, with how many a playback holds (`nextPurge()`).
+- **An open group draws `GROUP_PAGE` rows at a time,** with a `ListFoot` of its own, so *Expand all* draws
+  the first of each. `KindRows` and each row are memoised: typing in the search draws no row again.
+- **`?kind=devices` opens that group and no other,** for a link from when Kind was a filter. A list opens
+  each it names. Once a person opens or closes a group, or types a search, the address lets go of it and
+  the groups stay as they are.
+- **An arrival opens the group its row is in:** `?entity=`, or a whole id. Closing that group leaves the
+  drawer open.
+- **`EntityDrawer` is the same for every kind, and every row opens it.** It reads the row and nothing more,
+  except how many automations apply to a device in service. `entityUrl()` in `routes.js` knows each kind's
+  own page (`ENTITY_PAGES` in `utils/entityPages.js` is the rail's name for it), and `tabIsVisible()` decides
+  whether this reader may open it: an Auditor reads an identity here, and Access Control is an
+  Administrator's.
+  - **An archived row's has the acts,** as every drawer has its own: Restore first, its page with the lifecycle
+    filter on Archived, its Audit Trail, Export Bundle for a device, and Permanent Delete last. Restore and
+    Permanent Delete close it, since the row leaves the tab. Its auto-purge is a row, or a warning where it
+    is due within a week or a playback holds it (`purgeWarning()`). `/api/v1/archives` gives each row its
+    own of `entity_directory` (`directory`), for the description, the further ids and the place.
+  - **A retired row's is read-only.** It has no page, so it has no actions: the links of *What Survives* are a
+    section. Its ids are read from the tombstone the page holds already, as the view's own arm for them
+    reads them (`retiredRow()`, mirror check `168`).
 - **A retired row is for `archive:manage` or `audit_trail:read`.** A reader with neither is told so, rather
   than that nothing has been retired.
 
@@ -1753,13 +1785,13 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked under one time axis (`ChartTimeline`), each head showing its latest reading. Export CSV, on the Device, Overview, Metric, Cell and Area tabs, is the readings export ([History's Export](#historys-export)). Cell compares one metric across a cell's machines on one scale, with an hour-of-day heatmap (`HistoryCell`, [History's Cell tab](#historys-cell-tab)) |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Entities' Archived tab. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
-| `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
+| `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The toolbar is Devices': search, Status and the page's toggles in the row, and Lifecycle, Type and the Playback check in the Filters panel, so it keeps to one line at 1366px. The seeded Playback gateway, found by `is_shadow`, is left off the list until **Show Playback gateway** is on (`utils/playbackGateway.js`), as replay lanes are on Devices. Its drawer opening turns that on. Something wrong with it lists it with the check off, and the check says so. It is taken out after the facets have counted, so every count includes it. It reads Playing back or Idle rather than Offline. **Release waiting** lists the gateways with a platform release to approve (`releaseWaits()`, which the drawer's Platform row reads too). It is a facet of one value, so its count is of those the other filters let through, and it is drawn only while that is above zero or it is on |
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the form for a schema, and Upload the file** ([Schemas read and write YAML](#schemas-read-and-write-yaml)); changing one is versioning, not editing |
 | `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example. The page's second tab, **Built-in**, is `BuiltInAlerts` and its drawer `BuiltInAlertDrawer`: the alerts Aber raises about itself, read-only ([The Built-in tab](#the-built-in-tab-lists-the-alerts-aber-raises-about-itself)) |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
-| `EntitiesTab` | The Entities page (tab id `entities`), ungated: one card, a tab for each state of one lifecycle, and one search over the three ([The Entities page](#the-entities-page-lists-every-kind-and-finds-any-id)). **Active**: everything in service this reader may see, of every kind, with `EntityDrawer` for the open row. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (behind a [typed gate](#typed-text-guards-removing-access-and-what-cannot-be-undone)) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
+| `EntitiesTab` | The Entities page (tab id `entities`), ungated: one card, a tab for each state of one lifecycle, and one search over the three ([The Entities page](#the-entities-page-lists-every-kind-and-finds-any-id)). Each tab's rows are groups by kind, with `EntityDrawer` for the open row. **Active**: everything in service this reader may see, of every kind. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (behind a [typed gate](#typed-text-guards-removing-access-and-what-cannot-be-undone)) and, on a device, Export Bundle in the drawer, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each drawer linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
 
@@ -1789,7 +1821,7 @@ the source and fails on an outlined button written into one.
 **A control for a page's groups sits over them, not in the toolbar.** Expand all and Collapse all
 (`ExpandAllToggle`) act on the groups the page draws, not on what it filters, so they are the first
 control, at the far left, of the row above the groups. That row is `.groups-header`, which the Audit
-Trail, History, Metrics and Vocabulary all use. A line saying what is shown goes beside it, as on
+Trail, History, Metrics, Vocabulary and Entities all use. A line saying what is shown goes beside it, as on
 History, and a key goes at its right-hand end. The row sits outside the scroller, so it stays on
 screen. Check 371 (`scripts/check-docs-drift.mjs`) reads the source and fails on a toggle written
 into a toolbar, or anywhere but first in this row.
@@ -2398,7 +2430,7 @@ where the lathes sit in several areas. Its arithmetic is `utils/history.js` and 
   the other drawers'). The metrics offered are those some device in service reports (`historyMetrics()`:
   `cellMetrics()` over every device, a last birth's or a schema's), with the catalog's unit and kind where it
   has them. A metric the catalog does not know is offered all the same, with no unit: it is reported, and the
-  Cell tab charts it. A derived metric is offered where some device reports all its inputs (`deviceMetrics()`
+  Cell tab charts it. A derived metric is offered where some device's schemas name it (`deviceMetrics()`
   with the catalog), with its *derived* tag.
 - **The name is one path segment**, `encodeURIComponent()`, so `Spindle/LOAD` is `Spindle%2FLOAD`
   (`metricHistoryPath()`, `metricNameFrom()`). An address naming a metric no device reports says so and links
@@ -2558,12 +2590,13 @@ definition, computed where it is read. History offers it, draws it and tags it; 
 its current value; Export saves its values. The database's rules are in
 [supabase/README.md](../supabase/README.md#history-draws-a-derived-metric-from-the-minutes-0282).
 
-- **A device reports a derived metric when it reports all its inputs.** `deviceMetrics(device, schemas,
-  catalog)` adds each such metric to what a device declared and its schemas model, so the Device tab's
-  charts and Metrics filter, the Cell and Area tabs' metric lists, and the Metric tab's picker and its
-  devices all follow one rule (`derivedReportedBy()`). Without the catalog it lists measured metrics
-  only, as it always did. Overview reads it with the catalog, so its box exports the derived metrics its
-  devices have the inputs of.
+- **A device has the derived metrics its schemas name.** `derivedMetricsOfDevice()` is the rule: several
+  schemas' together, and a replay lane its original's (`derived_schema_ids`, which `api.js` gives each device
+  with `derivedSchemaIds()`). `deviceMetrics(device, schemas, catalog)` adds them to what a device declared
+  and its schemas model. So the Device tab's charts and Metrics filter, the Cell and Area tabs' metric lists,
+  and the Metric tab's picker and its devices all follow it. Without the catalog it lists measured metrics
+  only. Overview reads it with the catalog, so its box exports the derived metrics its devices have. The
+  database and the AAS exporter answer the same (mirror check 173, `device-derived-metrics.json`).
 - **A read is split by the catalogue** (`splitDerived()`): a measured name goes to
   `api.readCarriedTelemetry()`, a derived one to `api.readDerivedSeries()`, which returns the same
   columns, so `chartSeries()` draws both. A derived series draws its value as the line and has no band
@@ -2599,11 +2632,14 @@ its current value; Export saves its values. The database's rules are in
   `api.readDerivedCurrent()` when the drawer opens on the device. A device with no value says so, a
   failed read says that, and a device none apply to has no line. The windows are `derivedWindowMinutes()`,
   held to `derived_window_minutes()` by mirror check 94.
-- **The derived drawer's Applies To lists the devices in service that report all the inputs**, by the
+- **The derived drawer's Applies To lists the devices in service whose schemas name the metric**, by the
   Metric tab's own function (`metricDevices()`): a chip each that opens the device, in name order
   (`appliesToDevices()`) and with no cap, as the Schemas drawer's Devices field lists them. The field's
-  help names the inputs once (`appliesToRule()`). With none, the field says "No device yet: none reports
-  …" (`appliesToNone()`).
+  help says the rule once (`APPLIES_TO_RULE`). With none, the field says why: no schema names the metric, or
+  none in service is bound to one that does (`appliesToNone()`).
+- **Its Schemas field says how many versions name it** ("2 name it", `schemasNaming()`), as a measured
+  metric's says how many model it. With none it says "No schema names it yet", with a link to the Schemas
+  page: until one does, no device has the metric.
 - `derivedMetricReads.test.js`, `historyDerivedMetric.test.jsx`, `devicesDerivedValues.test.jsx`,
   `derivedMetrics.test.jsx` and `metricAppliesToChips.test.jsx` hold the rule, the reads, the tag, the
   fold, the Export rule, the drawer's line and Applies To.
@@ -2841,7 +2877,7 @@ or every derived metric listed with none ticked. The format is `docs/derived-met
   marks the lines of its Save. The editor's text is lost with the dialog.
 - **A property says what a derived metric cannot do there.** `x-derived-says`, on a property marked
   `"x-completes": "metric"`, is what its hover says when the name is a derived metric. The device schemas'
-  hover says no schema can model one. This file's says no derived metric is built on another.
+  hover says a schema names one under `derived_metrics`. This file's says no derived metric is built on another.
 - **The preview changes a description and nothing else.** Its statuses are **New**, **Changed**, **Unchanged**
   and **Refused**. A definition is fixed once saved, so a changed one is refused with the way to a new
   metric, and what **Changed** means is a description: the same definition under the name with another
@@ -2929,15 +2965,20 @@ level all say it. "Campus" may gloss it in running text and tooltips, as in "the
 campus", but never names a control, a setting or an identifier. "Area" is used everywhere except
 in "building management system".
 
+- **Look first.** Before building a feature or an element, look for something similar: `components/common`,
+  `hooks`, `utils`, `App.css` and the sibling pages. Use it, or extend it for every caller. A second one drawn
+  apart is two looks for one thing. The pull request says what was found, and whether it was used, extended or
+  could not be ([`CONTRIBUTING.md`](../CONTRIBUTING.md#three-rules-worth-stating-up-front)).
 - **Page identity.** A page has one card. Its icon, title and one-sentence description are the
   card's `CardHeading`, stated once; there is no `PageHeading` above it. A tabbed page puts its tab
   bar inside that card, and the tabs' tooltips and the toolbar row follow [Tabs](#tabs). Buttons go
   in the toolbar, never the heading ([The toolbar](#the-toolbar)).
 - **Scroll.** Every page scrolls inside its card, Access Control, System and Approvals included.
-- **Counts.** None on card headings, section headings or tabs. A count stays where it states what is
-  loaded ("30 of 55" beside Show more), what a filter value or toggle holds (Active 4 beside its
-  checkbox, "Needs attention (3)"), what an export will write, or how much work is waiting (a
-  Quarantine or Awaiting tab, the sidebar).
+- **Counts.** None on a card's heading, a section that does not close, or a tab. A group that opens and
+  closes says how many rows it holds, on every page, because a closed one hides them. A count stays
+  where it states what is loaded ("30 of 55" beside Show more), what a filter value or toggle holds
+  (Active 4 beside its checkbox, "Needs attention (3)"), what an export will write, or how much work is
+  waiting (a Quarantine or Awaiting tab, the sidebar).
 - **Queues are tabs.** Devices' quarantine queue is its Quarantine tab, not a card above the roster;
   a tab with work waiting takes `attention`.
 - **Clear filters (N).** N counts every control that is off its default, the lifecycle filter
@@ -2975,7 +3016,8 @@ in "building management system".
   archive has two numbering schemes, and two files numbered 0074), cite the file name.
 
 **Earlier decisions the 2026-10-01 review reversed**, recorded so the next audit does not undo them:
-counts always showing, including on headings; Settings and Vocabulary keeping a `PageHeading`;
+counts always showing, including on headings (a group that opens and closes says its own again, since
+2026-11-25); Settings and Vocabulary keeping a `PageHeading`;
 Access Control, System and Approvals scrolling the page; the Devices queue as a card above the
 roster.
 
@@ -3337,16 +3379,15 @@ opens itself on that call, so `App.jsx` needs no wiring for it.
 [the Entities page](#the-entities-page-lists-every-kind-and-finds-any-id) does, with people from the same
 `useLocalEntities()`, read as the bar first opens. It asks from two characters, once typing has rested 180 ms.
 `shortlist()` orders them: a whole id, a whole name, the start of an id, part of a name, and in service
-first among equals. It keeps 10 of a kind (`RECORD_KIND_LIMIT`). An answer stops at 200 rows, which one kind can
-fill: four hundred devices before a cell. So `findEntities({ share, kinds })` then reads each kind short of
-its share apart, by name, all at once. A row opens `recordUrl()`: its own page while the rail has that page,
+first among equals. It keeps 10 of a kind (`RECORD_KIND_LIMIT`), and asks the database for no more of each
+(`p_per_kind`), so one request answers and four hundred devices leave room for a cell. The browser
+orders them again, with people's rows. A row opens `recordUrl()`: its own page while the rail has that page,
 else `/entities?find=<id>`. An id adds *View in Entities* and *Find This ID in the Audit Trail*, whatever it
 names; a text is one by its shape (`isIdShaped()`) or by what it found (`idFoundBy()`). The trail is handed
 the record's own id for a further id of one record, since its search does not read every further id. Nothing
 moves as the records arrive: they are last, the two id rows come with them, and the highlight follows its row
 by key. Until the answer is in, the last answer's rows that the new text names as well stay. With 4,950
-devices and 200 tombstones, the records were in 260 to 300 ms after the last key, and 330 to 400 ms where
-kinds were read apart.
+devices and 2,000 tombstones, the records were in 250 to 310 ms after the last key, however broad the text.
 
 ### Opening help from anywhere
 
@@ -3732,7 +3773,7 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
   not. A tint (`--bg-glass`, or the card colour mixed with text) was tried and either vanished on a
   white card or showed rows through a pinned header. A header never takes an inline background.
 - **Group and section headings pin to the top of their scroller** while their own rows are in
-  view: `.table-group-row` (Metrics) and `.vocab-section-head` (Vocabulary). A group row sits below
+  view: `.table-group-row` (Metrics, Entities) and `.vocab-section-head` (Vocabulary). A group row sits below
   a pinned `thead` at `--table-head-height`, which `.table-scroll` and `.card-fill > .table-wrap`
   set to the header's fixed height (12px padding twice plus a 16px line, so keep header cells on one
   line). It works the same whether the scroller is a `.card-fill` card body or a `.table-scroll`.
@@ -3772,8 +3813,8 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
     A component that holds several tabs' tables passes `{ active: tab === '…' }`, so a hidden
     table neither reads the sort nor tidies away one meant for the table on screen. A table in a
     modal has no address and uses `useLocalSortableRows`.
-  - **Groups sort inside themselves.** The Metric Catalog's group bands keep their order, and
-    `useTableSort(columns).apply(rows)` sorts each group's rows.
+  - **Groups sort inside themselves.** The Metric Catalog's and the Entities page's groups keep their order,
+    and `useTableSort(columns).apply(rows)` sorts each group's rows.
   - **A table loaded a page at a time from the server keeps its order** and has no sortable headers:
     sorting in the browser would sort only the rows on screen. Backups is the one such table.
   - **The arrow hangs in the header cell's right padding**, so a sortable column is no wider than it

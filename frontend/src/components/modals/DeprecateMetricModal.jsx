@@ -17,8 +17,12 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
       size="md"
       icon={<IconAlertTriangle size={18} />}
       message={metric.derivation ? <>
-        This moves <strong>{metric.name}</strong> from the Derived tab to the Deprecated Metrics tab. It is
-        not in any schema, so none is affected. Its definition can never be changed, so a different one
+        This moves <strong>{metric.name}</strong> from the Derived tab to the Deprecated Metrics tab. {usageCount > 0 ? (
+          <><strong>{usageCount}</strong> schema{usageCount === 1 ? ' names' : 's name'} it and {usageCount === 1 ? 'keeps' : 'keep'} it, so their
+          devices still have it. No other schema can name it.</>
+        ) : (
+          <>No schema names it, and none can once it is deprecated.</>
+        )} Its definition can never be changed, so a different one
         is a new derived metric: add it first, then name it below as this one's replacement.
       </> : <>
         This retires <strong>{metric.name}</strong> from the schema builder's picker — it will no

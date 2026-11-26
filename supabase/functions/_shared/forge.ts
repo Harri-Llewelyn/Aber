@@ -1620,8 +1620,6 @@ async function seedPlatformPointer(cfg: ForgeConfig, name: string, tag: string):
   console.log(`forge: '${name}' points at the platform ${tag}`);
 }
 
-/** The rule on the branches Aber proposes a platform bump from, and on no others. */
-
 /**
  * The rule that gives the machine account the branches it proposes a platform bump from, and closes
  * them to everyone else: the `**` rule admits the two teams and not the machine account. No deploy

@@ -505,7 +505,7 @@ describe('GatewaysTab filters', () => {
     renderGateways()
     await waitFor(() => expect(screen.getByText('Sim_Gateway')).toBeTruthy())
     expect(screen.queryByText('Line_A_Gateway')).toBeNull()
-    expect(dropdownButton('Lifecycle')).toHaveTextContent('Any lifecycle')
+    expect(picked('Lifecycle')).toEqual(['active', 'archived'])
     expect(queryOf('lifecycle')).toBe('active,archived')
   })
 

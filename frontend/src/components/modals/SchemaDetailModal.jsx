@@ -15,7 +15,7 @@ import {
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { Modal } from '../common/Modal'
-import { SchemaEditor, schemaFields, useSchemaForm } from '../common/SchemaEditor'
+import { SchemaEditor, schemaDerived, schemaFields, useSchemaForm } from '../common/SchemaEditor'
 import { boundText, catalogPropertyEntry, isNumericType, rangeText, sameJson } from '../../utils/schemaProperty'
 import { Tooltip } from '../common/Tooltip'
 
@@ -104,6 +104,7 @@ export function SchemaDetailModal({
     description: schema?.description || '',
     changeDescription: schema?.change_description || '',
     picked: new Set(modelledMetrics(schema) || []),
+    derived: new Set(schema?.derived_metrics || []),
     ...storedSemanticIdPair(schema?.semantic_id, schema?.semantic_id_type)
   }))
   const { picked, ranges } = form
@@ -112,7 +113,7 @@ export function SchemaDetailModal({
   // A refusal of a save or a publish, as the database worded it.
   const [error, setError] = useState(null)
 
-  // A derived metric is not offered: nothing publishes it, so a schema cannot model it.
+  // A derived metric is not offered among the metrics: nothing publishes it, so a schema does not model it.
   const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated && !m.derivation), [catalog])
 
   const lineage = useMemo(() => lineageOf(schemas, schema), [schemas, schema])
@@ -198,10 +199,19 @@ export function SchemaDetailModal({
     !sameJson(catalogPropertyEntry(activeByName.get(n), { stored: storedProperties[n] }), storedProperties[n]))
   const metricsEdited = added.length > 0 || removed.length > 0 || changed.length > 0
 
+  // What the version it was made from names may be named again, a deprecated one too.
+  const namedNow = schema?.derived_metrics || []
+  const parent = (schemas || []).find(s => s.schema_uuid === schema?.parent_schema_id)
+  const derived = schemaDerived({ form, catalog, definition: built ?? schema?.schema_definition, kept: [...namedNow, ...(parent?.derived_metrics || [])] })
+  const derivedAdded = [...form.derived].filter(n => !namedNow.includes(n))
+  const derivedRemoved = namedNow.filter(n => !form.derived.has(n))
+  const derivedEdited = derivedAdded.length > 0 || derivedRemoved.length > 0
+
   const semanticNow = storedSemanticIdPair(schema?.semantic_id, schema?.semantic_id_type)
   const semanticEdited = storedSemanticIdPair(form.semanticId, form.semanticIdType)
   const dirty =
     metricsEdited ||
+    derivedEdited ||
     form.description !== (schema?.description || '') ||
     form.changeDescription !== (schema?.change_description || '') ||
     semanticEdited.semanticId !== semanticNow.semanticId ||
@@ -209,10 +219,12 @@ export function SchemaDetailModal({
 
   /**
    * Everything a draft save writes. The definition goes only when the metric list or an entry
-   * changed; api.js writes only the keys it is given, and sends the type as NULL when the id is blank.
+   * changed, and the derived metrics only when they did: both in one write, so the database judges them
+   * together. api.js writes only the keys it is given, and sends the type as NULL when the id is blank.
    */
   const draftPatch = () => ({
     ...(metricsEdited && { schema_definition: buildDefinition() }),
+    ...(derivedEdited && { derived_metrics: [...form.derived].sort() }),
     description: form.description,
     change_description: form.changeDescription,
     semantic_id: semanticEdited.semanticId,
@@ -242,7 +254,7 @@ export function SchemaDetailModal({
   })
 
   // Saving asks for a change; publishing takes the draft as it is. The last one pressed speaks.
-  const fields = editing ? schemaFields('schema-detail', { form, catalog: activeCatalog, takesRange, named: true }) : {}
+  const fields = editing ? schemaFields('schema-detail', { form, catalog: activeCatalog, takesRange, derived, named: true }) : {}
   const saving = useFormCheck(fields, { unchanged: !dirty })
   const publishing = useFormCheck(fields)
   const errors = Object.fromEntries(Object.keys(fields).map(k => [k, saving.errors[k] || publishing.errors[k]]))
@@ -358,6 +370,17 @@ export function SchemaDetailModal({
             vs. the last saved draft
           </span>
         )}
+        derived={{
+          catalog,
+          offered: derived.offered,
+          counts: editing && derivedEdited && (
+            <span className="form-hint-inline schema-counts">
+              {derivedAdded.length > 0 && <span className="schema-count-added">+{derivedAdded.length} </span>}
+              {derivedRemoved.length > 0 && <span className="schema-count-removed">−{derivedRemoved.length} </span>}
+              vs. the last saved draft
+            </span>
+          )
+        }}
         // Opening a draft can be enough to change it: a forked version takes the catalog as it is now,
         // which is how a new version comes to carry permitted values its parent lacked.
         above={fromCatalog.length > 0 && (

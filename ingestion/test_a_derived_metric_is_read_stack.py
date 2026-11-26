@@ -112,6 +112,7 @@ class ADerivedMetricIsRead(unittest.TestCase):
         cls.broken = None
         cls.session = cls.manager = cls.edge = cls.gateway = cls.device = cls.owner = None
         cls.catalogue_ids = []
+        cls.schema_id = None
         cls.trigger_id = None
         cls.automation_made = False
         group = "T324R" + secrets.token_hex(5)
@@ -169,6 +170,14 @@ class ADerivedMetricIsRead(unittest.TestCase):
             "description": "Fixture for ingestion/test_a_derived_metric_is_read_stack.py. Safe to delete.",
         })
         cls.asset = cls.device["sparkplug_id"]
+        # A device has the derived metrics its schemas name, so a threshold on this one needs a schema (0336).
+        with cls.owner.cursor() as cur:
+            cur.execute("INSERT INTO public.schemas (schema_name, schema_definition, derived_metrics) VALUES (%s, %s, %s)"
+                        " RETURNING id::text", (f"{cls.derived.split('/')[0]}_Schema", json.dumps(
+                            {"type": "object", "properties": {cls.measured: {"type": "number"}}}), [cls.derived]))
+            cls.schema_id = cur.fetchone()[0]
+            cur.execute("INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s)"
+                        " ON CONFLICT DO NOTHING", (DEVICE_ID, cls.schema_id))
         status, body = _request(
             f"{SUPABASE_URL}/functions/v1/gateway-credential", method="POST", body={"gateway_id": cls.gateway["id"]},
             headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {cls.session.token}", "Content-Type": "application/json"},
@@ -450,11 +459,13 @@ class ADerivedMetricIsRead(unittest.TestCase):
         with cls.owner.cursor() as cur:
             if cls.device:
                 cur.execute("DELETE FROM public.asset_config WHERE asset_id = %s", (cls.asset,))
-            # The derived row first: it names the counter it is built on.
+            # The schema first, which names the derived row, then that row, which names the counter.
+            if cls.schema_id:
+                cur.execute("DELETE FROM public.schemas WHERE id = %s", (cls.schema_id,))
             cur.execute("DELETE FROM public.metric_catalog WHERE name = %s", (cls.derived,))
             cur.execute("DELETE FROM public.metric_catalog WHERE name = %s", (cls.measured,))
             cur.execute("DELETE FROM public.audit_trail WHERE entity_id = ANY(%s::uuid[])",
-                        ([GATEWAY_ID, DEVICE_ID, *cls.catalogue_ids],))
+                        ([GATEWAY_ID, DEVICE_ID, *cls.catalogue_ids, *([cls.schema_id] if cls.schema_id else [])],))
 
 
 if __name__ == "__main__":

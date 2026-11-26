@@ -17213,7 +17213,7 @@ ALTER TABLE public.backups ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.backups', 'backups_select_administrator', $ddl$
 CREATE POLICY backups_select_administrator ON public.backups FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0330_a_search_asks_about_the_tombstones_once.sql');
 COMMIT;
 
 --
@@ -17248,7 +17248,7 @@ $ddl$);
 -- captures captures_select_privileged :: POLICY
 SELECT public.replay_policy('public.captures', 'captures_select_privileged', $ddl$
 CREATE POLICY captures_select_privileged ON public.captures FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0330_a_search_asks_about_the_tombstones_once.sql');
 COMMIT;
 
 --
@@ -17583,7 +17583,7 @@ ALTER TABLE public.machine_principals ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.machine_principals', 'machine_principals_select_admin_or_auditor', $ddl$
 CREATE POLICY machine_principals_select_admin_or_auditor ON public.machine_principals FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0330_a_search_asks_about_the_tombstones_once.sql');
 COMMIT;
 
 --
@@ -17777,7 +17777,7 @@ ALTER TABLE public.retired_entities ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.retired_entities', 'retired_entities_select_privileged', $ddl$
 CREATE POLICY retired_entities_select_privileged ON public.retired_entities FOR SELECT TO authenticated USING (public.has_authority(ARRAY['archive:manage'::text, 'audit_trail:read'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0330_a_search_asks_about_the_tombstones_once.sql');
 COMMIT;
 
 --

@@ -4,8 +4,9 @@ import { allFiles, fail, pass, read } from './lib.mjs';
 // 588. The API reference lists the kinds the database has. AuditTrailEntry.entity_type is the words of
 // AUDIT_TRAIL_ENTITY_TYPES, and /rest/v1/audit_trail gives them by lane; links.entity_type, in its three places,
 // is the words docs/architecture.md gives that column. Check 566 holds the first list to
-// audit_trail_action_kinds() and the second to the dashboard. /rest/v1/machine_principals counts the pinned
-// identities as the table's comment does, which check 565 holds to the seed, and names both its writers.
+// audit_trail_action_kinds() and the second to its CHECK and the dashboard. /rest/v1/machine_principals counts
+// the pinned identities as the table's comment does, which check 565 holds to the seed, and names both its
+// writers.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
   const problems588 = [];

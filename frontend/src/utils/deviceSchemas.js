@@ -15,10 +15,13 @@ export const DEVICE_SCHEMAS_FILE_MAX_BYTES = 8 * 1024 * 1024
 
 const list = (names) => (names || []).join(', ')
 
+const noun = (names) => (names.length === 1 ? 'metric' : 'metrics')
+
 /**
  * What an apply would do to one schema, in words, for the preview: a new schema is version 1 and in
- * force; a changed one makes a draft, and the note says which metrics it adds, removes and changes,
- * and which other keys differ. Null for a schema that is refused or unchanged, which say it already.
+ * force; a changed one makes a draft, and the note says which metrics it adds, removes and changes, which
+ * derived metrics it names and no longer names, and which other keys differ. Null for a schema that is
+ * refused or unchanged, which say it already.
  */
 export function schemaResultNote(result) {
   if (result.status === 'new') return 'version 1, in force'
@@ -28,10 +31,25 @@ export function schemaResultNote(result) {
   if (metrics.added?.length) parts.push(`adds ${list(metrics.added)}`)
   if (metrics.removed?.length) parts.push(`removes ${list(metrics.removed)}`)
   if (metrics.changed?.length) parts.push(`changes the range of ${list(metrics.changed)}`)
-  const others = (result.changes || []).filter(key => key !== 'metrics').map(key => key.replace(/_/g, ' '))
+  const derived = result.derived_metrics || {}
+  if (derived.added?.length) parts.push(`names the derived ${noun(derived.added)} ${list(derived.added)}`)
+  if (derived.removed?.length) parts.push(`no longer names the derived ${noun(derived.removed)} ${list(derived.removed)}`)
+  const others = (result.changes || []).filter(key => key !== 'metrics' && key !== 'derived_metrics').map(key => key.replace(/_/g, ' '))
   if (others.length) parts.push(`changes the ${list(others)}`)
   const draft = `a new draft, v${result.version}${result.schema_name ? ` (${result.schema_name})` : ''}`
   return parts.length ? `${draft}: ${parts.join('; ')}` : draft
+}
+
+/**
+ * What a file would take from schemas it changes, for the warning over the preview: `{ count, schemas }`,
+ * each schema with the derived metrics it would no longer name, or null when it takes none. A file says
+ * what is saved, so one written before a schema could name any, or without the key, takes them all.
+ */
+export function removedDerivedMetrics(results) {
+  const schemas = (results || [])
+    .filter(r => r.status === 'changed' && r.derived_metrics?.removed?.length)
+    .map(r => ({ name: r.name, metrics: r.derived_metrics.removed }))
+  return schemas.length ? { count: schemas.reduce((sum, s) => sum + s.metrics.length, 0), schemas } : null
 }
 
 /** The name a result is shown under: the schema's, or its place in the file when it has no valid name. */

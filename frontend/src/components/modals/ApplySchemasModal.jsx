@@ -4,7 +4,7 @@ import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { ApplyResults } from '../common/ApplyResults'
 import { DropZone } from '../common/DropZone'
-import { IconClipboardList } from '../common/Icons'
+import { IconAlertTriangle, IconClipboardList } from '../common/Icons'
 import { RequiredMark } from '../common/RequiredMark'
 import { describeApply, useApplyPreview } from '../../hooks/useApplyPreview'
 import { useFormCheck } from '../../hooks/useFormCheck'
@@ -14,7 +14,7 @@ import { plural } from '../../utils/format'
 import { schemaUrl, tabUrl } from '../../routes'
 import { refusedCount } from '../../utils/automations'
 import {
-  DEVICE_SCHEMAS_FILE_MAX_BYTES, appliedSchemaWords, schemaResultName, schemaResultNote, writtenSchemas,
+  DEVICE_SCHEMAS_FILE_MAX_BYTES, appliedSchemaWords, removedDerivedMetrics, schemaResultName, schemaResultNote, writtenSchemas,
 } from '../../utils/deviceSchemas'
 
 /**
@@ -42,6 +42,7 @@ export function ApplySchemasModal({ showToast, onApplied, onClose }) {
   const [applying, setApplying] = useState(false)
   const { results, refused, written, unread, checking, problem, held, unchanged, count } = describeApply(preview, parsed, 'schema')
   const check = useFormCheck({ file: { id: `${uid}-file`, missing: upload.missing } }, { unchanged })
+  const removed = preview.phase === 'ready' ? removedDerivedMetrics(results) : null
 
   const confirm = async () => {
     setApplyError(null)
@@ -121,6 +122,20 @@ export function ApplySchemasModal({ showToast, onApplied, onClose }) {
           </p>
           {written === 0 && refused === 0 && results.length > 0 && (
             <p className="apply-note">Every schema here is already as the file says. Nothing would change.</p>
+          )}
+          {removed && (
+            <div className="callout callout-warning" role="status">
+              <IconAlertTriangle size={13} className="callout-icon" />
+              <div>
+                This file removes {plural(removed.count, 'derived metric')}. Once the drafts are published, the devices bound to them
+                no longer have {removed.count === 1 ? 'it' : 'them'}. A file says what is saved, and a file exported before Aber 1.10 names none.
+                <ul className="apply-removed">
+                  {removed.schemas.map(s => (
+                    <li key={s.name}><strong className="mono">{s.name}</strong>: <span className="mono">{s.metrics.join(', ')}</span></li>
+                  ))}
+                </ul>
+              </div>
+            </div>
           )}
           <ApplyResults
             results={results}

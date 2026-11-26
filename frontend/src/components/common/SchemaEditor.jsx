@@ -5,8 +5,11 @@ import { IconCheck } from './Icons'
 import { MetricPicker } from './MetricPicker'
 import { PropertyRange } from './PropertyRange'
 import { RequiredMark } from './RequiredMark'
+import { SchemaDerivedMetrics } from './SchemaDerivedMetrics'
 import { SemanticIdField } from './SemanticIdField'
 import { Tooltip } from './Tooltip'
+import { derivedOffered, derivedProblems } from '../../utils/derivedMetric'
+import { modelledMetrics } from '../../utils/deviceTags'
 import { rangeError } from '../../utils/schemaProperty'
 
 const REQUIRED = 'Required: the schema cannot be saved without it'
@@ -14,12 +17,14 @@ const REQUIRED = 'Required: the schema cannot be saved without it'
 const BLANK = { name: '', description: '', changeDescription: '', semanticId: '', semanticIdType: '', ranges: {} }
 
 /**
- * What a schema's editor holds: its fields, the names of the ticked metrics (`picked`, a Set) and the
- * range typed beside each (`ranges`, by name). A range is kept when its metric is unticked, so ticking
- * it again brings the range back. `change` takes a patch, or a function of the form that returns one.
+ * What a schema's editor holds: its fields, the names of the ticked metrics (`picked`, a Set), the range
+ * typed beside each (`ranges`, by name) and the names of the ticked derived metrics (`derived`, a Set). A
+ * range is kept when its metric is unticked, so ticking it again brings the range back, and a derived
+ * metric stays ticked when an input is, so unticking one by mistake loses nothing. `change` takes a patch,
+ * or a function of the form that returns one.
  */
 export function useSchemaForm(initial) {
-  const [form, setForm] = useState(() => ({ ...BLANK, picked: new Set(), ...initial?.() }))
+  const [form, setForm] = useState(() => ({ ...BLANK, picked: new Set(), derived: new Set(), ...initial?.() }))
   const change = (patch) => setForm(f => ({ ...f, ...(typeof patch === 'function' ? patch(f) : patch) }))
   return [form, change]
 }
@@ -27,10 +32,24 @@ export function useSchemaForm(initial) {
 const rangeId = (idPrefix, metric) => `${idPrefix}-range-${metric.metric_uuid}`
 
 /**
- * What the editor's fields still need, for useFormCheck(), in the order they appear. `takesRange(name)`
- * says whether a range is typed beside a metric; a version's name is not its editor's to give.
+ * What a schema whose definition is this one may name among its derived metrics: the ones `offered`, and
+ * why a ticked one may not be saved (`problems`, { name, problem } each). `kept` is what the version, or the
+ * one it was made from, names already. The database checks the same on the save, in the same words.
  */
-export function schemaFields(idPrefix, { form, catalog, takesRange, named = false }) {
+export function schemaDerived({ form, catalog, definition, kept = [] }) {
+  const schema = { definition, modelled: modelledMetrics({ schema_definition: definition }) }
+  return {
+    offered: derivedOffered(schema, catalog, kept),
+    problems: derivedProblems(schema, [...form.derived].sort(), catalog, kept)
+  }
+}
+
+/**
+ * What the editor's fields still need, for useFormCheck(), in the order they appear. `takesRange(name)`
+ * says whether a range is typed beside a metric; a version's name is not its editor's to give. `derived` is
+ * schemaDerived()'s.
+ */
+export function schemaFields(idPrefix, { form, catalog, takesRange, derived, named = false }) {
   const bad = catalog.filter(m => form.picked.has(m.name) && takesRange(m.name) && rangeError(form.ranges[m.name]))
   return {
     ...(!named && { name: { id: `${idPrefix}-name`, missing: !form.name.trim() && 'Give the schema a name' } }),
@@ -42,6 +61,11 @@ export function schemaFields(idPrefix, { form, catalog, takesRange, named = fals
     ranges: {
       id: bad.length > 0 ? rangeId(idPrefix, bad[0]) : undefined,
       wrong: bad.length > 0 && `Fix the range of ${bad.map(m => `${m.name}: ${rangeError(form.ranges[m.name])}`).join(' ')}`,
+    },
+    // Said as soon as an input is unticked, not at the save that it would refuse.
+    derived: {
+      id: `${idPrefix}-derived`,
+      wrong: derived?.problems.length > 0 && derived.problems.map(p => p.problem).join(' '),
     },
   }
 }
@@ -61,7 +85,7 @@ function StaticField({ label, children, none = null, hint = null }) {
 /**
  * The body of the dialogs that build a schema, edit a draft of one and show a published version, so a
  * schema is one form wherever it is met: its name, description and semantic id, then its metrics with
- * their ranges. `readOnly` shows the same fields as text, never as disabled inputs. Use it inside
+ * their ranges, then the derived metrics its devices get. `readOnly` shows the same fields as text, never as disabled inputs. Use it inside
  * `<Modal size="wide" fill>`: the metric list takes the height the rest leaves, and scrolls inside
  * itself.
  *
@@ -78,11 +102,14 @@ function StaticField({ label, children, none = null, hint = null }) {
  * @param {(name: string) => string|null} [rangeTextOf] A metric's range in words, for `readOnly`.
  * @param {React.ReactNode} [counts] Drawn after the count of the ticked metrics.
  * @param {React.ReactNode} [above] Drawn over the metric list, and `below` under it.
- * @param {React.ReactNode} [children] Drawn below the metrics.
+ * @param {{ offered: object[], counts?: React.ReactNode }} [derived] The derived metrics on offer
+ * (schemaDerived()), and what is drawn after their count.
+ * @param {React.ReactNode} [children] Drawn beside the derived metrics: each is a closed `<details>`, so the
+ * two share a line until one is opened.
  */
 export function SchemaEditor({
   idPrefix, readOnly = false, form, onChange, errors = {}, catalog, rangeOf, version = null,
-  noteOf, rangeTextOf, counts = null, above = null, below = null, children
+  noteOf, rangeTextOf, counts = null, above = null, below = null, derived, children
 }) {
   const id = (part) => `${idPrefix}-${part}`
   const names = [...form.picked]
@@ -224,7 +251,23 @@ export function SchemaEditor({
       </div>
 
       {below}
-      {children}
+      <div className="schema-asides">
+        <SchemaDerivedMetrics
+          id={id('derived')}
+          readOnly={readOnly}
+          names={form.derived}
+          catalog={derived?.catalog}
+          offered={derived?.offered}
+          counts={derived?.counts}
+          error={errors.derived}
+          onToggle={name => onChange(f => {
+            const next = new Set(f.derived)
+            if (next.has(name)) next.delete(name); else next.add(name)
+            return { derived: next }
+          })}
+        />
+        {children}
+      </div>
     </>
   )
 }

@@ -392,7 +392,8 @@ Run it from `ingestion/` after `npm run proto`, which generates the Sparkplug bi
     `MQTT_CAPTURE_USER` without that grant may not.
 - **`play`** publishes as the Playback gateway (`gwy160000000000400080000`), authenticating as it
   with `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD`. Issue the password from the gateway's
-  drawer on the Gateways page (**Generate Broker Credential**), which shows it once. On Kubernetes
+  drawer on the Gateways page (**Filters** › **Show Playback gateway**, then **Generate Broker
+  Credential**), which shows it once. On Kubernetes
   the same password is delivered into the `mosquitto-passwords` Secret under the key
   `playback_credentials.json`, as `{"<sparkplug_id>": "<password>"}`. Issuing a new password
   replaces the one the dashboard's playback worker holds, and is delivered to it within about a
@@ -649,8 +650,8 @@ id is worse: it is not bound to the Playback gateway, so the replayed DBIRTH fai
 [the binding check](#gateway-binding) and **quarantines that real device**
 (`GATEWAY_MISMATCH`), and its DDATA is dropped. Either way no reading reaches the historian.
 
-So the only `--map` targets that work are replay lanes, which the Capture page's **Prepare replay
-lanes** makes. Prepare them there, then map each captured device onto its lane.
+So the only `--map` targets that work are replay lanes, which the Capture page's **Prepare Replay
+Lanes** makes. Prepare them there, then map each captured device onto its lane.
 
 ### Marking what was replayed
 

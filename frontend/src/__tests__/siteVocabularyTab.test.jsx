@@ -122,7 +122,7 @@ describe('the Imported tab', () => {
     const { onUseEntry } = renderTab()
     await filesTable()
 
-    const heading = screen.getByRole('button', { name: 'ISO 22400 KPIs' })
+    const heading = screen.getByRole('button', { name: 'ISO 22400 KPIs, 2 entries' })
     expect(heading.closest('.vocab-section-head')).toHaveTextContent('1 in use')
     fireEvent.click(heading)
     const chip = screen.getByRole('button', { name: 'Start a catalog metric from Overall equipment effectiveness, already used by one' })

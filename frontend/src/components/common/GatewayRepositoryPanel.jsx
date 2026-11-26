@@ -21,13 +21,16 @@ export function gatewayCompareUrl(gateway) {
   return `${gatewayRepositoryUrl(gateway)}/compare/main..appliance`
 }
 
+/** Whether a platform release waits for approval on this gateway's repository: forge-sweep's record of it. */
+export const releaseWaits = (gateway) => Boolean(gateway?.forge_bump_tag && gateway.forge_bump_number)
+
 /**
  * The platform release whose pull request from Aber waits for approval on this gateway's repository
  * (forge-sweep's record of it), or null. A link to it for a role that may open the forge, and the same
  * words for the rest. It is news and not a fault, so it keeps the text's own colour in a row of any tone.
  */
 export function WaitingBump({ gateway, canOpenForge }) {
-  if (!gateway?.forge_bump_tag || !gateway.forge_bump_number) return null
+  if (!releaseWaits(gateway)) return null
   const words = `${gateway.forge_bump_tag} waits for approval`
   if (!canOpenForge) return <span className="waiting-bump">{words}</span>
   return (

@@ -1,7 +1,7 @@
 /**
  * GroupHeading: the shared heading of a group of rows that opens and closes. A disclosure button
- * (WAI-ARIA Disclosure pattern) with a chevron, an optional icon, the name and a count or words in
- * its place, which reports a press and leaves the page to keep which groups are open.
+ * (WAI-ARIA Disclosure pattern) with a chevron, an optional icon, the name, a count and words,
+ * which reports a press and leaves the page to keep which groups are open.
  */
 import React from 'react'
 import { render, screen, fireEvent, act } from '@testing-library/react'
