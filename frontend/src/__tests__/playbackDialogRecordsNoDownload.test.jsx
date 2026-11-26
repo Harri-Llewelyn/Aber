@@ -57,7 +57,7 @@ afterEach(() => { fetchSpy.mockRestore() })
 /** The dialog once its reads have settled. */
 async function openDialog(capture, onCancel = vi.fn()) {
   render(<StartPlaybackModal capture={capture} onConfirm={vi.fn()} onCancel={onCancel} />)
-  await screen.findByText(/Plays back as/)
+  await screen.findByText('Playback Gateway', { selector: 'dt' })
   await waitFor(() => expect(api.playbackWorkerStatus).toHaveBeenCalled())
   return onCancel
 }
@@ -137,7 +137,7 @@ describe('Prepare Replay Lanes', () => {
   const TWO_IDS = { ...LISTLESS, id: 'cap-2', manifest: { birth_captured: true, device_ids: [RECORDED, ALSO] } }
   const prepare = async (showToast) => {
     render(<StartPlaybackModal capture={TWO_IDS} subjectName="Spindle 4" onConfirm={vi.fn()} onCancel={vi.fn()} showToast={showToast} />)
-    await screen.findByText(/Plays back as/)
+    await screen.findByText('Playback Gateway', { selector: 'dt' })
     fireEvent.click(await screen.findByRole('button', { name: /Prepare Replay Lanes/ }))
     await waitFor(() => expect(api.ensureShadowLanes).toHaveBeenCalledWith('cap-2'))
   }

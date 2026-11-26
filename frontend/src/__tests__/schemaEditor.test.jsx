@@ -124,7 +124,7 @@ describe('one body', () => {
     const bare = { ...ACTIVE_V2, description: null, change_description: null, semantic_id: null, semantic_id_type: null, schema_definition: {} }
     const dialog = detail(bare, { schemas: [bare] })
     expect([...dialog.querySelectorAll('.form-static')].map(el => el.textContent.trim())).toEqual([
-      'Mill_v2', 'v2-uuid', '—', 'No change description was recorded for this version.', '—', '—', 'This schema models no metrics.'
+      'Mill_v2', 'v2-uuid', 'Not set', 'Not set', 'Not set', 'Not set', 'This schema models no metrics.'
     ])
   })
 

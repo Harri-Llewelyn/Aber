@@ -20,7 +20,7 @@ export default function check() {
     ['the Metric groups filter', 'label="Metric groups"'],
     ['the roster column', '>Metric groups</SortHeader>'],
     ['the drawer row', "label: 'Metric groups'"],
-    ["the edit form's line", 'Metric groups these schemas model:'],
+    ["the edit form's static field", '<StaticField label="Metric Groups"'],
   ];
   for (const [what, text] of wording) {
     if (!page.includes(text)) problems413.push(`${PAGE} does not name ${what} as Metric groups (${text})`);

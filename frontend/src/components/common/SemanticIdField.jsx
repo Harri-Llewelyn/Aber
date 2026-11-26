@@ -5,6 +5,7 @@ import {
   SEMANTIC_ID_TYPES, followSemanticIdType, storedSemanticIdPair, sameSemanticIdPair
 } from '../../utils/standards'
 import { searchSemanticIdCandidates, foreignConcept, candidatesFor } from '../../utils/semanticIdSources'
+import { StaticField } from './StaticField'
 import { Tooltip } from './Tooltip'
 
 /** The most matches the picker lists at once; the rest are reached by narrowing the search. */
@@ -34,7 +35,8 @@ const PLACEHOLDER = {
 
 /**
  * A semantic id and its AAS reference type as one field, shared by the schema editor, Add Metric and a
- * catalog metric's Edit so they cannot drift apart. `readOnly` shows the pair as text. The type is empty
+ * catalog metric's Edit so they cannot drift apart. `readOnly` shows the pair as static fields, the id
+ * copied by a click. The type is empty
  * and its select disabled while the id is blank: a type with no id exports as a Reference with no key.
  * `onChange` receives the next `{ semanticId, semanticIdType }`.
  *
@@ -98,6 +100,30 @@ export function SemanticIdField({
     toggleRef.current?.focus()
   }
 
+  if (readOnly) {
+    return (
+      <div className="semantic-id-fields" style={style}>
+        <StaticField
+          className="semantic-id-own"
+          label="Semantic ID"
+          value={hasId ? semanticId : ''}
+          mono
+          copyable
+          copyLabel="semantic ID"
+          help={HELP[subject]}
+          helpLabel="What a semantic ID is for"
+        />
+        <StaticField
+          className="semantic-id-type"
+          label="Reference Type"
+          value={hasId ? semanticIdType : ''}
+          help={TYPE_HELP}
+          helpLabel="What the reference type says"
+        />
+      </div>
+    )
+  }
+
   // Each tip is a sibling of its label, never a child: a button inside a label answers to the
   // label's name too, and the control stops being the only thing that does.
   return (
@@ -105,69 +131,51 @@ export function SemanticIdField({
       <div className="semantic-id-fields">
         <div className="semantic-id-own">
           <div className="semantic-id-label">
-            {readOnly
-              ? <span className="form-label">Semantic ID</span>
-              : (
-                <label className="form-label" htmlFor={idFor}>
-                  {subject === 'further' ? 'Further Semantic ID' : 'Semantic ID'}
-                  {subject !== 'further' && <> <span className="semantic-id-optional">(optional)</span></>}
-                </label>
-              )}
+            <label className="form-label" htmlFor={idFor}>
+              {subject === 'further' ? 'Further Semantic ID' : 'Semantic ID'}
+              {subject !== 'further' && <> <span className="semantic-id-optional">(optional)</span></>}
+            </label>
             <HelpTip text={HELP[subject]} label="What a semantic ID is for" />
           </div>
-          {readOnly ? (
-            <div className={`form-static mono semantic-id-static${hasId ? '' : ' form-static-none'}`}>
-              {hasId ? semanticId : '—'}
-            </div>
-          ) : (
-            <input
-              id={idFor}
-              className="form-control mono semantic-id-input"
-              value={semanticId}
-              onChange={e => onChange?.({
-                semanticId: e.target.value,
-                semanticIdType: followSemanticIdType(semanticId, semanticIdType, e.target.value)
-              })}
-              placeholder={PLACEHOLDER[subject]}
-              {...fieldErrorProps(error, `${idFor}-error`)}
-            />
-          )}
+          <input
+            id={idFor}
+            className="form-control mono semantic-id-input"
+            value={semanticId}
+            onChange={e => onChange?.({
+              semanticId: e.target.value,
+              semanticIdType: followSemanticIdType(semanticId, semanticIdType, e.target.value)
+            })}
+            placeholder={PLACEHOLDER[subject]}
+            {...fieldErrorProps(error, `${idFor}-error`)}
+          />
           <FieldError id={`${idFor}-error`} error={error} />
         </div>
 
         <div className="semantic-id-type">
           <div className="semantic-id-label">
-            {readOnly
-              ? <span className="form-label">Reference Type</span>
-              : <label className="form-label" htmlFor={typeFor}>{subject === 'further' ? 'Further Reference Type' : 'Reference Type'}</label>}
+            <label className="form-label" htmlFor={typeFor}>{subject === 'further' ? 'Further Reference Type' : 'Reference Type'}</label>
             <HelpTip text={TYPE_HELP} label="What the reference type says" />
           </div>
-          {readOnly ? (
-            <div className={`form-static${hasId && semanticIdType ? '' : ' form-static-none'}`}>
-              {hasId && semanticIdType ? semanticIdType : '—'}
-            </div>
-          ) : (
-            <Tooltip text={hasId ? null : 'Enter a semantic id first: a type with no id says nothing'}>
-              <select
-                id={typeFor}
-                className="form-control"
-                value={hasId ? semanticIdType : ''}
-                disabled={!hasId}
-                onChange={e => onChange?.({ semanticId, semanticIdType: e.target.value })}
-              >
-                <option value="">— None —</option>
-                {SEMANTIC_ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </Tooltip>
-          )}
+          <Tooltip text={hasId ? null : 'Enter a semantic id first: a type with no id says nothing'}>
+            <select
+              id={typeFor}
+              className="form-control"
+              value={hasId ? semanticIdType : ''}
+              disabled={!hasId}
+              onChange={e => onChange?.({ semanticId, semanticIdType: e.target.value })}
+            >
+              <option value="">— None —</option>
+              {SEMANTIC_ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </Tooltip>
           {/* Disabled until there is an id to type: the reason is said beside it, not only on hover. */}
-          {!readOnly && !hasId && <div className="form-hint">Needs a semantic id first.</div>}
+          {!hasId && <div className="form-hint">Needs a semantic id first.</div>}
         </div>
       </div>
 
       {/* A row of its own under the field, not beside the label: in a 480px dialog the label row
           cannot hold them, and a taller label row drops the input below the type select. */}
-      {!readOnly && (showingSuggestion || canRestore || canPick) && (
+      {(showingSuggestion || canRestore || canPick) && (
         <div className="semantic-id-actions">
           {showingSuggestion && (
             <Tooltip text={suggestion.note}><span className="semantic-id-suggested">Suggested</span></Tooltip>

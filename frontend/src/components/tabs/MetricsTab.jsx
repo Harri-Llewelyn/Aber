@@ -59,6 +59,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { SemanticIdField } from '../common/SemanticIdField'
+import { StaticField } from '../common/StaticField'
 import { FurtherSemanticIdList } from '../common/FurtherSemanticIds'
 import { PermittedValuesField } from '../common/PermittedValuesField'
 import { furtherIdsOf } from '../../utils/furtherSemanticIds'
@@ -1850,13 +1851,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               </div>
             ) : (
               // A type that takes no unit is a fact, as Edit Metric shows a name it cannot change.
-              <div className="form-group metric-edit-facts" style={{ flex: '0 1 220px' }}>
-                <div>
-                  <div className="form-label">Units</div>
-                  <div>None</div>
-                  <div className="form-hint">{noUnitsReason}</div>
-                </div>
-              </div>
+              <StaticField label="Units" value="None" reason={noUnitsReason} style={{ flex: '0 1 220px' }} />
             )}
 
             <div className="form-group" style={{ flex: '0 1 140px' }}>

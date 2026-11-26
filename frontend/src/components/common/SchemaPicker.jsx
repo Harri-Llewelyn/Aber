@@ -47,12 +47,11 @@ function SchemaRow({ schema, metrics, needle, id }) {
  * @param {string[]} value The chosen schemas' ids. The caller holds them, so one the search hides
  * stays chosen.
  * @param {(schemaId: string) => void} onToggle Called to choose a schema or take it out.
- * @param {boolean} [disabled] Nothing can be chosen or taken out. The search still works.
  * @param {string} legend The fieldset's name.
  * @param {React.ReactNode} [note] Drawn under the legend, above the search box.
  * @param {React.ReactNode} [children] Drawn under the list.
  */
-export function SchemaPicker({ schemas, value, onToggle, disabled = false, legend, note, children }) {
+export function SchemaPicker({ schemas, value, onToggle, legend, note, children }) {
   const baseId = useId()
   const idOf = schema => `${baseId}-${schema.schema_uuid}`
   const [first] = useState(() => new Set(value))
@@ -69,7 +68,6 @@ export function SchemaPicker({ schemas, value, onToggle, disabled = false, legen
       keyOf={keyOf}
       isPicked={row => value.includes(keyOf(row))}
       onPick={row => onToggle(keyOf(row))}
-      disabled={disabled}
       searchLabel={rows.length > 0 ? 'Search name, description or metric' : undefined}
       matches={matches}
       // The control is named by the schema, and described by the rest of its row.

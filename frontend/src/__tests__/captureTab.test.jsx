@@ -605,10 +605,10 @@ describe('deleting and downloading', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play Back/))
-    await screen.findByText(/Plays back as/)
+    await screen.findByText('Playback Gateway', { selector: 'dt' })
     expect(screen.getByText(/stored without the list of devices it holds/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(screen.queryByText(/Plays back as/)).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Playback Gateway', { selector: 'dt' })).toBeNull())
     expect(api.captureUrl).not.toHaveBeenCalled()
   })
 })
@@ -759,14 +759,14 @@ describe('playing a capture back', () => {
     const rendered = renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play Back/))
-    await screen.findByText(/Plays back as|Choose the Playback gateway/)
+    await screen.findByText(/^Playback Gateway$|Choose the Playback gateway/, { selector: 'dt, option' })
     return rendered
   }
 
   /** Only the Playback gateway is named: `start_playback_job()` refuses any other target. */
   it('names only the target the gate will accept', async () => {
     await open()
-    const line = screen.getByText(/Plays back as/)
+    const line = screen.getByText('Playback Gateway', { selector: 'dt' }).nextElementSibling
     expect(line.textContent).toMatch(/Playback Target/)
     expect(line.textContent).not.toMatch(/Line 1 Gateway/)
     expect(screen.queryByLabelText('Playback Gateway')).toBeNull()
@@ -903,7 +903,7 @@ describe('playing a capture back', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play Back/))
-    await screen.findByText(/Plays back as/)
+    await screen.findByText('Playback Gateway', { selector: 'dt' })
     expect(screen.getByText(/so a playback\s+refuses it/)).toBeInTheDocument()
     expect(screen.queryByText(/will play back normally|dropped on ingest/)).toBeNull()
   })
@@ -925,7 +925,7 @@ describe('playing a capture back', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play Back/))
-    await screen.findByText(/Plays back as/)
+    await screen.findByText('Playback Gateway', { selector: 'dt' })
     expect(await screen.findByText(/publishes no device-level traffic/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Play Back' })).not.toBeDisabled()
   })
@@ -1559,7 +1559,7 @@ describe('playing a file', () => {
       expect.objectContaining({ subjectKind: 'gateway', subjectId: 'gw-1' })
     ))
     // …and then straight into playing it back, rather than back to the table to find it.
-    expect(await screen.findByText(/Plays back as/)).toBeInTheDocument()
+    expect(await screen.findByText('Playback Gateway', { selector: 'dt' })).toBeInTheDocument()
   })
 
   it('leaves the subject unchosen when the file names nothing this stack knows', async () => {

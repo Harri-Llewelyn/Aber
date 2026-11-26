@@ -431,15 +431,18 @@ describe('the edit form', () => {
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', area_id: 'area-2', location_scope: 'area_wide' })
   })
 
-  it('disables the picker when the serving gateway is simulated, and says which lane instead', async () => {
+  it('shows the lane as a static field when the serving gateway is simulated, and says why', async () => {
     // There is no CHECK on the device side, so a cell chosen here would be accepted and then
-    // ignored, since device_locations resolves `simulated` ahead of every cell arm. The control is
-    // withheld.
+    // ignored, since device_locations resolves `simulated` ahead of every cell arm. The gateway
+    // decides, so the place is a value and not a control.
     await show([device({ active_gateway_id: 'gw-sim', effective_cell_id: null, location_source: 'simulated' })])
     openEdit()
-    expect(screen.getAllByRole('radio').every(r => r.disabled)).toBe(true)
+    expect(screen.queryByRole('radiogroup', { name: 'Location' })).toBeNull()
+    expect(screen.queryAllByRole('radio')).toHaveLength(0)
     expect(cellPicker()).toBeNull()
-    expect(screen.getByText(/belong to the Simulated lane/i, { ignore: '[role=tooltip]' })).toBeInTheDocument()
+    const location = within(document.querySelector('.modal')).getByText('Location', { selector: 'dt' }).closest('.static-field')
+    expect(location.querySelector('.form-static')).toHaveTextContent(/^Simulated$/)
+    expect(location).toHaveTextContent(/^Location.*Follows the gateway\. .*belong to the Simulated lane/i)
   })
 
   it('keeps a cell already stored on a device whose gateway went simulated', async () => {

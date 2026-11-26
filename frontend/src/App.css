@@ -2030,14 +2030,22 @@ tbody tr.table-group-foot:hover { background: none; }
 }
 .backup-files .mono { min-width: 0; overflow-wrap: anywhere; }
 
-/* A value nobody can change, set where a field would be: plain text in the form's own size, with no
-   box, so it does not read as a control that is switched off. */
+/* A value nobody can change, set where a field would be (StaticField): a drawer field's name over its
+   value, in the form's sizes, with no box, so it does not read as a control that is switched off. An
+   identifier keeps .mono's size and wraps anywhere, so a dialog never scrolls sideways for one. Empty,
+   it is the drawers' Not set (.context-field-empty). */
 .form-static {
-  margin: 0;
   font-size: 13px;
+  line-height: 1.4;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
-.form-static-none { color: var(--text-muted); }
+.form-static .copyable-id { margin: 0; }
+.static-field > .form-label { display: flex; align-items: center; }
+
+/* Static fields side by side (StaticFields), each as wide as its value, wrapping where there is no room. */
+.static-fields { display: flex; flex-wrap: wrap; column-gap: 24px; }
+.static-fields > .static-field { min-width: 0; }
 
 /* A value to copy (CopyField): `.form-static`'s text, in mono, in the box a block of commands has
    (pre.gateway-code), so it reads as text to take rather than a field to fill. A click selects all of
@@ -2698,7 +2706,6 @@ main:focus { outline: none; }
   column-gap: 14px;
 }
 .schema-editor-fields > * { min-width: 0; }
-.schema-editor-fields .form-static { overflow-wrap: anywhere; }
 .schema-editor-metrics { display: flex; flex-direction: column; }
 .modal-body-fill > .schema-editor-metrics { min-height: 210px; }
 
@@ -2919,6 +2926,8 @@ main:focus { outline: none; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 14px;
 }
+/* The grid's gap spaces its fields, a fixed one as much as one with a box. */
+.nameplate-fields > .static-field { margin-bottom: 0; }
 .nameplate-address {
   grid-column: 1 / -1;
   min-width: 0;
@@ -3081,7 +3090,6 @@ main:focus { outline: none; }
 .semantic-id-label > .form-label { margin-bottom: 0; }
 .semantic-id-optional { font-weight: 400; color: var(--text-dim); }
 .form-control.semantic-id-input { font-size: 11px; }
-.form-static.semantic-id-static { font-size: 12px; overflow-wrap: anywhere; }
 
 /* SemanticIdField's row under the field: the marker on a suggested id and the compact actions.
    --text-muted, not --text-dim, which falls under AA on the Add Metric form's glass. */
@@ -7856,15 +7864,6 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   line-height: 1.5;
 }
 
-/* The note under a form field a proposal may not name. Muted rather than amber: nothing has gone
-   wrong, and the field is legitimately out of reach for this reader rather than in an error state. */
-.form-hint-locked {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-  font-style: italic;
-}
-
 .readonly-notice > span { flex: 1; min-width: 0; }
 .readonly-notice > svg { flex-shrink: 0; }
 
@@ -8155,9 +8154,6 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 
 .form-hint-inline { font-weight: 400; font-size: 11px; color: var(--text-muted); }
 
-/* The device form's line of metric groups, under the schema picker it follows. */
-.schema-groups { margin-top: 6px; }
-
 /* A long list to choose from (ListPicker): the search row, then rows that scroll inside themselves.
    The list takes the height the fields above leave, unless its caller gives it one. */
 .list-picker {
@@ -8203,10 +8199,6 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 }
 /* A row that cannot be chosen now, among rows that can. */
 .list-picker-label-blocked { cursor: not-allowed; opacity: 0.55; }
-/* Every row of a list nothing can be chosen from: still to be read, so muted and not faded. */
-.list-picker-label-disabled,
-.list-picker-label-disabled > input { cursor: not-allowed; }
-.list-picker-label-disabled { color: var(--text-muted); }
 
 /* The device form's schema list (SchemaPicker): as tall as the schemas it offers, up to three and the
    next one's name, so a short list costs a dialog nothing and a search never changes its height. */
@@ -8359,7 +8351,7 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 }
 
 /* A value to read, beside one to copy: on the line of that one's text (.copy-field-value's padding). */
-.token-connect-text { padding: 7px 0; }
+.token-connect-text > .form-static { padding: 7px 0; }
 
 /* Numbered steps to carry out somewhere else, such as the Node-RED editor. */
 ol.gateway-steps {
@@ -8433,12 +8425,6 @@ ol.gateway-steps {
 }
 
 .table-group-label-muted { color: var(--text-muted); }
-
-.metric-edit-facts {
-  display: flex;
-  gap: 24px;
-  flex-wrap: wrap;
-}
 
 .schema-change-cell { max-width: 280px; }
 

@@ -60,6 +60,8 @@ const openEdit = () => {
 }
 
 const typeSelect = () => document.querySelector('#gateway-type')
+/** The dialog's static field of this name. */
+const fixedField = (label) => within(document.querySelector('.modal')).getByText(label, { selector: 'dt' }).closest('.static-field')
 /**
  * The row's Type cell in the table, not a badge in the drawer or an option in the filter bar.
  * Scoped to the table because the type filter renders an <option> per type and a page-wide search
@@ -225,20 +227,24 @@ describe('the Location control', () => {
     expect(screen.queryByRole('checkbox', { name: /Site-Wide/i })).toBeNull()
   })
 
-  it('disables the cell picker for a simulated gateway and says why', async () => {
+  it('shows a simulated gateway its location as a static field, decided by its type, and says why', async () => {
     await show([gateway({ deployment: 'host', is_simulated: true, cell_id: null })])
     openEdit()
-    expect(cellSelect().disabled).toBe(true)
-    // A disabled control has to say which lane the devices land in instead.
-    expect(screen.getByText(/resolve to the Simulated lane/i)).toBeInTheDocument()
+    expect(cellSelect()).toBeNull()
+    expect(screen.queryByRole('radiogroup', { name: 'Location' })).toBeNull()
+    const location = fixedField('Location')
+    // The drawer's words for it, and which lane the devices land in instead.
+    expect(location.querySelector('.form-static')).toHaveTextContent(/^Simulated — no cell$/)
+    expect(location).toHaveTextContent(/Decided by the gateway’s type\. Its devices resolve to the Simulated lane/)
   })
 
   it('does not show a stored site-wide scope on a gateway that cannot hold a cell', async () => {
-    // A disabled box reading "Site-Wide" above a note saying simulated gateways have no cell would
+    // A field reading "Site-Wide" above a note saying simulated gateways have no cell would
     // contradict itself.
     await show([gateway({ deployment: 'host', is_simulated: true, cell_id: null, location_scope: 'site_wide' })])
     openEdit()
-    expect(cellSelect().value).toBe('')
+    expect(fixedField('Location')).not.toHaveTextContent(/Site-Wide/)
+    expect(screen.queryByRole('radio', { name: /Site-Wide/i })).toBeNull()
   })
 
   it('clears a cell when the type changes to Simulated, rather than letting the save be refused', async () => {
@@ -267,14 +273,16 @@ describe('the Location control', () => {
 describe('the Type control in a proposal', () => {
   // deployment and is_simulated are not proposable, so the patch drops them; a control left live
   // would let an Operator change the type and file a proposal that silently omits it.
-  it('is disabled, and says why, for someone who may only propose', async () => {
+  it('is a static field with its value, and says why, for someone who may only propose', async () => {
     api.get.mockImplementation(routeGet([gateway()]))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={(p) => p === PERMISSION_UUIDS.PROPOSAL_CREATE} />)
     await waitFor(() => expect(screen.getByText('Playback_Lab')).toBeTruthy())
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Playback_Lab'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Propose a Change'))
-    expect(typeSelect().disabled).toBe(true)
-    expect(screen.getByText(/connector runs — an Administrator or a Shopfloor Manager changes it/)).toBeTruthy()
+    expect(typeSelect()).toBeNull()
+    const type = fixedField('Type')
+    expect(type.querySelector('.form-static')).toHaveTextContent(/^Remote$/)
+    expect(type).toHaveTextContent(/^Type.*A proposal can’t change this\. .*connector runs — an Administrator or a Shopfloor Manager changes it/)
   })
 
   it('stays live for someone who may manage gateways', async () => {

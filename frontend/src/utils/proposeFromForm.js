@@ -11,7 +11,8 @@
  * filtered through it at insert and at approval. This answers which box on the form is that column.
  *
  * Fields that are not proposable (a device's gateway and schema, a gateway's `deployment`) are
- * disabled in propose mode, not hidden; `nonProposableFields()` tells the form which.
+ * static fields in propose mode, with their values, not hidden; `nonProposableFields()` tells the
+ * form which, and why.
  */
 import { api } from '../api'
 import { proposalUrl } from '../routes'

@@ -293,7 +293,7 @@ describe('the edit form', () => {
     fireEvent.click(within(panel()).getByText('Edit Details'))
   }
   const schemaBox = (name) => within(screen.getByRole('group', { name: /Schemas/ })).getByRole('checkbox', { name })
-  const groupsLine = () => screen.queryByText(/^Metric groups these schemas model/)
+  const groupsLine = () => screen.queryByText('Metric Groups', { selector: 'dt' })?.nextElementSibling ?? null
 
   it('has no Device Type / Classification box, and no field for the groups', async () => {
     await show()
@@ -308,16 +308,17 @@ describe('the edit form', () => {
     await show()
     openEdit('Press_01')
 
-    expect(groupsLine().textContent).toBe('Metric groups these schemas model: Axes, Controller')
-    // A line of text under the checklist, not an input.
-    expect(groupsLine().tagName).toBe('P')
-    expect(screen.getByRole('group', { name: /Schemas/ }).contains(groupsLine())).toBe(true)
+    expect(groupsLine().textContent).toBe('Axes, Controller')
+    // A static field after the checklist, not an input.
+    expect(groupsLine().closest('.static-field').querySelector('input, select')).toBeNull()
+    const schemas = screen.getByRole('group', { name: /Schemas/ })
+    expect(schemas.compareDocumentPosition(groupsLine()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     fireEvent.click(schemaBox('Environment_Schema'))
-    expect(groupsLine().textContent).toBe('Metric groups these schemas model: Axes, Controller, Environmental')
+    expect(groupsLine().textContent).toBe('Axes, Controller, Environmental')
 
     fireEvent.click(schemaBox('Axes_Schema'))
-    expect(groupsLine().textContent).toBe('Metric groups these schemas model: Environmental')
+    expect(groupsLine().textContent).toBe('Environmental')
   })
 
   it('has no line with no schema ticked', async () => {

@@ -5,6 +5,7 @@ import { CopyBlock, CopyField } from '../common/CopyField'
 import { Modal } from '../common/Modal'
 import { IconLock, IconShieldAlert } from '../common/Icons'
 import { SegmentedControl } from '../common/SegmentedControl'
+import { StaticField } from '../common/StaticField'
 import { formatDate } from '../../utils/format'
 import { i3xBaseUrl, i3xClientSetups } from '../../utils/i3xClientSetups'
 import { i3xUrl } from '../../constants'
@@ -44,10 +45,7 @@ function ConnectSection({ origin, token }) {
           />
         )}
         {/* Plain text, no copy button: a client offers it as a choice, such as Explorer's dropdown. */}
-        <div className="form-group">
-          <div className="form-label">Authentication</div>
-          <p className="form-static token-connect-text">{AUTHENTICATION}</p>
-        </div>
+        <StaticField label="Authentication" value={AUTHENTICATION} className="token-connect-text" />
       </div>
       {setup ? (
         <CopyBlock

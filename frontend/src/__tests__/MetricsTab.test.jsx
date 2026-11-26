@@ -2543,7 +2543,7 @@ describe('Add Metric: Reference Type says why it waits for an id', () => {
 })
 
 describe('Add Metric: Units is a label where the type takes none', () => {
-  const unitsFacts = () => [...document.querySelectorAll('.metric-edit-facts')]
+  const unitsFacts = () => [...document.querySelectorAll('.static-field')]
     .find(el => el.querySelector('.form-label')?.textContent === 'Units')
   const chooseType = (value) => fireEvent.change(screen.getByLabelText(/Data Item Type/), { target: { value } })
 
@@ -2609,7 +2609,7 @@ describe('Add Metric: Units is a label where the type takes none', () => {
 })
 
 describe('Add Metric: a custom MTConnect type asks for its category', () => {
-  const unitsFacts = () => [...document.querySelectorAll('.metric-edit-facts')]
+  const unitsFacts = () => [...document.querySelectorAll('.static-field')]
     .find(el => el.querySelector('.form-label')?.textContent === 'Units')
   const chooseCustomType = (name = 'VIBRATION_RMS') => {
     fireEvent.change(screen.getByLabelText(/Data Item Type/), { target: { value: '__custom__' } })

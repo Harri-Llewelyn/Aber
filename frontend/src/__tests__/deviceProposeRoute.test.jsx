@@ -57,6 +57,9 @@ const routeGet = (rows, proposals = []) => (path) => {
 const asOperator = (id) => id === PERMISSION_UUIDS.PROPOSAL_CREATE
 const asManager = () => true
 
+/** The dialog's static field of this name. */
+const fixedField = (label) => within(document.querySelector('.modal')).getByText(label, { selector: 'dt' }).closest('.static-field')
+
 const show = async (hasPermission, rows = [device()], proposals = []) => {
   api.get.mockImplementation(routeGet(rows, proposals))
   const onViewApprovals = vi.fn()
@@ -166,7 +169,7 @@ describe('proposing a change from a device', () => {
     expect(footer.queryByRole('button', { name: /^propose a change$/i })).toBeNull()
   })
 
-  it('withholds the fields a proposal may not name, without hiding them', async () => {
+  it('shows the fields a proposal may not name as their values, without hiding them', async () => {
     // A device's gateway is its data path and its schema is what its telemetry is judged against;
     // hiding them would make two dialogs out of one.
     await show(asOperator)
@@ -174,27 +177,30 @@ describe('proposing a change from a device', () => {
     clickAction('Propose a Change')
     await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
 
-    const locked = [...document.querySelectorAll('.form-hint-locked')].map(n => n.textContent)
-    expect(locked.some(t => /data path/i.test(t)), 'the gateway note').toBe(true)
-    expect(locked.some(t => /judged against/i.test(t)), 'the schema note').toBe(true)
-    expect(locked.some(t => /kept or dropped/i.test(t)), 'the conformance note').toBe(true)
-    // The controls are still THERE, disabled -- hiding them would make two dialogs out of one.
-    expect(document.querySelectorAll('.modal select[disabled]').length).toBeGreaterThanOrEqual(2)
+    expect(fixedField('Serving Gateway')).toHaveTextContent(/Line_A_Gateway \(gw-1\)/)
+    expect(fixedField('Serving Gateway')).toHaveTextContent(/data path/i)
+    expect(fixedField('Schemas')).toHaveTextContent(/judged against/i)
+    expect(fixedField('Schema Conformance')).toHaveTextContent(/Audit — record the violation, keep the reading/)
+    expect(fixedField('Schema Conformance')).toHaveTextContent(/kept or dropped/i)
+    // A value, not a control that is switched off.
+    expect(document.querySelectorAll('.modal select[disabled], .modal input[type="checkbox"][disabled]')).toHaveLength(0)
+    expect(document.querySelector('#device-gateway')).toBeNull()
+    expect(document.querySelector('#device-conformance')).toBeNull()
+    expect(within(document.querySelector('.modal')).queryByRole('group', { name: /^Schemas/ })).toBeNull()
   })
 
-  it('opens each note with what a proposal cannot do, and keeps the field a control beside it', async () => {
+  it('opens each reason with what a proposal cannot do, and keeps what it can change a control', async () => {
     await show(asOperator)
     openPanel()
     clickAction('Propose a Change')
     await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
 
-    const locked = [...document.querySelectorAll('.form-hint-locked')]
-    expect(locked).toHaveLength(3)
-    for (const note of locked) expect(note.textContent).toMatch(/^A proposal can’t change this\. /)
-    // Each note sits with the field it is about, which stays a control rather than becoming text.
-    expect(document.querySelector('#device-gateway').disabled).toBe(true)
-    expect(document.querySelector('#device-gateway').closest('.form-group').querySelector('.form-hint-locked')).toBeTruthy()
-    expect(document.querySelector('#device-conformance').closest('.form-group').querySelector('.form-hint-locked')).toBeTruthy()
+    const reasons = ['Serving Gateway', 'Schemas', 'Schema Conformance'].map(label => fixedField(label).querySelector('dd.form-hint'))
+    for (const reason of reasons) expect(reason.textContent).toMatch(/^A proposal can’t change this\. /)
+    // What a proposal can name stays a control.
+    expect(screen.getByLabelText(/Device Name/)).toBeEnabled()
+    expect(screen.getByLabelText('Description')).toBeEnabled()
+    expect(screen.getByRole('radiogroup', { name: 'Location' })).toBeInTheDocument()
   })
 
   it('shows a replay lane its gateway as text, with no note about who moves it, where nobody does', async () => {
@@ -208,16 +214,15 @@ describe('proposing a change from a device', () => {
     clickAction('Propose a Change')
     await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
 
-    // Fixed for everyone, so a label and not a greyed select; the other withheld fields stay controls.
+    // Fixed for everyone, so the lane's reason and not the proposer's; the other withheld fields say theirs.
     expect(document.querySelector('#device-gateway')).toBeNull()
-    const gateway = within(document.querySelector('.modal')).getByText('Serving Gateway').closest('.form-group')
+    const gateway = fixedField('Serving Gateway')
     expect(gateway.querySelector('select, input')).toBeNull()
-    expect(gateway.querySelector('.form-hint-locked')).toBeNull()
     expect(gateway.textContent).not.toMatch(/data path/)
     expect(gateway.textContent).toMatch(/This is a replay lane\. It stays on the Playback gateway/)
-    expect(document.querySelector('#device-conformance').disabled).toBe(true)
-    // The schema and conformance notes are still true for a lane.
-    expect(document.querySelectorAll('.form-hint-locked')).toHaveLength(2)
+    // The schema and conformance reasons are still true for a lane.
+    expect(fixedField('Schemas')).toHaveTextContent(/A proposal can’t change this\./)
+    expect(fixedField('Schema Conformance')).toHaveTextContent(/A proposal can’t change this\./)
   })
 
   it('asks a proposer why, and asks a manager nothing', async () => {

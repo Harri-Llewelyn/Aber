@@ -7,6 +7,7 @@ import CopyableId from '../common/CopyableId'
 import { CredentialField, useCredential } from '../common/CredentialField'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
+import { StaticField } from '../common/StaticField'
 import { IconAlertTriangle, IconDatabase } from '../common/Icons'
 import {
   COLD_STORAGE_DIALOG_KEYS,
@@ -129,15 +130,13 @@ export function ColdStorageDestinationModal({ values = {}, siteKey = '', credent
           consequence="If the new one is wrong, the first sign is the nightly export failing to authenticate."
         />
         {/* Text, not a field: no one can change it here. */}
-        <div className="form-group metric-edit-facts">
-          <div style={{ minWidth: 0 }}>
-            <div className="form-label">Site Key</div>
-            <div className="mono" style={{ overflowWrap: 'anywhere' }}>
-              {siteKey || <span style={{ color: 'var(--text-muted)' }}>Not set</span>}
-            </div>
-            <p className="form-hint">Fixed at install by <span className="mono">values.yaml coldArchive.s3.siteKey</span>.</p>
-          </div>
-        </div>
+        <StaticField
+          label="Site Key"
+          value={siteKey}
+          mono
+          copyable
+          reason={<>Fixed at install by <span className="mono">values.yaml coldArchive.s3.siteKey</span>.</>}
+        />
       </div>
 
       <label className="cold-destination-check">
