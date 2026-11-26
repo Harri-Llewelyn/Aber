@@ -144,7 +144,8 @@ Only what acts looks clickable. `.mono` is a typeface and takes the text colour;
 means a real link (the System page's open chip, a `.count-link`). An id that copies is a
 `CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A value a
 dialog hands over is a `CopyField` ([A value to copy](#a-value-to-copy)). A long
-id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`). A cut value slides on
+id passes `truncate="start"` to keep its last 24 characters and cut the middle
+(`https://aber.lo…s/iso22400/EFFECTIVENESS`). A cut value slides on
 hover or focus (`OverflowText`); with `truncate="start"` the cut part slides towards the end it keeps.
 The copy and the aria label always carry the full value. The tooltip carries it whenever the chip is
 cut, measured as the pointer or focus arrives, and otherwise says "Click to copy this {label}". A read-only or disabled `.form-control` takes the page background and muted
@@ -344,8 +345,8 @@ page: "Gateways · 81 · last deleted 25 Nov". Drift check `600` refuses a page'
   goes the groups are as they were. Which are open is kept while the page is open, and not in the address.
 - **A closed group still shows what happened in it.** On the Audit Trail a closed section's heading
   row keeps one summary track, with every event of its lanes clustered as a lane's are. Opening an
-  event there opens the section too. The History page is to group its lanes by area and cell
-  under the same heading.
+  event there opens the section too. History's Overview groups its lanes by area and cell under the
+  same heading, and a closed group's row carries its devices' counts merged.
 - **Which groups are closed belongs to the viewer, in this browser.** The Audit Trail keeps its
   closed sections in localStorage (`aber_audit_trail_closed_sections`, read and written inside
   `try`), not in the address, so a shared link opens every section. Expand all and Collapse all
@@ -3956,7 +3957,7 @@ shows it in the dialog's error slot, as it was worded. Nothing is toasted behind
 
 ## Testing
 
-Vitest with globals enabled and a jsdom environment. **3,851 tests across 162 files** at the last count (2026-10-11).
+Vitest with globals enabled and a jsdom environment. **7,742 tests across 462 files** at the last count (2026-11-26).
 
 The suite treats an unhandled promise rejection as a defect, not noise — Vitest reports them
 separately and they can mask real failures.
