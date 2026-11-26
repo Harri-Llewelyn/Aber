@@ -40,8 +40,8 @@ export const MODEL_BUCKET = Deno.env.get("STORAGE_MODEL_BUCKET") ?? "asset-3d-mo
 
 /**
  * Where a device's live readings can be read, for the Asset Interfaces Description. main/index.ts
- * gives these to aas-api alone, so no file aas-export writes names them. Each is blank while what it
- * names is off: the UNS bridge's broker as a consumer dials it, and the i3X server's origin.
+ * gives these to aas-api alone, so no file aas-export writes names them. The UNS bridge's broker, as
+ * a consumer dials it, and the i3X server's origin are each blank while what it names is off.
  */
 export const LIVE_ENDPOINTS: LiveEndpoints = {
   unsBroker: (Deno.env.get("AAS_UNS_BROKER_URL") ?? "").trim().replace(/\/+$/, ""),
@@ -785,7 +785,7 @@ export interface ConceptSource {
   source: string;
 }
 
-/** The addresses LIVE_ENDPOINTS reads, each blank while what it names is off. */
+/** The addresses LIVE_ENDPOINTS reads: the broker and the i3X origin are blank while each is off. */
 export interface LiveEndpoints {
   unsBroker: string;
   unsTopicRoot: string;
