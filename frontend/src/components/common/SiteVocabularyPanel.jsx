@@ -19,9 +19,8 @@ import { EmptyState } from './EmptyState'
 import { ExpandAllToggle } from './ExpandAllToggle'
 import { IconBookOpen, IconFileCode, IconTag, IconTrash, IconUpload } from './Icons'
 import { LoadingState } from './LoadingState'
-import { OverflowText } from './OverflowText'
 import { PersonName } from './PersonName'
-import { RouteLink } from './RouteLink'
+import { RecordChip } from './RecordChip'
 import { SearchInput } from './SearchInput'
 import { SortHeader } from './SortHeader'
 import { Tooltip } from './Tooltip'
@@ -224,10 +223,7 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast, drawerHost = nu
           value: metricsInUse.length === 0 ? 'None' : (
             <div className="context-device-list">
               {metricsInUse.map(m => (
-                <RouteLink key={m.metric_uuid} className="chip chip-link" to={metricUrl(m.metric_uuid, !!m.deprecated)} title={`Open ${m.name} on the Metrics page`}>
-                  <IconTag size={11} />
-                  <OverflowText className="chip-name">{m.name}</OverflowText>
-                </RouteLink>
+                <RecordChip key={m.metric_uuid} icon={<IconTag size={11} />} page="Metrics" to={metricUrl(m.metric_uuid, !!m.deprecated)} name={m.name} />
               ))}
             </div>
           ),

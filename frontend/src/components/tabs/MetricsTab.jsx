@@ -309,16 +309,15 @@ function UncataloguedDrawer({ row, canCatalogue, onCatalogue, onClose, onCopy })
           value: devices.length === 0 ? null : (
             <div className="context-device-list">
               {devices.map(d => (
-                <RouteLink
+                <RecordChip
                   key={d.id}
-                  className="chip chip-link"
+                  kind="devices"
                   to={deviceUrl(d.id)}
-                  title={`Open ${d.name} on the Devices page${d.quarantined ? '. It is in quarantine, awaiting approval.' : ''}`}
+                  name={d.name}
+                  note={d.quarantined && 'It is in quarantine, awaiting approval.'}
                 >
-                  <IconCpu size={11} />
-                  <OverflowText className="chip-name">{d.name}</OverflowText>
                   {d.quarantined && <span className="cell-meta">quarantined</span>}
-                </RouteLink>
+                </RecordChip>
               ))}
             </div>
           ),
