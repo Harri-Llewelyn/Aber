@@ -16,6 +16,8 @@ export const gatewayUrl = (id, archived = false) => pageUrl('gateways', { search
 export const cellUrl = (id, archived = false) => pageUrl('cells', { search: id, lifecycle: archived && 'archived' })
 export const areaUrl = (id, archived = false) => pageUrl('areas', { search: id, lifecycle: archived && 'archived' })
 export const schemaUrl = (uuid) => pageUrl('schemas', { search: uuid })
+/** The Schemas page with every version listed, superseded ones too: the page cannot search by a metric. */
+export const allSchemaVersionsUrl = () => pageUrl('schemas', { status: 'all' })
 
 /** Build Schema from Template on the Schemas page, with one template chosen, by its id. */
 export const schemaFromTemplateUrl = (templateId) => pageUrl('schemas', { template: templateId })

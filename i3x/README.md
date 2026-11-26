@@ -54,6 +54,13 @@ shell describes one asset**, as a document handed over (a snapshot, self-contain
 from `aas-api`; **i3X is an address space queried** for values and their changes, across every
 asset.
 
+**Each names the other.** A device's `metadata.system` names its shell, by `aasShellId` and
+`aasGlobalAssetId`. A shell's telemetry submodel has a second history link, to `/objects/history`
+here, which names its metrics by their elementIds. Both are made from the `sparkplug_id` by one rule,
+which [`asset-identities.json`](../test-harness/fixtures/asset-identities.json) holds `shell.ts` and
+`address_space.py` to. A device's recorded nameplate is a component here too (see
+[Address space](#address-space)).
+
 ## Why it is a separate long-lived service
 
 Subscriptions. i3X requires the server to accumulate value changes between client polls, and those
@@ -235,6 +242,20 @@ The mappings that are decisions rather than mechanics:
   metric's value is its latest sample, with the quality the table below gives its device; one
   never published is `GoodNoData` while its device is online. There is no metric-group level,
   because `Controller` and `Controller/EXECUTION` can both be metrics.
+- **A device's nameplate is a component too.** A device whose nameplate has a value has one
+  `Nameplate`, `i3x:nameplate:<sparkplug_id>`, a leaf component as a metric is. Its value is the
+  fields the shell's Digital Nameplate exports, from `device_nameplate`, under the template's idShorts,
+  with `AddressInformation` as an object. A field with no value, or only spaces, is null. Mirror check
+  180 holds the fields to the shell's.
+  - **It is what somebody recorded, not a reading.** It is `Good` whatever its device's state, at the
+    time it was saved, and stays out of the device's map. It has no history, and no message changes it,
+    so a subscription receives nothing for it.
+  - **Its type is the template's, adapted.** `i3x:type:nameplate` is in
+    `https://admin-shell.io/idta/nameplate/3/0?projection=i3X`, with the template's id as its
+    `sourceTypeId`. Each field is a nullable string. The type is served while a device has a
+    nameplate, as a metric's type is while its catalog row exists.
+  - **The values a device publishes are not in it.** The shell takes a field from a metric the device
+    publishes under an OPC 40001 id before the recorded one. Here that metric is a component of its own.
 
   A metric's type is its catalog row, `i3x:type:metric:<name>`, read at request time and never
   written back. Its schema is a scalar from the row's Sparkplug datatype, with these keywords:
@@ -281,7 +302,9 @@ The mappings that are decisions rather than mechanics:
   would name its own root. The `schemas` row itself is never changed.
 - **`isExtended` is judged against the union of what a device's schemas model.** When it is true,
   `metadata.schemaExtensions` gives each metric beyond them a JSON Schema fragment from its DBIRTH
-  datatype. Vendor keys, `quarantined` among them, are under `metadata.system`.
+  datatype. Vendor keys are under `metadata.system`: `quarantined`, and the device's AAS shell,
+  `aasShellId` and `aasGlobalAssetId`. Those two are `<AAS_BASE_IRI><sparkplug_id>` and that with
+  `/shell`, under the base the chart gives `aas-export` (`supabaseFunctions.aas.baseIri`).
 - **`quality` is derived at read time, by one rule.** `value_quality()` in `address_space.py`
   decides it for `/objects/value`, for every staged subscription update and for history. It takes
   the device's row, its gateway's row and whether a value is held. A `quality` column on the
@@ -398,6 +421,7 @@ schemes make them, all in `address_space.py`:
 | The type of a device with several schemas | `i3x:type:schemas:<uuids, sorted, joined by +>` | Synthetic |
 | A catalog metric's type | `i3x:type:metric:<name>` | Synthetic |
 | The type of a metric the catalog lacks | `i3x:type:sparkplug:<datatype>`, `i3x:type:unknown` | Synthetic |
+| A device's Nameplate, and its type | `i3x:nameplate:<sparkplug_id>`, `i3x:type:nameplate` | Synthetic: its row is keyed by its device |
 
 A RelationshipType's `elementId` is its name, such as `HasParent`.
 
@@ -604,10 +628,11 @@ that is not a string failing its own item with a 400. A `subscriptionId` that is
 | A device at `maxDepth: 0`, or 2 or more | The device, and each of its metrics as `<device>/<metric>`, in one batch when both change |
 | A metric, `<device>/<metric>` | That metric only, whatever its depth |
 | A gateway | That gateway only: its birth, its death, and a heartbeat that changes its live status. It composes nothing, so not its devices |
+| A device's Nameplate, `i3x:nameplate:<device>` | Nothing: no message changes it. Read it with `/objects/value` |
 | The site, an area, a cell, a lane or Unassigned | Nothing |
 
-**A metric's parent is read from its elementId.** The only composition is a device's metrics, and a
-`sparkplug_id` never contains `/`, so the device is the text before the first one. The MQTT thread
+**A metric's parent is read from its elementId.** A device's metrics are the components that change,
+and a `sparkplug_id` never contains `/`, so the device is the text before the first one. The MQTT thread
 therefore matches a change to its subscribers without reading the address space. What the owner may
 still see is checked at each delivery, as above.
 

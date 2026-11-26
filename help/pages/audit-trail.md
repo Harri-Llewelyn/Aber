@@ -30,6 +30,9 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 - **Collapse all**, at the start of the key's row, over the section headings, closes every section. While every section is closed it reads **Expand all**, and opens them all. Every section starts open. Aber remembers which sections you closed in this browser, so they stay closed when you come back.
 - **A lane's name** opens the drawer on the newest change to that entity. Then **Previous**, or ←, steps back through its history. An entity with no name is labelled by a short form of its ID. Point at a lane's name to see the whole name and the entity's ID. A name too long for its column is cut short, and slides to show the rest while you point at it.
 - **The event drawer** opens when you click a marker. It shows when the change was recorded, the actor, the entity ID, the mutation ID, the transaction ID and the description. **Previous** and **Next**, or ← and →, step through that lane's history. **Previous Entity** and **Next Entity**, or ↑ and ↓, move to the entity above or below, at the same point in time. They skip the entities in a closed section. Above the buttons, "Event 3 of 7 · Entity 4 of 23" says where you are.
+- **A link to one event** opens its drawer, even when the event is older than the events loaded. A readings export's toast has such a link. **Previous** and **Next** step through the changes to its entity read with it.
+  - A filter in the link that leaves the event out is cleared.
+  - A link to an event that does not exist, or that you may not read, opens the drawer to say so.
 - **Property** and **Previous** in the drawer show the field that changed and the value it held before. Together they answer "when did this become wrong?".
 - **Same transaction** lists the other rows written by the same act. **Show whole transaction** loads all of them, by searching for the transaction ID. The section appears only when the act wrote something else, or may have. When Aber cannot count the act's rows, the section says so.
 - **The step buttons** run across the drawer's full width, under its title. **Previous** and **Next** are on the first row, and **Previous Entity** and **Next Entity** under them.
@@ -37,7 +40,7 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 - **View in Devices**, at the foot of the drawer, opens the entity on its own page. It reads **View in Gateways**, **View in Cells**, **View in Areas** or **View in Schemas** for those kinds. A deleted entity has no page, so it has no such button.
 - **Raw audit payload** opens the entry exactly as it was recorded, for when the summary is not enough.
 - **A read of a service's logs** over a fixed window shows the window as one row, in your local time, such as "3 Nov 09:00 – 4 Nov 09:00". The raw payload keeps its two ends in UTC, as they were recorded.
-- **Show more** at the foot loads the next 200 events, older than those already loaded. Beside it is the number loaded out of the number that match, such as "200 of 242". **All N shown.** appears once every matching event is loaded. Under **All time** the page loads 200 events at first. Any other window loads every event in it by itself, up to 2,000, as [Moving through time](#moving-through-time) says.
+- **Show 200 More Events** at the foot loads the next 200 events, older than those already loaded. Beside it are the events loaded and the events that match, such as "200 events of 242 events for 31 entities". The last part counts the entities those events are about. **All 242 events for 31 entities shown.** appears once every matching event is loaded. Under **All time** the page loads 200 events at first. Any other window loads every event in it by itself, up to 2,000, as [Moving through time](#moving-through-time) says.
 - The page **refreshes itself** every 60 seconds, unless an Administrator changed that on the Settings page. A refresh adds new events at the top, and keeps the pages you already loaded.
 
 ## Moving through time
@@ -59,7 +62,7 @@ Under a rolling or custom range, no span is chosen. The arrows are called **Earl
 
 When the window runs on past now, as today's does, the axis shows **Now** and the time. The part after it is hatched and says **Nothing recorded yet**.
 
-A window loads every event in it by itself, 200 at a time, up to 2,000 events. The foot says **Loading…** until it has them. A window that holds more than 2,000 loads the newest 2,000. Its start is then hatched and says **Older events not loaded: more than 2,000 in this window**, or **Not loaded: over 2,000** where the hatched part is narrow. **Show more** at the foot loads older ones, 200 at a time. The page stops at 2,000 so that a busy month stays quick to draw.
+A window loads every event in it by itself, 200 at a time, up to 2,000 events. The foot says **Loading…** until it has them. A window that holds more than 2,000 loads the newest 2,000. Its start is then hatched and says **Older events not loaded: more than 2,000 in this window**, or **Not loaded: over 2,000** where the hatched part is narrow. **Show 200 More Events** at the foot loads older ones, 200 at a time. The page stops at 2,000 so that a busy month stays quick to draw.
 
 The address keeps the window, so a link you share opens the same one.
 

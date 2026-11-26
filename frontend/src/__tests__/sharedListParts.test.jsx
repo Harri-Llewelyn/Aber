@@ -69,44 +69,44 @@ describe('ClearFilters', () => {
 })
 
 describe('ListFoot', () => {
-  it('offers the rows left when fewer than a step remain', () => {
+  it('offers the rows left when fewer than a step remain, naming them in Title Case', () => {
     const onMore = vi.fn()
-    render(<ListFoot shown={30} total={57} step={30} onMore={onMore} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show 27 more' }))
+    render(<ListFoot shown={30} total={57} step={30} noun="run" onMore={onMore} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show 27 More Runs' }))
     expect(onMore).toHaveBeenCalledTimes(1)
   })
 
   it('names the full step when more than a step remains', () => {
-    render(<ListFoot shown={30} total={100} step={30} onMore={() => {}} />)
-    expect(screen.getByRole('button', { name: 'Show 30 more' })).toBeInTheDocument()
+    render(<ListFoot shown={30} total={100} step={30} noun="run" onMore={() => {}} />)
+    expect(screen.getByRole('button', { name: 'Show 30 More Runs' })).toBeInTheDocument()
   })
 
   it('says everything is shown at the end', () => {
-    render(<ListFoot shown={57} total={57} onMore={() => {}} />)
-    expect(screen.getByText('All 57 shown.')).toBeInTheDocument()
+    render(<ListFoot shown={57} total={57} noun="run" onMore={() => {}} />)
+    expect(screen.getByText('All 57 runs shown.')).toBeInTheDocument()
     expect(screen.queryByRole('button')).toBeNull()
   })
 
   it('renders nothing for an empty list', () => {
-    const { container } = render(<ListFoot shown={0} total={0} onMore={() => {}} />)
+    const { container } = render(<ListFoot shown={0} total={0} noun="run" onMore={() => {}} />)
     expect(container).toBeEmptyDOMElement()
   })
 
   it('shows the pending state on the button', () => {
-    render(<ListFoot shown={30} total={57} pending onMore={() => {}} />)
+    render(<ListFoot shown={30} total={57} pending noun="run" onMore={() => {}} />)
     const btn = screen.getByRole('button', { name: /Loading…/ })
     expect(btn).toBeDisabled()
     expect(btn).toHaveAttribute('aria-busy', 'true')
   })
 
   it('says how many are loaded beside the button only when asked, as the total may be an estimate', () => {
-    const { rerender } = render(<ListFoot shown={30} total={57} onMore={() => {}} />)
-    expect(screen.queryByText('30 of 57')).toBeNull()
-    rerender(<ListFoot shown={30} total={57} counted onMore={() => {}} />)
-    expect(screen.getByText('30 of 57')).toBeInTheDocument()
-    rerender(<ListFoot shown={57} total={57} counted onMore={() => {}} />)
-    expect(screen.queryByText('57 of 57')).toBeNull()
-    expect(screen.getByText('All 57 shown.')).toBeInTheDocument()
+    const { rerender } = render(<ListFoot shown={30} total={57} noun="run" onMore={() => {}} />)
+    expect(screen.queryByText('30 runs of 57 runs')).toBeNull()
+    rerender(<ListFoot shown={30} total={57} counted noun="run" onMore={() => {}} />)
+    expect(screen.getByText('30 runs of 57 runs')).toBeInTheDocument()
+    rerender(<ListFoot shown={57} total={57} counted noun="run" onMore={() => {}} />)
+    expect(screen.queryByText('57 runs of 57 runs')).toBeNull()
+    expect(screen.getByText('All 57 runs shown.')).toBeInTheDocument()
   })
 })
 
