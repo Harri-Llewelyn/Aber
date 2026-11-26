@@ -1420,6 +1420,7 @@ paths:
                 properties:
                   events: { type: array, items: { $ref: '#/components/schemas/AuditTrailEntry' } }
                   total_matching: { type: integer, description: 'Rows the filters select in all, not just this page.' }
+                  matching_entities: { type: integer, description: 'Entities those rows are about, each once, under the same filters.' }
                   purged_assets: { type: integer, description: 'Deleted entities the filters cover.' }
                   truncated: { type: boolean, description: 'There is a next page.' }
                   next_cursor: { type: object, nullable: true, properties: { recorded_at: { type: string, format: date-time }, id: { type: integer, format: int64 } } }
