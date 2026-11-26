@@ -2847,7 +2847,8 @@ main:focus { outline: none; }
 .schema-asides > .field-error-above,
 .schema-asides > details[open] { flex: 1 0 100%; }
 .schema-asides > .field-error-above { margin-top: 12px; margin-bottom: 0; }
-.schema-derived { margin-top: 16px; }
+.schema-derived,
+.schema-template { margin-top: 16px; }
 .schema-derived-hint { margin: 4px 0 6px; }
 /* As tall as they are, up to two under their group's heading. Open, they take their height from the metric
    list, which then keeps its search and a row or two. */
