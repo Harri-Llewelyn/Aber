@@ -38,6 +38,13 @@
           "description": "How to read `semantic_id`: IRI for a URL or URN, IRDI for an ECLASS or IEC CDD code, ExpandedNodeId for an OPC UA node. Only with `semantic_id`.",
           "enum": ["IRI", "IRDI", "ExpandedNodeId"]
         },
+        "template": {
+          "description": "The id of the IDTA submodel template the schema is built from, as the Vocabulary page's Templates tab lists it. The schema's semantic id is then the template's id, so leave `semantic_id` out or give the same id. Aber works out which element each metric fills, and refuses a schema that leaves out an element the template requires. A file says what is saved: leave it out for a schema built from the catalogue alone.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "examples": ["https://admin-shell.io/idta/nameplate/3/0/Nameplate"]
+        },
         "change_description": {
           "description": "Why this version exists, up to 1,000 characters. Used only when the file makes a new draft version of a schema that exists, or a new schema. Optional.",
           "type": "string",

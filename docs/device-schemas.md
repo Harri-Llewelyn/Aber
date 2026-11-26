@@ -63,6 +63,7 @@ A file is a list of schemas. Each is a set of these keys.
 | `description` | No | What the schema is for, up to 4,000 characters. |
 | `semantic_id` | No | The published id of the standard Submodel the schema matches, 1 to 1,000 characters. |
 | `semantic_id_type` | No | How to read `semantic_id`: `IRI`, `IRDI` or `ExpandedNodeId`. Only with `semantic_id`. |
+| `template` | No | The id of the IDTA submodel template the schema is built from. Left out, the schema is built from the catalogue alone. |
 | `change_description` | No | Why this version exists, up to 1,000 characters. Used only when the file makes a new version or a new schema. |
 | `metrics` | Yes | The catalogue metrics the schema models: a list of 1 to 1,000. |
 | `derived_metrics` | No | The derived metrics the schema's devices get, by name: a list of up to 1,000. Left out, the schema names none. |
@@ -107,6 +108,13 @@ Things to know:
   lacks is refused, and so is a measured metric.
 - **A file without `derived_metrics` names none.** A file says what is saved. A file exported before Aber
   1.10 has no such key, so applying it removes every one the schema names. The preview lists each.
+- **`template` names the submodel template a schema is built from,** as the Vocabulary page's Templates
+  tab lists it. The schema's semantic id is then the template's id: leave `semantic_id` out, or give the
+  same id. Aber works out which element of the template each metric fills, as Build Schema from Template
+  does, from the catalogue of the site the file is applied on. A schema that leaves out an element the
+  template requires is refused, and the reason names the element.
+- **A file without `template` builds none.** A file says what is saved. Applying one to a schema built from
+  a template makes a draft that is not, and `changes` says so.
 - **A range is a number in the metric's catalogue unit.** Never write a unit. It applies to a metric
   that is a number, and `minimum` is not above `maximum`. Leave a side out for no bound. A device set to
   Enforce drops a reading outside the range.

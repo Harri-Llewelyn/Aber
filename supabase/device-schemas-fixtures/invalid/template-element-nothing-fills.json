@@ -1,0 +1,16 @@
+{
+  "about": "A template whose required elements no metric the file lists fills.",
+  "path": "$[0].template",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Nameplate",
+      "template": "https://admin-shell.io/idta/nameplate/3/0/Nameplate",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

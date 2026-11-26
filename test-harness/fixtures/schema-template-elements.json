@@ -1,0 +1,84 @@
+{
+  "about": "Which element of a submodel template each metric of a schema fills, and which elements the template requires. One rule in SQL (schema_template_elements() and template_required_paths(), 0342) and in the dashboard (templateElementFill() and requiredTemplatePaths() in utils/idtaTemplates.js). Each is run over these cases and gives exactly these answers. The template is made up: its rows are planted, as the seeded templates' are generated.",
+  "template": {
+    "template_id": "https://example.com/aber/fixture/0342/Template",
+    "template_name": "Fixture Template",
+    "template_number": "FIXTURE 0342",
+    "template_version": "1.0.0"
+  },
+  "elements": [
+    { "path": "Name", "parent_path": null, "ordinal": 1, "id_short": "Name", "model_type": "Property", "value_type": "xs:string", "semantic_id": "urn:aber:fixture:0342:name", "cardinality": "One" },
+    { "path": "Label", "parent_path": null, "ordinal": 2, "id_short": "Label", "model_type": "MultiLanguageProperty", "value_type": null, "semantic_id": "urn:aber:fixture:0342:label", "cardinality": "OneToMany" },
+    { "path": "Serial", "parent_path": null, "ordinal": 3, "id_short": "Serial", "model_type": "Property", "value_type": "xs:string", "semantic_id": "urn:aber:fixture:0342:serial", "cardinality": "ZeroToOne" },
+    { "path": "Address", "parent_path": null, "ordinal": 4, "id_short": "Address", "model_type": "SubmodelElementCollection", "value_type": null, "semantic_id": "urn:aber:fixture:0342:address", "cardinality": "One" },
+    { "path": "Address.Street", "parent_path": "Address", "ordinal": 5, "id_short": "Street", "model_type": "MultiLanguageProperty", "value_type": null, "semantic_id": "urn:aber:fixture:0342:street", "cardinality": "One" },
+    { "path": "Markings", "parent_path": null, "ordinal": 6, "id_short": "Markings", "model_type": "SubmodelElementList", "value_type": "SubmodelElementCollection", "semantic_id": "urn:aber:fixture:0342:markings", "cardinality": "ZeroToOne" },
+    { "path": "Markings[0]", "parent_path": "Markings", "ordinal": 7, "id_short": null, "model_type": "SubmodelElementCollection", "value_type": null, "semantic_id": "urn:aber:fixture:0342:marking", "cardinality": "OneToMany" },
+    { "path": "Markings[0].MarkingName", "parent_path": "Markings[0]", "ordinal": 8, "id_short": "MarkingName", "model_type": "Property", "value_type": "xs:string", "semantic_id": "urn:aber:fixture:0342:marking-name", "cardinality": "One" },
+    { "path": "Logo", "parent_path": null, "ordinal": 9, "id_short": "Logo", "model_type": "File", "value_type": "image/png", "semantic_id": "urn:aber:fixture:0342:logo", "cardinality": "One" },
+    { "path": "Note", "parent_path": null, "ordinal": 10, "id_short": "Note", "model_type": "Property", "value_type": "xs:string", "semantic_id": null, "cardinality": "One" },
+    { "path": "Count", "parent_path": null, "ordinal": 11, "id_short": "Count", "model_type": "Property", "value_type": "xs:int", "semantic_id": "urn:aber:fixture:0342:count", "cardinality": null },
+    { "path": "SerialAgain", "parent_path": null, "ordinal": 12, "id_short": "SerialAgain", "model_type": "Property", "value_type": "xs:string", "semantic_id": "urn:aber:fixture:0342:serial", "cardinality": "ZeroToOne" }
+  ],
+  "required": ["Name", "Label", "Address.Street"],
+  "catalog": [
+    { "name": "Fixture_0342/NAME", "semantic_id": "urn:aber:fixture:0342:name", "further": [] },
+    { "name": "Fixture_0342/LABEL", "semantic_id": "urn:aber:fixture:other:label", "further": ["urn:aber:fixture:0342:label"] },
+    { "name": "Fixture_0342/SERIAL", "semantic_id": "urn:aber:fixture:0342:serial", "further": [] },
+    { "name": "Fixture_0342/COUNT", "semantic_id": "urn:aber:fixture:0342:count", "further": ["urn:aber:fixture:0342:name"] },
+    { "name": "Fixture_0342/NAME_TOO", "semantic_id": "urn:aber:fixture:other:name-too", "further": ["urn:aber:fixture:0342:name"] },
+    { "name": "Fixture_0342/STREET", "semantic_id": "urn:aber:fixture:other:street", "further": ["urn:aber:fixture:0342:street"] },
+    { "name": "Fixture_0342/LOGO", "semantic_id": "urn:aber:fixture:0342:logo", "further": [] },
+    { "name": "Fixture_0342/MARKING", "semantic_id": "urn:aber:fixture:0342:marking-name", "further": [] },
+    { "name": "Fixture_0342/ADDRESS", "semantic_id": "urn:aber:fixture:0342:address", "further": [] },
+    { "name": "Fixture_0342/UNNAMED", "semantic_id": null, "further": [] },
+    { "name": "Fixture_0342/ELSEWHERE", "semantic_id": "urn:aber:fixture:other:elsewhere", "further": [] }
+  ],
+  "cases": [
+    {
+      "key": "every-required-element-is-filled",
+      "metrics": ["Fixture_0342/NAME", "Fixture_0342/LABEL", "Fixture_0342/STREET"],
+      "filled": {
+        "Fixture_0342/NAME": { "path": "Name", "semantic_id": "urn:aber:fixture:0342:name" },
+        "Fixture_0342/LABEL": { "path": "Label", "semantic_id": "urn:aber:fixture:0342:label" },
+        "Fixture_0342/STREET": { "path": "Address.Street", "semantic_id": "urn:aber:fixture:0342:street" }
+      },
+      "missing": []
+    },
+    {
+      "key": "nothing-fills-anything",
+      "metrics": ["Fixture_0342/ELSEWHERE", "Fixture_0342/UNNAMED"],
+      "filled": {},
+      "missing": ["Name", "Label", "Address.Street"]
+    },
+    {
+      "key": "of-two-elements-with-one-id-the-first-is-filled",
+      "metrics": ["Fixture_0342/SERIAL"],
+      "filled": { "Fixture_0342/SERIAL": { "path": "Serial", "semantic_id": "urn:aber:fixture:0342:serial" } },
+      "missing": ["Name", "Label", "Address.Street"]
+    },
+    {
+      "key": "a-metrics-own-id-comes-before-a-further-id-that-is-earlier-in-the-template",
+      "metrics": ["Fixture_0342/COUNT"],
+      "filled": { "Fixture_0342/COUNT": { "path": "Count", "semantic_id": "urn:aber:fixture:0342:count" } },
+      "missing": ["Name", "Label", "Address.Street"]
+    },
+    {
+      "key": "two-metrics-fill-one-element",
+      "metrics": ["Fixture_0342/NAME", "Fixture_0342/NAME_TOO", "Fixture_0342/LABEL", "Fixture_0342/STREET"],
+      "filled": {
+        "Fixture_0342/NAME": { "path": "Name", "semantic_id": "urn:aber:fixture:0342:name" },
+        "Fixture_0342/NAME_TOO": { "path": "Name", "semantic_id": "urn:aber:fixture:0342:name" },
+        "Fixture_0342/LABEL": { "path": "Label", "semantic_id": "urn:aber:fixture:0342:label" },
+        "Fixture_0342/STREET": { "path": "Address.Street", "semantic_id": "urn:aber:fixture:0342:street" }
+      },
+      "missing": []
+    },
+    {
+      "key": "a-file-a-collection-and-an-element-inside-an-optional-list-are-not-asked-for",
+      "metrics": ["Fixture_0342/LOGO", "Fixture_0342/ADDRESS", "Fixture_0342/MARKING"],
+      "filled": { "Fixture_0342/MARKING": { "path": "Markings[0].MarkingName", "semantic_id": "urn:aber:fixture:0342:marking-name" } },
+      "missing": ["Name", "Label", "Address.Street"]
+    }
+  ]
+}

@@ -67,6 +67,76 @@ export function templateSections(elements) {
     .sort((a, b) => a.template.number.localeCompare(b.template.number) || a.title.localeCompare(b.title))
 }
 
+/** The templates the rows hold, one each, by IDTA number: `{ id, name, number, version, title }`. */
+export function templateList(elements) {
+  return templateSections(elements).map(s => ({ ...s.template, title: s.title }))
+}
+
+/** The elements a metric can fill: a value goes in them. schema_template_elements() in 0342 names the same. */
+export const FILLABLE_MODEL_TYPES = Object.freeze(['Property', 'MultiLanguageProperty'])
+
+/** The cardinalities that make an element one a submodel must hold. template_required_paths() names the same. */
+export const REQUIRED_CARDINALITIES = Object.freeze(['One', 'OneToMany'])
+
+/** An element a metric can fill: a Property or a MultiLanguageProperty with a semantic id. */
+export const isFillable = (element) => FILLABLE_MODEL_TYPES.includes(element?.model_type) && !!element?.semantic_id
+
+/** A template's elements a metric can fill, in the template's order. */
+export function fillableElements(elements, templateId) {
+  return (elements || []).filter(e => e.template_id === templateId && isFillable(e)).sort((a, b) => a.ordinal - b.ordinal)
+}
+
+/**
+ * The element of the template each metric fills: `{ [metric name]: { path, semantic_id } }`. A metric fills
+ * the first element a metric can fill whose semantic id is its own id, or else one of its further ids
+ * (`further_semantic_ids`, as api.js reads the catalogue). The database writes the same with
+ * schema_template_elements() (0342), and test-harness/fixtures/schema-template-elements.json holds the two.
+ */
+export function templateElementFill(elements, templateId, metrics) {
+  const fillable = fillableElements(elements, templateId)
+  const filled = {}
+  for (const metric of metrics || []) {
+    const further = (metric.further_semantic_ids || []).map(f => (typeof f === 'string' ? f : f.semantic_id))
+    const element = (metric.semantic_id && fillable.find(e => e.semantic_id === metric.semantic_id))
+      || fillable.find(e => further.includes(e.semantic_id))
+    if (element) filled[metric.name] = { path: element.path, semantic_id: element.semantic_id }
+  }
+  return filled
+}
+
+/**
+ * The paths a submodel of the template must hold that a metric can fill, in the template's order: one whose
+ * cardinality is One or OneToMany, inside no element whose cardinality is anything else. An element inside one
+ * that may be left out is asked for only where that one is there, which a schema of metrics does not say.
+ */
+export function requiredTemplatePaths(elements, templateId) {
+  const rows = (elements || []).filter(e => e.template_id === templateId)
+  const optional = rows.filter(a => !REQUIRED_CARDINALITIES.includes(a.cardinality))
+  const inside = (e, a) => e.path.startsWith(`${a.path}.`) || e.path.startsWith(`${a.path}[`)
+  return fillableElements(rows, templateId)
+    .filter(e => REQUIRED_CARDINALITIES.includes(e.cardinality) && !optional.some(a => inside(e, a)))
+    .map(e => e.path)
+}
+
+/**
+ * Every reason a version built from a template may not be saved, in the words schema_template_problems()
+ * (0342) refuses it with, in the same order: mirror check 182 holds the sentences. `title` is the template's
+ * name and version, or null for an id the rows do not hold.
+ */
+export function templateProblems({ templateId, title, semanticId, required, filled }) {
+  if (!title) return [`${templateId} is not a template Aber holds. Choose one on the Vocabulary page's Templates tab.`]
+  const problems = []
+  if (semanticId !== templateId) {
+    problems.push(`A schema built from ${title} carries the template's id as its semantic id: ${templateId}.`)
+  }
+  const paths = new Set(Object.values(filled || {}).map(f => f.path))
+  const missing = (required || []).filter(p => !paths.has(p))
+  if (missing.length > 0) {
+    problems.push(`No metric here fills ${missing.join(', ')}, which ${title} requires. A metric fills an element when the element's semantic id is the metric's own or one of its further ids.`)
+  }
+  return problems
+}
+
 /** What an element's tooltip says, and the search reads: its path, then what the template says of it. */
 export function elementTooltip(element) {
   if (!element) return ''
