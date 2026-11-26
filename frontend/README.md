@@ -3133,16 +3133,15 @@ opens itself on that call, so `App.jsx` needs no wiring for it.
 [the Entities page](#the-entities-page-lists-every-kind-and-finds-any-id) does, with people from the same
 `useLocalEntities()`, read as the bar first opens. It asks from two characters, once typing has rested 180 ms.
 `shortlist()` orders them: a whole id, a whole name, the start of an id, part of a name, and in service
-first among equals. It keeps 10 of a kind (`RECORD_KIND_LIMIT`). An answer stops at 200 rows, which one kind can
-fill: four hundred devices before a cell. So `findEntities({ share, kinds })` then reads each kind short of
-its share apart, by name, all at once. A row opens `recordUrl()`: its own page while the rail has that page,
+first among equals. It keeps 10 of a kind (`RECORD_KIND_LIMIT`), and asks the database for no more of each
+(`p_per_kind`), so one request answers and four hundred devices leave room for a cell. The browser
+orders them again, with people's rows. A row opens `recordUrl()`: its own page while the rail has that page,
 else `/entities?find=<id>`. An id adds *View in Entities* and *Find This ID in the Audit Trail*, whatever it
 names; a text is one by its shape (`isIdShaped()`) or by what it found (`idFoundBy()`). The trail is handed
 the record's own id for a further id of one record, since its search does not read every further id. Nothing
 moves as the records arrive: they are last, the two id rows come with them, and the highlight follows its row
 by key. Until the answer is in, the last answer's rows that the new text names as well stay. With 4,950
-devices and 200 tombstones, the records were in 260 to 300 ms after the last key, and 330 to 400 ms where
-kinds were read apart.
+devices and 2,000 tombstones, the records were in 250 to 310 ms after the last key, however broad the text.
 
 ### Opening help from anywhere
 

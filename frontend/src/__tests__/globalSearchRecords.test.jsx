@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { visiblePages } from '../navigation'
 import { DEFAULT_ROLE_PERMISSIONS_MAP } from '../hooks/usePermissions'
 import { entityUrl, findEntityUrl, identityUrl, personUrl, trailUrl } from '../routes'
+import { ENTITY_FIND_LIMIT } from '../constants'
 import { DIRECTORY_KINDS } from '../utils/entities'
 import { KNOWN_PRINCIPALS } from '../utils/serviceIdentities'
 
@@ -86,13 +87,17 @@ beforeEach(() => {
 })
 
 describe('the search', () => {
-  it('asks the one search for an id and for a name, with each kind\'s share', async () => {
+  it('asks the one search for an id and for a name, with its limit of each kind', async () => {
     show('Operator')
     type(DEVICE.id)
-    await waitFor(() => expect(api.findEntities).toHaveBeenCalledWith(DEVICE.id, { share: RECORD_KIND_LIMIT, kinds: DIRECTORY_KINDS }))
+    await waitFor(() => expect(api.findEntities).toHaveBeenCalledWith(DEVICE.id, { perKind: RECORD_KIND_LIMIT }))
     type('haas')
-    await waitFor(() => expect(api.findEntities).toHaveBeenCalledWith('haas', { share: RECORD_KIND_LIMIT, kinds: DIRECTORY_KINDS }))
+    await waitFor(() => expect(api.findEntities).toHaveBeenCalledWith('haas', { perKind: RECORD_KIND_LIMIT }))
     expect(api.findEntities).toHaveBeenCalledTimes(2)
+  })
+
+  it('asks for no more of every kind together than one answer holds', () => {
+    expect(DIRECTORY_KINDS.length * RECORD_KIND_LIMIT).toBeLessThanOrEqual(ENTITY_FIND_LIMIT)
   })
 
   it('asks once for ten keystrokes typed together, with what they add up to', async () => {

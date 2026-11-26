@@ -4942,37 +4942,16 @@ const apiMethods = {
 
   /**
    * The entities one text names, whatever their state: a whole id of any kind, the start of one, or any
-   * part of a name (find_entities(), 0321). At most `limit` rows, a whole id first.
-   *
-   * `share` is the search bar's, with the `kinds` it lists. A full answer can be all of one kind, since it
-   * goes by rank and then by name: four hundred devices before a cell, or two hundred deleted ones before
-   * one in service. Each kind with fewer than `share` rows in service is then read apart by name, its best
-   * `share`, all at once. One that is refused leaves the rows there are.
+   * part of a name (find_entities(), 0321). At most `limit` rows, a whole id first; with `perKind`, at
+   * most that many of each kind, its best, so one kind cannot fill the answer.
    */
-  findEntities: async (text, { limit = ENTITY_FIND_LIMIT, share = null, kinds = [] } = {}) => {
-    const wanted = String(text || '').trim();
-    if (!wanted) return [];
-    const { data, error } = await supabase.rpc('find_entities', { p_query: text, p_limit: limit });
-    if (error) throw new Error(error.message || 'Could not search the entities');
-    const rows = data || [];
-    if (!share || rows.length < limit) return rows;
-
-    const inService = (kind) => rows.filter(row => row.kind === kind && row.state === 'active').length;
-    // LIKE's wildcards are text here, as they are to find_entities().
-    const pattern = `%${wanted.replace(/([%_\\])/g, '\\$1')}%`;
-    const reads = kinds.filter(kind => inService(kind) < share).map(async kind => {
-      // The three states are in this order by their own letters: active, archived, retired.
-      const { data: found, error: refused } = await supabase.from('entity_directory').select('*')
-        .eq('kind', kind).ilike('name', pattern).order('state').order('name').limit(share);
-      return refused ? [] : found || [];
+  findEntities: async (text, { limit = ENTITY_FIND_LIMIT, perKind = null } = {}) => {
+    if (!String(text || '').trim()) return [];
+    const { data, error } = await supabase.rpc('find_entities', {
+      p_query: text, p_limit: limit, ...(perKind && { p_per_kind: perKind }),
     });
-    const keyOf = (row) => `${row.state}:${row.kind}:${row.id}`;
-    const all = new Map(rows.map(row => [keyOf(row), row]));
-    for (const row of (await Promise.all(reads)).flat()) {
-      // Checked again: PostgREST reads a `*` as a wildcard, and nothing escapes it.
-      if (String(row.name || '').toLowerCase().includes(wanted.toLowerCase())) all.set(keyOf(row), row);
-    }
-    return [...all.values()];
+    if (error) throw new Error(error.message || 'Could not search the entities');
+    return data || [];
   },
 
   delete: async (path, _options = {}) => {
