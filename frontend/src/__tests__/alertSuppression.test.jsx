@@ -3,7 +3,7 @@ import { render, screen, fireEvent, within, waitFor, act, renderHook } from '@te
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AlertPill } from '../components/common/AlertPill'
 import { ContextPanel } from '../components/common/ContextPanel'
-import { alertIndex, alertForDevice, alertState } from '../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../utils/alertSubjects'
 import {
   countedAlerts, isSuppressed, maySuppress, nextSuppressionChange, suppressionMaxDays, windowState,
   SUPPRESSION_MAX_DAYS, SUPPRESSION_MAX_DAYS_KEY, SUPPRESSION_WINDOW_ROLES,

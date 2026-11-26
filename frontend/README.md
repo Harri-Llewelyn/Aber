@@ -3103,6 +3103,7 @@ that describes a component keeps the detail, and *Not* names what to use instead
 
 | Component | What it is for | Not |
 | :--- | :--- | :--- |
+| `AlertBadge` | A row's alert, beside its status: ALARM, WARNING or ACKNOWLEDGED | The drawer's: `ContextPanel`'s `alert` |
 | `AlertPill` | The top bar's alert counter, and the list behind it | |
 | `Badge` | A status or category chip; `ArchivedBadge` is ARCHIVED | A gateway's status: `StatusBadge`. A derived metric: `DerivedTag` |
 | `ConnectionStrip` | The row that says the page has stopped updating | |
@@ -3601,12 +3602,12 @@ passes `{ record: false }`, as an alert's toast does.
   about (`alertSubjectUrl()`). The dialogs are drawn inside the counter's wrapper, so a click in one
   is not a click outside the list. Another person's acknowledgement arrives as an `UPDATE` on
   `platform_alerts`, which the counter's subscription already carries. The pages draw the *Alert
-  acknowledged* state from `alertIndex()` (`utils/deviceAlerts.js`), where an unacknowledged alert
+  acknowledged* state from `alertIndex()` (`utils/alertSubjects.js`), where an unacknowledged alert
   outranks any acknowledged one. The acknowledger is named by display name with their email as its
   tooltip, else by email (`PersonName`, `acknowledgerName()` in `utils/alertHistory.js`), the same on
   every surface. `usePlatformAlerts` reads the names once for the whole list and gives each
-  acknowledged alert its `acknowledged_by_name`, so the counter, the banner and the Devices table
-  read the same.
+  acknowledged alert its `acknowledged_by_name`, so the counter, the banner and the Devices and
+  Gateways tables read the same.
 - **A suppressed alert is not counted and colours nothing** (0240). `platform_alerts_active` says
   whether a suppression window covers each alert as it is read, with the window's reason and end.
   `countedAlerts()` (`utils/alertSuppression.js`) leaves acknowledged and suppressed alerts out of
@@ -3803,7 +3804,8 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
   - **A column sorts by what it means, not by its text** (`utils/tableSort.js`): `text` in natural
     order ("Line 9" before "Line 10"), `number`, `time` by instant, and `rank`, a number the column
     works out. A status ranks by its badge's colour, `severityRank(tone)`, so ascending puts red and
-    amber first; a status with a fixed order of its own (Cold Storage's export sequence) uses
+    amber first. Where a row's alert sits beside its status (Devices, Gateways, `AlertBadge`), a
+    firing alert ranks first, then an acknowledged one, then the status (`statusSortRank()`); a status with a fixed order of its own (Cold Storage's export sequence) uses
     `rankIn(order, value)`. A column sorts on the value its cell shows, so a count column counts
     what the cell counts.
   - **An empty cell goes last** in either direction: Never, no gateway, a dash that stands for no

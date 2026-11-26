@@ -55,7 +55,7 @@ import { RequiredMark } from '../common/RequiredMark'
 import { plural } from '../../utils/format'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
 import { inServiceDevices, inServiceGateways } from '../../utils/inService'
-import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../../utils/alertSubjects'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { FilterDropdown } from '../common/FilterChecklist'
@@ -66,7 +66,7 @@ import { useSortableRows } from '../../hooks/useTableSort'
 import { Tooltip } from '../common/Tooltip'
 
 export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewTrail, onShowOnSiteMap, hasPermission, userRole = null, activeAlerts = [] }) {
-  /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js. */
+  /** Devices Grafana currently has an alert firing on -- see utils/alertSubjects.js. */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   const [cells, setCells]       = useState([])
   const [areas, setAreas]       = useState([])
