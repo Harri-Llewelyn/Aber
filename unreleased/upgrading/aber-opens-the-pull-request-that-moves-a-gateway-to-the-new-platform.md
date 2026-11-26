@@ -23,6 +23,9 @@ Nothing moves until you merge, so a gateway you leave alone keeps running as it 
 - **A tag you chose yourself is left alone**: a branch, a commit, a pre-release, or a newer release. A
   `platform.yml` that Aber cannot change safely is left alone too, and the functions log says why.
 - **A pull request of your own still works.** Close Aber's if you move the tag yourself.
+- **Coming from 1.9.0 or earlier,** merge Aber's pull request in place of the one
+  [*a tag cannot stand in for a gateway's branch*](../../help/site/upgrading.md#from-191-a-tag-cannot-stand-in-for-a-gateways-branch)
+  asks you to make. The platform at `v1.10.0` carries 1.9.1's fix, and needs no second Administrator.
 - **An appliance whose `flow-sync` never started**, on a tag before `v1.9.0`, cannot fetch the merge.
   Merge Aber's pull request, then do step 2 of
   [*flow sync starts on an appliance the install command set up*](../../help/site/upgrading.md#from-190-flow-sync-starts-on-an-appliance-the-install-command-set-up)
