@@ -1129,6 +1129,14 @@ The event drawer moves along a lane and between lanes, like a cursor in a grid:
   Page Down still do.
 - **A lane's name opens its newest loaded event,** the change a reader most often wants, and ←
   steps back from there. The name is the label's button, named "Open the latest change to Line 1".
+- **An event the address names opens whatever is loaded,** as a run does on Backups. One the list does
+  not hold is read on its own (`api.auditTrailEvent()`): the row by id from `audit_trail`, then its
+  entity's newest page through the page's own read, or the page that ends at it, so it has a loaded
+  row's class and transaction size. ← and → step along what was read, and the tooltips at its ends
+  say when more was not read. On arrival (`useArrivalSelection`, once for each) a kind, action,
+  person or class filter, a window or the hidden deleted entities that leave it out are cleared. A
+  search is cleared only when the page's own read for its entity under the filters does not return
+  it. No row, or one the policies hide, opens the drawer to say so.
 - **They stand down** where `shortcutAllowed` (`shortcuts.js`) says, so a dialog in front, a field,
   a select and Ctrl, Cmd or Alt all keep them, and for a key a control has already taken. They are
   not character keys, so the Single-key shortcuts setting does not cover them.

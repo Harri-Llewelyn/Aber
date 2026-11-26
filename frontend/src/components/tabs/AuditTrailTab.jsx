@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react'
 import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { isUuid } from '../../utils/isUuid'
@@ -1845,10 +1846,64 @@ export function AuditTrailTab({ userRole, showToast }) {
     ? { left: offsetForFraction(shownBand.lo), width: `calc((100% - 28px) * ${shownBand.hi - shownBand.lo})` }
     : null
 
-  // Resolved fresh every render: a refresh replaces every event object. If the selected event drops
-  // out of the filter, the drawer closes.
-  const selected = events.find(e => String(e.event_id) === String(selectedEventId)) || null
-  const selectedAnalysis = selected ? analysis.get(selected.event_id) : null
+  // Resolved fresh every render: a refresh replaces every event object. One the loaded list does not
+  // hold, as a link to an old event names or a filter changed with the drawer open leaves out, is read
+  // on its own below.
+  const loadedSelected = events.find(e => String(e.event_id) === String(selectedEventId)) || null
+
+  /* An event the address names that the loaded list does not hold is read on its own, with its
+     entity's events around it, once the list has answered without it: a link can name one older than
+     every loaded page, or one the filters leave out. Stepping along its lane stays in what was read. */
+  const [alone, setAlone] = useState(null)
+  const aloneEvents = alone?.events || NONE
+  const aloneSelected = loadedSelected ? null
+    : aloneEvents.find(e => String(e.event_id) === String(selectedEventId)) || null
+  const readAlone = !!selectedEventId && !loadedSelected && !aloneSelected && alone?.id !== selectedEventId
+    && !loading && !loadingMore && !windowPaging
+  useEffect(() => {
+    if (!readAlone) return undefined
+    let live = true
+    const id = selectedEventId
+    Promise.resolve().then(() => api.auditTrailEvent(id)).then(
+      found => { if (live) setAlone({ id, events: found?.events || NONE, olderUnread: !!found?.olderUnread, newerUnread: !!found?.newerUnread, error: null }) },
+      err => { if (live) setAlone({ id, events: NONE, error: err?.message || 'The read failed.' }) })
+    return () => { live = false }
+  }, [readAlone, selectedEventId])
+  const selected = loadedSelected || aloneSelected
+  // A link to no event, or to one this reader may not read: the drawer opens to say so.
+  const absent = !selected && !!selectedEventId && alone?.id === selectedEventId ? alone : null
+
+  /**
+   * The filters in the address that leave out the event a link opened, cleared for it, as the Backups
+   * page clears its status filter. Once for each arrival: a filter chosen with the drawer open stays.
+   * Each list, the window and the deleted toggle are judged from the event. The search reads more
+   * than an event holds, so it is asked of the page's own read, and only when nothing else hides it.
+   */
+  const arrivedEvents = useMemo(() => (selected ? [selected] : NONE), [selected])
+  useArrivalSelection(selectedEventId, arrivedEvents, (e, id) => String(e.event_id) === id, (e) => {
+    if (loadedSelected) return
+    let hidden = false
+    if (entityTypeFilter.length && !entityTypeFilter.some(k => (ENTITY_TABLE_BY_KIND[k] || k) === e.entity_type)) {
+      setEntityTypeFilter([]); hidden = true
+    }
+    if (actionFilter.length && !actionFilter.includes(e.event_type)) { setActionFilter([]); hidden = true }
+    if (changedBy.length && !changedBy.includes(e.changed_by)) { setChangedBy([]); hidden = true }
+    if (classFilter.length && !classFilter.includes(markerOf(e))) { setClassFilter([]); hidden = true }
+    const { start, end } = windowBounds(timeWin, Date.now())
+    const at = Date.parse(e.timestamp)
+    if ((start && at < start.getTime()) || (end && at >= end.getTime())) { setTimeWin(ALL_TIME); hidden = true }
+    if (!showPurged && loadedKinds.has(entityKind(e.entity_type)) && !entityNames.has(e.entity_id)) {
+      setShowPurged(true); hidden = true
+    }
+    if (hidden || !search) return
+    api.get(`${buildUrl({ recorded_at: e.timestamp, id: Number(e.event_id) + 1 })}&entity_ids=${encodeURIComponent(e.entity_id)}`)
+      .then(rows => { if (!rows.some(r => String(r.event_id) === String(e.event_id))) setNameFilter('') })
+      .catch(() => {})
+  })
+
+  const selectedAnalysis = selected
+    ? analysis.get(selected.event_id) || { diff: diffFields(selected.old_data, selected.new_data), kind: markerOf(selected) }
+    : null
   const drawerName = selected
     ? (entityNames.get(selected.entity_id) || snapshotIdentity(selected)?.label || selected.entity_id)
     : ''
@@ -1915,9 +1970,11 @@ export function AuditTrailTab({ userRole, showToast }) {
    * describe the same events.
    */
   const selectedLaneKey = selected ? laneKeyOf(selected) : null
+  // An event read on its own steps along the events read with it.
+  const laneSource = aloneSelected ? aloneEvents : events
   const selectedLaneEvents = useMemo(
-    () => (selectedLaneKey ? events.filter(e => laneKeyOf(e) === selectedLaneKey).sort(byTimeThenId) : []),
-    [events, selectedLaneKey]
+    () => (selectedLaneKey ? laneSource.filter(e => laneKeyOf(e) === selectedLaneKey).sort(byTimeThenId) : []),
+    [laneSource, selectedLaneKey]
   )
   const selectedIndex = selectedLaneEvents
     .findIndex(e => String(e.event_id) === String(selectedEventId))
@@ -2508,12 +2565,15 @@ export function AuditTrailTab({ userRole, showToast }) {
       </div>
 
       <ContextPanel
-        open={!!selected}
+        open={!!selected || !!absent}
         onClose={() => setSelectedEventId(null)}
-        type={selected ? entityKind(selected.entity_type) : ''}
-        icon={SelectedIcon && <SelectedIcon size={15} />}
+        type={selected ? entityKind(selected.entity_type) : 'Audit event'}
+        icon={SelectedIcon ? <SelectedIcon size={15} /> : absent && <IconHistory size={15} />}
         onCopy={showToast}
-        title={drawerName}
+        title={selected ? drawerName : absent && !absent.error ? 'No such event' : 'Audit event'}
+        warnings={absent ? [absent.error
+          ? { id: 'unread', tone: 'danger', text: `Could not read this event: ${absent.error}` }
+          : { id: 'absent', tone: 'warning', text: 'No audit event has this id, or you may not read it.' }] : undefined}
         subtitle={selected && (
           <div className="trail-drawer-nav-badges">
             <Tooltip text={eventWords(selected) === selected.event_type ? 'The audit event type'
@@ -2548,6 +2608,8 @@ export function AuditTrailTab({ userRole, showToast }) {
                 keyName="ArrowLeft"
                 atEnd={selectedIndex <= 0}
                 tip={selectedIndex > 0 ? 'Step back to the previous change to this entity (←)'
+                  : aloneSelected ? (alone.olderUnread ? 'This is the oldest change read for this link. Older ones are not loaded.'
+                    : 'This is the oldest recorded change to this entity')
                   : nextCursor ? 'This is the oldest change loaded. Show more, at the foot of the trail, loads older ones.'
                     : truncated ? 'This is the oldest change loaded. There are older ones this view cannot reach.'
                       : 'This is the oldest recorded change to this entity'}
@@ -2561,7 +2623,8 @@ export function AuditTrailTab({ userRole, showToast }) {
                 atEnd={selectedIndex >= selectedLaneEvents.length - 1}
                 tip={selectedIndex < selectedLaneEvents.length - 1
                   ? 'Step forward to the next change to this entity (→)'
-                  : 'This is the most recent change to this entity'}
+                  : aloneSelected && alone.newerUnread ? 'This is the newest change read for this link. Newer ones are not loaded.'
+                    : 'This is the most recent change to this entity'}
                 onStep={() => stepTo(selectedIndex + 1)}
               />
               <StepButton
