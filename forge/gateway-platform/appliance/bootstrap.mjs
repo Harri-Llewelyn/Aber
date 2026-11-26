@@ -250,7 +250,8 @@ async function enrol() {
         'the enrolment token was refused.',
         'Enrolment tokens are SINGLE-USE and expire (30 minutes by default). This one is\n'
         + 'unknown, expired, or has already been redeemed -- possibly by an earlier run of this\n'
-        + 'same bundle. Generate a new bundle from the gateway\'s page in the dashboard.'
+        + 'same bundle or install command. Issue a new install command, or a new bundle, from the\n'
+        + 'gateway\'s page in the dashboard.'
       );
     }
 
