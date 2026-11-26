@@ -9,7 +9,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { gatewayAcceptsDevices } from '../../utils/gatewayType'
-import { approvalGatewayId, approvalLocation, cameThroughLine } from '../../utils/quarantineHold'
+import { HELD_AGAIN_APPROVAL, approvalGatewayId, approvalLocation, cameThroughLine, isHeldAgain } from '../../utils/quarantineHold'
 import {
   SCOPE_GATEWAY, SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, followedPlaceFix, followedPlaceLine, resolveDeviceLocation
 } from '../../utils/cellResolution'
@@ -151,6 +151,9 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
           </p>
         </ConfirmModal>
       )}
+
+      {/* A registered device held again: approving is its way out, as its row says. */}
+      {!isGateway && isHeldAgain(item) && <p className="form-hint">{HELD_AGAIN_APPROVAL}</p>}
 
       <div className="form-group">
         <label className="form-label" htmlFor="approve-name">{isGateway ? 'Gateway Name' : 'Device Name'}</label>

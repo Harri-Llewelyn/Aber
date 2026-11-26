@@ -9,6 +9,14 @@ import { SCOPE_AREA_WIDE, SCOPE_CELL, SCOPE_GATEWAY, normaliseScope } from './ce
 export const isHeldAgain = (device) => Boolean(device?.requarantined_at)
 
 /**
+ * Why such a device has no Reject, as its Quarantine row and Approve & Onboard say it. The database
+ * refuses the delete as well (0337), until the device is archived.
+ */
+export const HELD_AGAIN_ROW = 'Registered, so no Reject: approving keeps its schemas, nameplate and links.'
+export const HELD_AGAIN_APPROVAL = 'This device is registered and is held again. Approving lets it in where it was, '
+  + 'and keeps its schemas, nameplate and links. It has no Reject, which would delete them.'
+
+/**
  * The location Approve & Onboard starts from: a registered device's own, so that an approval which
  * leaves the picker alone leaves the device where it is. A device nobody registered arrives following
  * its gateway.
