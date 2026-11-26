@@ -2183,6 +2183,37 @@ jobs:
             exit 1
           fi
 
+      # aas-api against IDTA's own test engine (aas-test-engines, Apache-2.0), for the reason i3X runs
+      # CESMII's suite. Its public package tests the read profiles aas-api declares for the AAS and
+      # Submodel Repositories; its Registry and Discovery suites are for IDTA members only, so
+      # test_a_registry_and_discovery_resolve_a_shell.py reads those in the stack lane. The version is
+      # the script's PINNED, in a venv of its own so its pins stay out of validate.py's environment.
+      # The script holds what was measured: a recorded pass that fails, or a 5xx, fails the step. The
+      # stack lane's suites have removed their devices by now, so it makes the AAS fixture first.
+      - name: AAS Conformance — IDTA Test Engine
+        run: |
+          set -eu
+          kubectl -n $NS port-forward svc/supabase-envoy 18080:8000 >/tmp/pf-aas.log 2>&1 &
+          PFE=$!
+          trap 'kill $PFE 2>/dev/null || true' EXIT
+          sleep 3
+
+          PINNED=$(python3 -c 'import sys; sys.path.insert(0, "test-harness"); import aas_conformance; print(aas_conformance.PINNED)')
+          python3 -m venv /tmp/aas-test-engines
+          /tmp/aas-test-engines/bin/pip install --quiet "aas_test_engines==$PINNED"
+
+          # The Administrator's token, which may make the fixture, through the stack lane's sign-in
+          # helper, which waits out the sign-in limit the lane's suites have just drawn on.
+          KEY=$(kubectl -n $NS get secret $RELEASE-secrets -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d)
+          TOKEN=$(python3 -c 'import sys; sys.path.insert(0, "test-harness"); import stack_sign_in
+          status, body = stack_sign_in.password_grant("http://127.0.0.1:18080", sys.argv[1], "admin@aber.local", "aber123")
+          print(body["access_token"] if status == 200 else "")' "$KEY")
+          test -n "$TOKEN"
+
+          /tmp/aas-test-engines/bin/python test-harness/aas_conformance.py \
+            --server "http://127.0.0.1:18080/functions/v1/aas-api" --token "$TOKEN" \
+            --provision "http://127.0.0.1:18080" --apikey "$KEY" --report-dir /tmp/aas-conformance
+
       # Through the ingress, not a port-forward: the request crosses Traefik and carries the Realtime
       # tenant hostname. A healthy container behind a misconfigured route would otherwise pass and
       # fail in the browser.

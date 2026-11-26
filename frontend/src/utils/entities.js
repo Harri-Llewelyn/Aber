@@ -117,8 +117,9 @@ export function purgeWarning(row, now = Date.now()) {
 export function entityWarnings(row) {
   return [
     purgeWarning(row),
-    row?.variant === 'quarantined'
-      && { id: 'quarantined', tone: 'warning', text: 'Quarantined: nobody has admitted this device yet, so its readings are held. Approve or reject it on the Devices page.' },
+    row?.variant === 'quarantined' && (row.state === 'archived'
+      ? { id: 'quarantined', tone: 'warning', text: 'Held in quarantine when it was archived. Restore returns it to the Quarantine tab on the Devices page.' }
+      : { id: 'quarantined', tone: 'warning', text: 'Quarantined: nobody has admitted this device yet, so its readings are held. Approve or reject it on the Devices page.' }),
     row?.variant === 'withdrawn'
       && { id: 'withdrawn', tone: 'warning', text: 'Withdrawn: the API refuses every token that names this machine identity.' },
   ].filter(Boolean)

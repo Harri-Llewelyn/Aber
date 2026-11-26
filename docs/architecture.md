@@ -331,6 +331,11 @@ A gateway or a device is its `sparkplug_id`, and a row with no identity on the w
 with no row of its own has an id that starts `i3x:`. The
 [i3X README](../i3x/README.md#element-ids) says which kind uses which, and why.
 
+The two views name each other from the same `sparkplug_id`. An i3X device names its shell's id and
+`globalAssetId` in `metadata.system`, under the same base IRI. A shell's i3X history link names its
+metrics by their elementIds. [`asset-identities.json`](../test-harness/fixtures/asset-identities.json)
+holds `shell.ts` and `address_space.py` to one answer.
+
 ### The `aber.local` namespace
 
 An id under `https://aber.local/` was minted by Aber. The name resolves nowhere on purpose: it claims no

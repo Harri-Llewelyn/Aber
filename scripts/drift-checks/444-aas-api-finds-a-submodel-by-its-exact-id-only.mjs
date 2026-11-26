@@ -26,7 +26,7 @@ export default function check() {
 
   const calls = index.match(/\bsubmodelIn\(built, \w+\)/g) ?? [];
   if (calls.length !== 2) problems444.push(`aas-api reads a submodel through submodelIn() ${calls.length} time(s), not once on each of its two routes`);
-  const helper = index.slice(index.indexOf('function submodelIn('), index.indexOf('async function devicePage'));
+  const helper = index.slice(index.indexOf('function submodelIn('), index.indexOf('export default async function handler'));
   if (!/^function submodelIn\(built: BuiltShell, identifier: string\) \{\s*return built\.submodels\.find\(\(s\) => s\.id === identifier\) \?\? null;\s*\}/.test(helper)) {
     problems444.push('submodelIn() does more than find the exact id in the built shell');
   }

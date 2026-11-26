@@ -1556,9 +1556,10 @@ main .filter-bar .search-input-kbd { display: inline-block; }
 main .filter-bar .search-input-field:focus ~ .search-input-kbd { display: none; }
 
 /* The foot of a list that loads in steps (ListFoot): a rule above, the button or the end line
-   inside. It sits after the scroller, not in it. */
+   inside. It sits after the scroller, not in it. On a narrow card the button wraps under the count. */
 .list-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 12px var(--inset);
@@ -4343,7 +4344,7 @@ span.area-plan-pin { cursor: inherit; }
   color: var(--danger-text);
 }
 
-/* A chip that navigates, used in the context drawers for Serving Gateway, Cell and Schema. An <a>
+/* A chip that opens a record, drawn by `common/RecordChip.jsx` alone (drift check 620). An <a>
    when it opens another page (Ctrl-click opens a new tab), a <button> when it acts on this one.
    Inherits `.chip` and adds only the affordance. `text-align: left` because a button centres its
    text by default. */
@@ -5236,6 +5237,11 @@ a.chip { text-decoration: none; }
   font-weight: 700;
   flex-shrink: 0;
 }
+/* A flag's tone, which RecordChip's `flag` names: the word says it, and the colour repeats it. */
+.chip-flag-warning { color: var(--warning-text); }
+.chip-flag-danger { color: var(--danger-text); }
+.chip-flag-muted { color: var(--text-muted); }
+.chip-flag-accent { color: var(--accent-text); }
 
 /* A gateway name is `.mono`, which carries its own 13px. Inside a chip that is larger than
    everything beside it and it would grow the row it sits in. The colour is deliberately NOT reset --
@@ -5550,6 +5556,8 @@ a.chip { text-decoration: none; }
   gap: 4px;
   margin-top: 4px;
 }
+/* The rest of a long list, "and N more", a link centred on its row of chips. */
+.context-device-list > .count-link { align-self: center; }
 
 /* A gateway's device list once the devices' last readings are read: a row for each device, its chip
    at the start and the time of its last reading at the end, the muted words of an empty field when
@@ -8682,7 +8690,6 @@ ol.gateway-steps {
 .automation-section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .automation-section-title { margin: 8px 0 0; font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .automation-pairs { max-width: 260px; font-size: 12px; color: var(--text-muted); }
-.automation-trail { margin: 0; font-size: 13px; }
 
 .apply-summary { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .apply-note { margin: 0 0 8px; font-size: 12px; line-height: 1.5; color: var(--text-muted); }

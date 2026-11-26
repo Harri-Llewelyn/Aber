@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
 import { RouteLink } from '../common/RouteLink'
 import { OverflowText } from '../common/OverflowText'
+import { RecordChip } from '../common/RecordChip'
 import { areaUrl, cellUrl, deviceUrl, gatewayUrl, tabUrl } from '../../routes'
 import { alertIndex, alertForDevice, alertState } from '../../utils/alertSubjects'
 import { api } from '../../api'
@@ -37,6 +38,7 @@ import {
   DEVICE_STATUS,
   deviceLifecycleStatus,
   deviceChipClass,
+  deviceChipNote,
   deviceStatusTitle,
   deviceDotStyle,
   devicesOnlineLabel,
@@ -67,6 +69,10 @@ import {
 const COLUMNS_FOR = (n) => Math.min(3, Math.max(1, n))
 const PIN_SIZE = { 1: 40, 2: 36, 3: 28 }
 const PIN_ICON = { 1: 20, 2: 16, 3: 12 }
+
+/** What an area panel's chip says of a gateway or device that serves the whole area: a flag, and its tooltip. */
+const AREA_WIDE_FLAG = { text: 'AREA-WIDE', tone: 'muted' }
+const SERVES_THE_AREA = 'It serves the whole area.'
 
 /**
  * An area card's name: the button that opens its panel, with `tip`, the area's state, as its tooltip.
@@ -329,49 +335,53 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   const cellChip = (c, note, unplaced = false) => {
     const state = stateOf(cellDevicesOf(c))
     const Icon = cellIconComponent(c.icon)
+    // A ring for an acknowledged alert, as the tile dot and the device chips draw it.
     return (
-      <Tooltip key={c.cell_id} text={`${STATUS_WORD[state.pin]} — ${note}`}>
-        <button
-          type="button"
-          className={`chip chip-link${selectedCellId === c.cell_id ? ' is-selected' : ''}`}
-          onClick={() => toggleCell(c.cell_id)}
-        >
-          {/* A ring for an acknowledged alert, as the tile dot and the device chips draw it. */}
-          <span className="badge-dot" style={state.pin === 'acknowledged'
-            ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px var(--danger)' }
-            : { background: state.pin === 'alert' ? 'var(--danger)' : state.status === 'normal' ? 'var(--success)' : state.status === 'attention' ? 'var(--warning)' : 'var(--text-dim)' }} />
-          <Icon size={11} />
-          <OverflowText className="chip-name">{c.cell_name}</OverflowText>
-          {unplaced && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>NOT PLACED</span>}
-        </button>
-      </Tooltip>
+      <RecordChip
+        key={c.cell_id}
+        title={`${STATUS_WORD[state.pin]} — ${note}`}
+        selected={selectedCellId === c.cell_id}
+        onClick={() => toggleCell(c.cell_id)}
+        dot={state.pin === 'acknowledged'
+          ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px var(--danger)' }
+          : { background: state.pin === 'alert' ? 'var(--danger)' : state.status === 'normal' ? 'var(--success)' : state.status === 'attention' ? 'var(--warning)' : 'var(--text-dim)' }}
+        icon={<Icon size={11} />}
+        name={c.cell_name}
+        flag={unplaced && { text: 'NOT PLACED', tone: 'warning' }}
+      />
     )
   }
 
   /** A gateway in the cell and area panels: a chip that opens it on the Gateways page. */
   const panelGatewayChip = (g, areaWide = false) => (
-    <RouteLink key={g.gateway_id} className="chip chip-link chip-gw" to={gatewayUrl(g.gateway_id)} onNavigate={() => onSelectGateway?.(g.gateway_id)} title={`Open ${g.gateway_name} on the Gateways page${areaWide ? ' — it serves the whole area' : ''}`}>
-      <IconRadio size={11} /><OverflowText className="chip-name">{g.gateway_name}</OverflowText>
-      {areaWide && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>AREA-WIDE</span>}
-    </RouteLink>
+    <RecordChip
+      key={g.gateway_id}
+      kind="gateways"
+      to={gatewayUrl(g.gateway_id)}
+      onNavigate={() => onSelectGateway?.(g.gateway_id)}
+      name={g.gateway_name}
+      note={areaWide && SERVES_THE_AREA}
+      flag={areaWide && AREA_WIDE_FLAG}
+    />
   )
 
   /** A device in the cell and area panels: its state's dot, and a flag while an alert fires on it. */
   const panelDeviceChip = (d, areaWide = false) => {
-    const status = deviceLifecycleStatus(d)
     const alert = alertForDevice(alerts, d)
     return (
-      <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} onNavigate={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}` : deviceStatusTitle(status)}${areaWide ? ' — it serves the whole area' : ''}`}>
-        <span className="badge-dot" style={deviceDotStyle(d, alert)} />
-        <IconCpu size={11} />
-        <OverflowText className="chip-name">{d.asset_name}</OverflowText>
-        {alert && (
-          <span className="chip-flag" style={{ color: 'var(--danger-text)' }}>
-            {alertState(alert) === 'acknowledged' ? 'ACKNOWLEDGED' : alert.severity === 'critical' ? 'ALARM' : 'WARNING'}
-          </span>
-        )}
-        {areaWide && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>AREA-WIDE</span>}
-      </RouteLink>
+      <RecordChip
+        key={d.asset_id}
+        kind="devices"
+        to={deviceUrl(d.asset_id)}
+        onNavigate={() => onSelectDevice?.(d.asset_id)}
+        name={d.asset_name}
+        note={`${deviceChipNote(d, alert)}${areaWide ? ` ${SERVES_THE_AREA}` : ''}`}
+        dot={deviceDotStyle(d, alert)}
+        flag={[
+          alert && { text: alertState(alert) === 'acknowledged' ? 'ACKNOWLEDGED' : alert.severity === 'critical' ? 'ALARM' : 'WARNING', tone: 'danger' },
+          areaWide && AREA_WIDE_FLAG
+        ]}
+      />
     )
   }
 
@@ -670,6 +680,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
 
   /** The panel's contents for the selected cell: where it is, and what resolves to it. */
   const SelectedCellIcon = cellIconComponent(selectedCell?.icon)
+  const SelectedCellAreaIcon = areaIconComponent(selectedCellArea?.icon)
   const cellPanel = {
     type: 'CELL',
     title: selectedCell?.cell_name || '',
@@ -700,7 +711,17 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     fields: selectedCell ? [
       {
         label: 'Where',
-        value: selectedCellArea ? selectedCellArea.area_name : 'Unfiled',
+        // A chip that opens the area's panel, as an area's cell chips open theirs.
+        value: selectedCellArea
+          ? (
+            <RecordChip
+              icon={<SelectedCellAreaIcon size={11} />}
+              name={selectedCellArea.area_name}
+              title="Open its area's details in this panel"
+              onClick={() => toggleArea(selectedCellArea.area_id)}
+            />
+          )
+          : 'Unfiled',
         full: true,
         help: 'The area this cell is filed in, as set on the Cells page'
       },

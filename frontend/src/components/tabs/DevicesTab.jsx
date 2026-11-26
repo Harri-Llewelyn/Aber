@@ -2,7 +2,7 @@ import { alertIndex, alertForDevice, statusSortRank } from '../../utils/alertSub
 import { AlertBadge } from '../common/AlertBadge'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { OverflowText } from '../common/OverflowText'
+import { RecordChip } from '../common/RecordChip'
 import { approvalsForUrl, areaUrl, automationsForEntityUrl, cellUrl, deviceHistoryUrl, deviceUrl, gatewayUrl, schemaRejectionsUrl, schemaUrl, trailUrl } from '../../routes'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
@@ -63,6 +63,7 @@ import {
   normaliseScope, locationSourceLabel, gatewayAcceptsCell, noCellReason
 } from '../../utils/cellResolution'
 import { AreaIcon } from '../../utils/areaIcon'
+import { CellIcon } from '../../utils/cellIcon'
 import { unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
 import { unsTopicField, UnsRenameNote } from '../common/UnsPlace'
 import { derivedValuesField } from '../common/DeviceDerivedValues'
@@ -73,7 +74,7 @@ import {
 } from '../../utils/deviceTags'
 import { oldDevicesLinkChanges, STATUS_OUT_OF_VOCABULARY, STATUS_UNMODELLED } from '../../utils/devicesAddress'
 import { assignableSchemas, isAssignableSchema } from '../../utils/schemaVersion'
-import { HELD_AGAIN_ROW, isHeldAgain } from '../../utils/quarantineHold'
+import { HELD_AGAIN_ROW, isHeldAgain, isInQueue } from '../../utils/quarantineHold'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
@@ -87,15 +88,12 @@ import {
   IconArchive,
   IconRefreshCw,
   IconHistory,
-  IconClipboardList,
   IconBookOpen,
   IconCube,
   IconAlertTriangle,
   IconCheck,
   IconPlay,
   IconDownload,
-  IconRadio,
-  IconLayoutDashboard,
   IconTrash,
   IconChartLine,
   IconZap
@@ -494,10 +492,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     showToast(`Device '${archiveTarget.asset_name}' archived`, 'success', { to: deviceUrl(archiveTarget.asset_id) })
   }
 
-  const restoreDevice = async (assetId, name) => {
-    await api.post(`/api/v1/devices/${assetId}/restore`, {})
+  // A device archived while it was held goes back to the Quarantine queue, and the toast says so; its
+  // link lands there, as any arrival at a device in the queue does.
+  const restoreDevice = async (device) => {
+    await api.post(`/api/v1/devices/${device.asset_id}/restore`, {})
     setRestoreTarget(null); loadAll()
-    showToast(`Device '${name}' restored to active service`, 'success', { to: deviceUrl(assetId) })
+    const where = device.is_quarantined ? 'to the Quarantine queue' : 'to active service'
+    showToast(`Device '${device.asset_name}' restored ${where}`, 'success', { to: deviceUrl(device.asset_id) })
   }
 
   const canApprove = hasPermission(PERMISSION_UUIDS.QUARANTINE_APPROVE)
@@ -618,7 +619,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // (24h+), carrying a finding (unmodelled metrics, a value out of vocabulary), or with a location
   // finding. No device resolves to an archived cell: the database refuses the archive while one does.
   const needsAttention = (a) =>
-    a.is_quarantined || isProvisioningOverdue(a) || findingsFor(a).length > 0 ||
+    isInQueue(a) || isProvisioningOverdue(a) || findingsFor(a).length > 0 ||
     // Location findings. Unassigned is the work queue that should drain; a mismatch is "this
     // resolved to something, but look at it".
     needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) ||
@@ -666,9 +667,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     { key: 'cell', chosen: cellFilter, values: cellLanesOf },
     { key: 'status', chosen: statusFilter, values: statusesOf },
   ], (a) => {
-    // Quarantined devices belong to the Quarantine queue card and nowhere else. The two lists come
-    // from different sources, so this is the only place the separation is enforced.
-    if (a.is_quarantined) return false
+    // A device in the Quarantine queue belongs to its tab and nowhere else; an archived one is listed
+    // with the archived. The two lists come from different sources, so the separation is enforced here.
+    if (isInQueue(a)) return false
     // Replay lanes are out by default: `ensure_shadow_devices()` mints one per captured device when
     // a playback starts, which would otherwise double the list. Not a lifecycle, which is the
     // archived axis; a shadow can be archived or not.
@@ -718,13 +719,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // Quarantine queue instead. `needsAttention` is rebuilt every render, so its inputs are the
   // dependencies.
   const attentionCount = useMemo(
-    () => assets.filter(a => !a.is_quarantined && needsAttention(a)).length,
+    () => assets.filter(a => !isInQueue(a) && needsAttention(a)).length,
     [assets, gatewayById, cellById, findingsFor]
   )
   // Counted across every device, not the filtered list: it is the number the toggle reveals.
   // Quarantined lanes are excluded as attentionCount excludes them.
   const shadowCount = useMemo(
-    () => assets.filter(a => !a.is_quarantined && a.shadow_of).length,
+    () => assets.filter(a => !isInQueue(a) && a.shadow_of).length,
     [assets]
   )
   // Walks every device's schemas for the Metric groups filter.
@@ -735,7 +736,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // The roster's own rows: everything but the queue, and the replay lanes unless they are shown.
   // The empty state reads it to tell none yet from none matching.
   const roster = useMemo(
-    () => assets.filter(a => !a.is_quarantined && (showShadows || !a.shadow_of)),
+    () => assets.filter(a => !isInQueue(a) && (showShadows || !a.shadow_of)),
     [assets, showShadows]
   )
   // The filters inside the Filters popover, which its button counts; the bar's Clear counts all.
@@ -762,7 +763,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const chooseView = (next) => { setView(next); setSelectedId(null) }
 
   // Arriving from a chip, an alert row or the Site Map with one device named: open it rather than
-  // leave a one-row table. A quarantined device has no panel; it lands on the Quarantine tab.
+  // leave a one-row table. A device in the Quarantine queue has no panel; it lands on that tab.
   // Identifier equality only; see the hook.
   useArrivalSelection(
     searchQuery,
@@ -770,7 +771,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     (a, term) => deviceIdentifiers(a).includes(term),
     (a) => {
       // Replaced, not pushed: Back from here should leave the page, not land on the arrival again.
-      if (a.is_quarantined) { setView('quarantine', { replace: true }); return }
+      if (isInQueue(a)) { setView('quarantine', { replace: true }); return }
       // An archived device is off the default list, so the list shows it as well as the drawer.
       if (a.is_archived && lifecycle.length > 0 && !lifecycle.includes('archived')) setLifecycle(v => [...v, 'archived'])
       if (view !== 'registered') setView('registered', { replace: true })
@@ -832,7 +833,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     selectedDevice.is_quarantined && {
       id: 'quarantined',
       tone: 'warning',
-      text: isHeldAgain(selectedDevice)
+      text: selectedDevice.is_archived
+        ? 'Held in quarantine when it was archived. Restore returns it to the Quarantine tab.'
+        : isHeldAgain(selectedDevice)
         ? 'In quarantine: this device is registered, and is held again. The Quarantine tab says why. Its readings are dropped until it is approved there.'
         : 'In quarantine: Aber could not match it to a registered device. Its readings are dropped until it is approved on the Quarantine tab.'
     },
@@ -961,7 +964,19 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                       >
                         Approve &amp; Onboard
                       </ActionButton>
-                      {/* A registered device held again has none: it would take what is set on it. */}
+                      {/* A registered device held again has Archive Device for Reject, which would take
+                          what is set on it. Archived, it leaves the queue, and Entities deletes it. */}
+                      {isHeldAgain(q) && (
+                        <ActionButton
+                          className="btn btn-danger btn-sm"
+                          permitted={canArchive}
+                          deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)}
+                          onClick={() => setArchiveTarget(q)}
+                          title="Archive this device: take it out of commission"
+                        >
+                          Archive Device
+                        </ActionButton>
+                      )}
                       {!isHeldAgain(q) && (
                         <ActionButton
                           className="btn btn-danger btn-sm"
@@ -1595,7 +1610,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       {restoreTarget && (
         <RestoreEntityModal
           type="device" name={restoreTarget.asset_name}
-          onConfirm={() => restoreDevice(restoreTarget.asset_id, restoreTarget.asset_name)}
+          onConfirm={() => restoreDevice(restoreTarget)}
           onCancel={() => setRestoreTarget(null)}
         />
       )}
@@ -1706,17 +1721,12 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             label: 'Serving Gateway',
             full: true,
             value: selectedDevice.active_gateway_id ? (
-              <RouteLink
-                className="chip chip-link"
+              <RecordChip
+                kind="gateways"
                 to={gatewayUrl(selectedDevice.active_gateway_id)}
                 onNavigate={() => onSelectGateway?.(selectedDevice.active_gateway_id)}
-                title={`Open ${selectedGateway?.gateway_name || selectedDevice.gateway_name || selectedDevice.active_gateway_id} on the Gateways page`}
-              >
-                <IconRadio size={11} />
-                <OverflowText className="chip-name">
-                  {selectedGateway?.gateway_name || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
-                </OverflowText>
-              </RouteLink>
+                name={selectedGateway?.gateway_name || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
+              />
             ) : null,
             help: "The edge node carrying this device's data. Reassign it in Edit Details."
           },
@@ -1734,30 +1744,26 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               const area = areaById.get(selectedLocation.effective_area_id)
               const cell = cellById.get(selectedLocation.effective_cell_id)
               const place = cell ? (
-                <RouteLink
-                  className="chip chip-link"
+                <RecordChip
+                  kind="cells"
                   to={cellUrl(cell.cell_id)}
                   onNavigate={() => onSelectCell?.(cell.cell_id)}
-                  title={`Open ${cell.cell_name} on the Cells page`}
-                >
-                  <IconLayoutDashboard size={11} />
-                  <OverflowText className="chip-name">{cell.cell_name}</OverflowText>
-                </RouteLink>
+                  icon={<CellIcon cell={cell} size={11} />}
+                  name={cell.cell_name}
+                />
               ) : NON_CELL_SOURCES.has(source) ? <span>{locationSourceLabel(source)}</span> : null
               if (!place) return null
               return (
                 <div className="device-location">
                   {area && (
                     <>
-                      <RouteLink
-                        className="chip chip-link"
+                      <RecordChip
+                        kind="areas"
                         to={areaUrl(area.area_id)}
                         onNavigate={() => onSelectArea?.(area.area_id)}
-                        title={`Open ${area.area_name} on the Areas page`}
-                      >
-                        <AreaIcon area={area} size={11} />
-                        <OverflowText className="chip-name">{area.area_name}</OverflowText>
-                      </RouteLink>
+                        icon={<AreaIcon area={area} size={11} />}
+                        name={area.area_name}
+                      />
                       <span aria-hidden="true">›</span>
                     </>
                   )}
@@ -1790,16 +1796,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               return (
                 <div className="context-device-list">
                   {attached.map(schema => (
-                    <RouteLink
+                    <RecordChip
                       key={schema.schema_uuid}
-                      className="chip chip-link"
+                      kind="schemas"
                       to={schemaUrl(schema.schema_uuid)}
                       onNavigate={() => onSelectSchema?.(schema.schema_uuid)}
-                      title={`Open ${schema.schema_name} on the Schemas page`}
-                    >
-                      <IconClipboardList size={11} />
-                      <OverflowText className="chip-name">{schema.schema_name}</OverflowText>
-                    </RouteLink>
+                      name={schema.schema_name}
+                    />
                   ))}
                 </div>
               )

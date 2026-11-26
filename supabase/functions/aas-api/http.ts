@@ -1,7 +1,8 @@
 /**
  * What every aas-api route answers with: IDTA-01002's error shape, its list envelope, its page size
- * and its base64url identifiers. index.ts routes the shells and submodels and conceptDescriptions.ts
- * the ConceptDescriptions, each through these, so a client meets one shape on every route.
+ * and its base64url identifiers. index.ts routes the shells and submodels, conceptDescriptions.ts the
+ * ConceptDescriptions, registry.ts the shell descriptors and discovery.ts the asset links, each
+ * through these, so a client meets one shape on every route.
  */
 
 import { corsHeaders } from "../_shared/cors.ts";
@@ -26,6 +27,18 @@ export const problem = (status: number, text: string, code = String(status), cor
     }],
   }, status);
 
+/**
+ * A request the client got wrong, found below the router. Its answer is a 400 built here, from the
+ * fixed sentence the thrower wrote, which the handler returns as it is.
+ */
+export class ClientMistake extends Error {
+  readonly answer: Response;
+  constructor(sentence: string) {
+    super(sentence);
+    this.answer = problem(400, sentence, "400");
+  }
+}
+
 // Identifiers
 
 /**
@@ -45,6 +58,15 @@ export function b64urlDecode(value: string): string | null {
   }
 }
 
+/** A path segment's identifier, or null where it is not percent- or base64url-decodable. */
+export function identifierIn(segment: string): string | null {
+  try {
+    return b64urlDecode(decodeURIComponent(segment));
+  } catch {
+    return null;
+  }
+}
+
 /** The inverse of b64urlDecode(), unpadded, as the specification shows an identifier. */
 export function b64urlEncode(value: string): string {
   let binary = "";
@@ -53,7 +75,8 @@ export function b64urlEncode(value: string): string {
 }
 
 // Pagination. The specification's cursor is opaque to the client, so each list says what its own
-// names: the next device for the shells and submodels, the last id for the ConceptDescriptions.
+// names: the next device for the shells, submodels and shell descriptors, the last id for the
+// ConceptDescriptions and a shell's submodel descriptors.
 
 const DEFAULT_LIMIT = 20;
 /** Each device on a page costs up to ten queries and one shell construction. That is the reason. */

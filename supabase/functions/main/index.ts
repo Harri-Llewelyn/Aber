@@ -145,6 +145,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "SUPABASE_SERVICE_ROLE_KEY",
     "AAS_BASE_IRI",
     "AAS_HISTORIAN_ENDPOINT",
+    "AAS_I3X_HISTORY_ENDPOINT",
     "AAS_MODEL_PUBLIC_BASE",
     "AAS_MAX_BUNDLED_MODEL_BYTES",
     "STORAGE_MODEL_BUCKET",
@@ -157,11 +158,14 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // rather than two routes, because envForFunction() forwards only what an entry names, so one
   // worker cannot hold a key the other is denied. The AAS_* set is duplicated so the identifiers
   // this serves are the identifiers aas-export mints; no STORAGE_MODEL_BUCKET or
-  // AAS_MAX_BUNDLED_MODEL_BYTES, which belong to AASX packaging.
+  // AAS_MAX_BUNDLED_MODEL_BYTES, which belong to AASX packaging. SUPABASE_PUBLIC_URL is the address
+  // the Registry's descriptors name this service by.
   "aas-api": [
     "AAS_BASE_IRI",
     "AAS_HISTORIAN_ENDPOINT",
+    "AAS_I3X_HISTORY_ENDPOINT",
     "AAS_MODEL_PUBLIC_BASE",
+    "SUPABASE_PUBLIC_URL",
     // Where a device's live readings are read, for the Asset Interfaces Description. This worker
     // alone is given them: they are the site's own endpoints, and aas-export's file leaves the site.
     "AAS_UNS_BROKER_URL",
