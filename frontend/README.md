@@ -144,7 +144,8 @@ Only what acts looks clickable. `.mono` is a typeface and takes the text colour;
 means a real link (the System page's open chip, a `.count-link`). An id that copies is a
 `CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A value a
 dialog hands over is a `CopyField` ([A value to copy](#a-value-to-copy)). A long
-id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`). A cut value slides on
+id passes `truncate="start"` to keep its last 24 characters and cut the middle
+(`https://aber.lo…s/iso22400/EFFECTIVENESS`). A cut value slides on
 hover or focus (`OverflowText`); with `truncate="start"` the cut part slides towards the end it keeps.
 The copy and the aria label always carry the full value. The tooltip carries it whenever the chip is
 cut, measured as the pointer or focus arrives, and otherwise says "Click to copy this {label}". A read-only or disabled `.form-control` takes the page background and muted
@@ -344,8 +345,8 @@ page: "Gateways · 81 · last deleted 25 Nov". Drift check `600` refuses a page'
   goes the groups are as they were. Which are open is kept while the page is open, and not in the address.
 - **A closed group still shows what happened in it.** On the Audit Trail a closed section's heading
   row keeps one summary track, with every event of its lanes clustered as a lane's are. Opening an
-  event there opens the section too. The History page is to group its lanes by area and cell
-  under the same heading.
+  event there opens the section too. History's Overview groups its lanes by area and cell under the
+  same heading, and a closed group's row carries its devices' counts merged.
 - **Which groups are closed belongs to the viewer, in this browser.** The Audit Trail keeps its
   closed sections in localStorage (`aber_audit_trail_closed_sections`, read and written inside
   `try`), not in the address, so a shared link opens every section. Expand all and Collapse all
@@ -1732,9 +1733,9 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`, `sort`; `device` |
 | Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
-| Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
+| Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort`; `declared`, the name a row's drawer is open on |
 | Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter; `built-in` for the Built-in tab | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new` and `/automations/built-in`, for an automation whose id is `new` or `built-in`. Built-in: `search`, `sort`, `rule` (a built-in alert's uid, which opens its drawer) |
-| Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
+| Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its drawer and its concepts |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
 | Entities | `archived`, `retired` | `find`, which the three tabs share; `kind`, the groups that start open; `sort`; `entity` |
@@ -3911,11 +3912,9 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
   | Capture | Gateways | Gateway, Stored capture | | | | Type | | Sparkplug ID |
   | Capture | Devices | Device, Stored capture | | | Gateway | Type | | Sparkplug ID |
   | Areas | areas | Area, Devices | | | | | Cells | Plan |
-  | Vocabulary | Imported | Vocabulary, Actions | | | Imported by, Imported | Concepts, In use | What it is, Version | Definitions |
+  | Vocabulary | Imported | Vocabulary | | | Imported by, Imported | Concepts, In use | What it is, Version | Definitions |
 
-  Uncatalogued and Imported rows have no drawer: a hidden column there is out of sight until the card
-  widens. Automations' rows open the automation's
-  own page, which has every field.
+  Automations' rows open the automation's own page, which has every field.
 - **Every table header, group band and section band is one opaque colour, `--bg-base`**, sticky or
   not. A tint (`--bg-glass`, or the card colour mixed with text) was tried and either vanished on a
   white card or showed rows through a pinned header. A header never takes an inline background.
@@ -3986,7 +3985,7 @@ shows it in the dialog's error slot, as it was worded. Nothing is toasted behind
 
 ## Testing
 
-Vitest with globals enabled and a jsdom environment. **3,851 tests across 162 files** at the last count (2026-10-11).
+Vitest with globals enabled and a jsdom environment. **462 test files** at the last count (2026-11-26).
 
 The suite treats an unhandled promise rejection as a defect, not noise — Vitest reports them
 separately and they can mask real failures.

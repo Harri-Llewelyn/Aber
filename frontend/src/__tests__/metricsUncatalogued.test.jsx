@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MetricsTab } from '../components/tabs/MetricsTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
+import { requiresRolesTitle } from '../hooks/usePermissions'
 import { tabLink } from '../test/tabBar'
 import { tooltipOf } from '../test/tooltips'
 
@@ -74,7 +75,12 @@ const openTab = async () => {
 }
 
 const rowOf = (name) => within(document.querySelector('.card table')).getByText(name).closest('tr')
-const catalogueButton = (name) => within(rowOf(name)).getByRole('button', { name: /Catalogue/ })
+const drawer = () => within(document.querySelector('.context-panel-open'))
+/** Opens the row's drawer, which holds Catalogue, and answers that button. */
+const catalogueButton = (name) => {
+  fireEvent.click(rowOf(name))
+  return drawer().getByRole('button', { name: /Catalogue/ })
+}
 
 const standardSelect = () => screen.getByLabelText('Standard')
 const groupSelect = () => screen.getByLabelText('Group')
@@ -212,12 +218,14 @@ describe('Uncatalogued tab: the rows', () => {
 })
 
 describe('Uncatalogued tab: Catalogue', () => {
-  it('is offered only to a reader who may add a metric', async () => {
+  it('is in the drawer, greyed with the role that may, for a reader who may not add a metric', async () => {
     renderTab({ hasPermission: (p) => p !== PERMISSION_UUIDS.SCHEMA_MANAGE })
     await openTab()
 
-    expect(screen.queryByRole('button', { name: /Catalogue/ })).toBeNull()
     expect(document.querySelector('.card thead th.row-actions')).toBeNull()
+    const button = catalogueButton('Hydraulic/PRESSURE')
+    expect(button).toBeDisabled()
+    expect(tooltipOf(button)).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
   })
 
   it('opens Add Metric as a Custom metric under the declared name, in a group Custom lists', async () => {

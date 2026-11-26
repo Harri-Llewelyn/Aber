@@ -166,6 +166,11 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "AAS_I3X_HISTORY_ENDPOINT",
     "AAS_MODEL_PUBLIC_BASE",
     "SUPABASE_PUBLIC_URL",
+    // Where a device's live readings are read, for the Asset Interfaces Description. This worker
+    // alone is given them: they are the site's own endpoints, and aas-export's file leaves the site.
+    "AAS_UNS_BROKER_URL",
+    "AAS_UNS_TOPIC_ROOT",
+    "AAS_I3X_URL",
   ],
 
   // Records a Grafana alert notification in public.platform_alerts. It holds the service-role key

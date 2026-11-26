@@ -8,7 +8,7 @@
     "  frontend/src/utils/deviceTags.js          modelledMetrics()    -- the browser",
     "  ingestion/validate.py                     modelled_metrics()   -- the conformance validator",
     "  i3x/i3x_service.py                        _modelled_metrics()  -- the i3X address space",
-    "  supabase/functions/aas-export/index.ts    modelledMetrics()    -- the AAS exporter",
+    "  supabase/functions/_shared/aas/shell.ts   modelledMetrics()    -- the AAS exporter",
     "  supabase/migrations/0336_*.sql            schema_modelled_metrics() -- the database, for what a",
     "                                            schema may name among its derived metrics",
     "",

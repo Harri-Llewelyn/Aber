@@ -61,7 +61,7 @@ describe('the Quarantine row of a registered device held again', () => {
     const dialog = await screen.findByRole('dialog', { name: /Archive Device/ })
     expect(dialog).toHaveTextContent('CNC_01')
     fireEvent.change(within(dialog).getByLabelText('Auto-Purge'), { target: { value: '90' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Archive' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Archive Device' }))
     await waitFor(() => expect(post).toHaveBeenCalledWith(`/api/v1/devices/${HELD}/archive`, { auto_delete_days: 90 }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /Archive Device/ })).toBeNull())
     expect(showToast).toHaveBeenCalledWith("Device 'CNC_01' archived", 'success', expect.objectContaining({ to: expect.stringContaining(HELD) }))

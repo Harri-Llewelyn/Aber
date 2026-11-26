@@ -5415,8 +5415,8 @@ paths:
         The row carries what the entity was called, the `sparkplug_id` its readings are still keyed
         by in the historian, when it was archived and retired, who retired it (`retired_by` is null
         when the timer did), the id of the trail's `DELETE` row, and `old_data`, the whole row as
-        it was. It is the Entities page's Retired tab, where each row links to what
-        survives it: the audit trail, a gateway's repository in the forge, and any bundle in
+        it was. It is the Entities page's Retired tab, where each row opens a drawer that links to
+        what survives it: the audit trail, a gateway's repository in the forge, and any bundle in
         `asset_exports`.
 
         **Read-only for every role.** No write policy exists; the trigger writes as definer.
@@ -6827,7 +6827,10 @@ paths:
         from the database over the same mapping `aas-export` uses
         (`supabase/functions/_shared/aas/shell.ts`). A shipped `.aasx` and this endpoint therefore
         cannot describe the same machine differently — the agreement is asserted by
-        `test_aas_api.py`.
+        `test_aas_api.py`. The one difference is deliberate: a shell served here also carries an
+        `AssetInterfacesDescription` submodel (IDTA 02017), which names the i3X server and the UNS
+        bridge's broker where a device's live readings can be read. Those are the site's own
+        endpoints, so no exported file carries it.
 
         **What a client sends.** A bearer token and nothing else: a person's, from **Profile →
         Copy Token**, or a machine identity's, from **Access Control**. No `apikey`. On a site the

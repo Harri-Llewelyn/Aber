@@ -5846,7 +5846,7 @@ class ModelledMetricsContractTest(unittest.TestCase):
     no contract behind it.
 
     `modelledMetrics()` in frontend/src/utils/deviceTags.js, `modelled_metrics()` in
-    ingestion/validate.py and `modelledMetrics()` in supabase/functions/aas-export/index.ts answer
+    ingestion/validate.py and `modelledMetrics()` in supabase/functions/_shared/aas/shell.ts answer
     the same question -- which metrics a schema models. None can import another, so
     `test-harness/fixtures/modelled-metrics.json` is the seam, and each asserts it in its own runner.
 

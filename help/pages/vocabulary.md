@@ -108,7 +108,9 @@ The elements come from IDTA's own files, which are under CC BY 4.0. The credit i
 
 ## The Imported tab
 
-The Imported tab holds vocabularies your site brought in itself. It can be your group's naming standard, a customer's specification, or the terms of a standard you hold a copy of. Every role can read them. Only an Administrator can import, remove or share one, and the buttons are greyed for anyone else. The table of files fits the window. With less room, it hides **Imported by** and **Imported** first, then the counts, then **What it is** and **Version**, then **Definitions**. Widen the window to see them again.
+The Imported tab holds vocabularies your site brought in itself. It can be your group's naming standard, a customer's specification, or the terms of a standard you hold a copy of. Every role can read them. Only an Administrator can import, remove or share one, and the buttons are greyed for anyone else. The table of files fits the window. With less room, it hides **Imported by** and **Imported** first, then the counts, then **What it is** and **Version**, then **Definitions**.
+
+Select a file's row to open its details panel. It shows every field, including the ones the table has hidden, and each metric that uses the file. Its actions are **Show Concepts**, **Share Definitions** or **Stop Sharing**, and **Remove**. **Show Concepts** opens the file's concepts below the table. A link to a file opens its panel and its concepts.
 
 ## Import a vocabulary
 
@@ -136,11 +138,11 @@ Click a concept to start a catalog metric from it, as you do on any other tab. T
 
 ## Share the definitions
 
-Press **Share Definitions** and confirm that your licence allows it. Until you do, an AAS export carries each concept's id and preferred name, and says its definition is the vocabulary's. It also leaves out the description of each metric that carries one of those ids, in case it is a copy. Once you do, it carries the definition text and the metrics' descriptions. **Stop Sharing** takes it back.
+Open the file's panel, press **Share Definitions**, and confirm that your licence allows it. Until you do, an AAS export carries each concept's id and preferred name, and says its definition is the vocabulary's. It also leaves out the description of each metric that carries one of those ids, in case it is a copy. Once you do, it carries the definition text and the metrics' descriptions. **Stop Sharing** takes it back.
 
 ## Remove a vocabulary
 
-Press **Remove**. The dialog says how many metrics use the vocabulary. Those metrics keep their ids and lose the link. An export of them uses the catalog's description again. You can import the file again later.
+Open the file's panel and press **Remove**. The dialog says how many metrics use the vocabulary. Those metrics keep their ids and lose the link. An export of them uses the catalog's description again. You can import the file again later.
 
 ## Why this is a separate page from Metrics and Schemas
 

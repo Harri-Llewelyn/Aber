@@ -10479,6 +10479,37 @@ name its own.
 **A submodel names a template only where it conforms.** See
 [What a shell's submodels claim](#what-a-shells-submodels-claim).
 
+**A shell says where its asset's live readings can be read, in `aas-api` alone.** Its
+`AssetInterfacesDescription` submodel (IDTA 02017) has an interface for each live surface that is on:
+
+- **`I3X`, over HTTP,** while the chart publishes the i3X server. Its base is the server's address
+  (`AAS_I3X_URL`). It has a property for the device and one for each metric its schemas model. Each
+  property's `key` is the i3X `elementId`, `<sparkplug_id>` or `<sparkplug_id>/<metric name>`. Its form
+  is `POST /v1/objects/value`. The security scheme is a bearer token in `Authorization`.
+- **`UnifiedNamespace`, over MQTT,** while the UNS bridge publishes (`ingestion.unsMqttEnabled`) and the
+  broker is published. Its base is the broker as a consumer dials it (`AAS_UNS_BROKER_URL`). It has a
+  property for each modelled metric the bridge publishes, whose form is its topic. The topic is
+  `<root>/<uns_path>/<metric name>`: the bridge's root (`AAS_UNS_TOPIC_ROOT`), then the device's path
+  from the `device_uns_paths` view the bridge and the dashboard read. Each level is percent-encoded, as a
+  URI's path must be. A device the bridge skips has no entry. The security scheme is a username and
+  password.
+
+The details:
+
+- **It is never in an exported file.** It names the site's own endpoints, and a package leaves the site.
+  `main/index.ts` gives the three variables to `aas-api` alone, and drift check `627` holds that.
+- **It names no credential,** only the scheme a client authenticates with.
+- **It is left out, not sent empty,** when neither surface is on.
+- **Each element's idShort, type and ids come from the template's seeded rows** in
+  `idta_template_elements`. Mirror check `179` holds every template path the builder names to those rows.
+  Without the rows, no description is built.
+- **One form per property.** IDTA 02017 1.0 has no element for a second form or an operation, so the
+  `I3X` forms name the value route. `observable` says i3X's subscriptions push changes, and a client
+  creates them at the same base, as the i3X specification says.
+- **No Sparkplug interface.** A Sparkplug payload is protobuf, which a generic client cannot decode from
+  the description. And a device admitted from Quarantine may publish under an id of its own, so naming
+  its topic needs ingestion's identity rules.
+
 **A semantic id resolves without an export.** `/concept-descriptions` lists the ConceptDescription
 of every id the shells' submodels use, and `/concept-descriptions/{id}` fetches one by its base64url
 id. Each is the one the shell's JSON export carries, built by the same `buildConceptDescriptions()`.
@@ -10593,6 +10624,11 @@ invites. `buildEnvironment()` in `_shared/aas/shell.ts` decides it, for `aas-exp
   its id with a `404`.
 - **`stats` counts both:** `claimed_templates`, and `nameplate_missing_elements` for what the claim waits for. The
   Nameplate dialog lists the second by name (`frontend/src/utils/nameplate.js`).
+
+**The Asset Interfaces Description claims IDTA 02017 whenever it is there.** It carries
+`https://admin-shell.io/idta/AssetInterfacesDescription/1/0/Submodel`, and is built only from the template's
+rows, so every element it holds is one the template defines. `aas-api` alone serves it
+([Connecting an AAS client](#connecting-an-aas-client)).
 
 **The other submodels claim nothing.** Each was read against the template in `admin-shell-io/submodel-templates`
 that comes nearest, at commit `5285185b`:

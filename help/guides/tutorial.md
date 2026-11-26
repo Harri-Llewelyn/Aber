@@ -181,8 +181,8 @@ quarantined and drops its `DDATA` until someone approves it. This is how a new d
 itself, not an error.
 
 1. Open **Devices**.
-2. Find the **Quarantine queue**, the first card on the page. The device is listed with the id it
-   used and why it was held.
+2. Open the **Quarantine** tab, beside **Registered**. The device is listed with the id it used and
+   why it was held.
 3. As an `Administrator` or a `Shopfloor_Manager`, choose **Approve & Onboard** and pick its
    gateway, and optionally its cell. Or reject it.
 4. Its next `DDATA` is stored.
