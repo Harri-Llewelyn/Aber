@@ -1,0 +1,16 @@
+{
+  "about": "A template Aber does not hold.",
+  "path": "$[0].template",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "template": "https://example.com/aber/no-such-template"
+    }
+  ]
+}

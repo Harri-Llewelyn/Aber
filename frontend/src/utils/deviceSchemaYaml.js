@@ -9,7 +9,7 @@ import { ordered } from './automationYaml'
  */
 
 /** The keys of each map, in the order a file writes them. The database's jsonb has its own. */
-const SCHEMA_KEYS = ['name', 'description', 'semantic_id', 'semantic_id_type', 'change_description', 'metrics', 'derived_metrics']
+const SCHEMA_KEYS = ['name', 'description', 'semantic_id', 'semantic_id_type', 'template', 'change_description', 'metrics', 'derived_metrics']
 const METRIC_KEYS = ['name', 'minimum', 'maximum', 'semantic_id']
 
 /** One schema as a file writes it: its keys in order, its metrics' too. */

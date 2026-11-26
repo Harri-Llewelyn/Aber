@@ -100,6 +100,8 @@ Three templates are listed:
 - **Contact Information** (IDTA 02002): how to reach a manufacturer. A Digital Nameplate takes its address from here. The Nameplate needs `Street`, `Zipcode`, `CityTown` and `NationalCode`, though this template marks them optional.
 - **Asset Interfaces Description** (IDTA 02017): where a machine's data can be read, over HTTP, Modbus or MQTT. It names its elements by the W3C's Web of Things ids.
 
+**Build Schema** at the end of a template's heading opens **Build Schema from Template** on the [Schemas page](schemas.md), with that template chosen. It ticks the catalog metrics that fill the template's elements. Only a role that may build schemas can use it.
+
 **A template is for looking up.** Nothing on this tab starts a metric or changes anything, and every role sees the same. Listing a template does not make a device's export conform to it. A device's Digital Nameplate says what that takes, on the [Devices page](devices.md).
 
 The elements come from IDTA's own files, which are under CC BY 4.0. The credit is on the tab, and the licence is linked from it.

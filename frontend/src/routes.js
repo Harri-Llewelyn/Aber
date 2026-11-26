@@ -19,6 +19,12 @@ export const schemaUrl = (uuid) => pageUrl('schemas', { search: uuid })
 /** The Schemas page with every version listed, superseded ones too: the page cannot search by a metric. */
 export const allSchemaVersionsUrl = () => pageUrl('schemas', { status: 'all' })
 
+/** Build Schema from Template on the Schemas page, with one template chosen, by its id. */
+export const schemaFromTemplateUrl = (templateId) => pageUrl('schemas', { template: templateId })
+
+/** The submodel templates, on the Vocabulary page's Templates tab. */
+export const templatesUrl = () => pageUrl('vocabulary', {}, 'templates')
+
 /** One device's readings over time on the History page, at the window it opens on. */
 export const deviceHistoryUrl = (id) => `/history/device/${encodeURIComponent(id)}`
 

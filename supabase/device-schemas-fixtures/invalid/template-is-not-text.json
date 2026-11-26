@@ -1,0 +1,16 @@
+{
+  "about": "A number for a template.",
+  "path": "$[0].template",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "template": 5
+    }
+  ]
+}
