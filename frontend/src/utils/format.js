@@ -38,6 +38,14 @@ export function formatDate(ts) {
   return d.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+/** "29 Sept" in the viewer's time zone, with the year where it is not this one: "29 Sept 2025". Fallback "—". */
+export function formatDay(ts, now = Date.now()) {
+  const d = toDate(ts)
+  if (!d) return NO_VALUE
+  const thisYear = d.getFullYear() === new Date(now).getFullYear()
+  return d.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', ...(thisYear ? {} : { year: 'numeric' }) })
+}
+
 /**
  * How long ago, compactly: "just now" under 10 seconds, then "12s ago", "5m ago", "3h ago", "4d ago",
  * then `formatDate` from 30 days. A timestamp after `now` reads as "just now". Fallback "—".

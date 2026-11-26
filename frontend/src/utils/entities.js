@@ -1,6 +1,7 @@
 import { DERIVED_TAG_TITLE } from '../components/common/DerivedTag'
 import { KNOWN_PRINCIPALS } from './serviceIdentities'
 import { SCHEMA_STATUS } from './schemaVersion'
+import { formatDate, formatDay, plural } from './format'
 import { isSparkplugId } from './sparkplugId'
 import { inferSemanticIdType } from './standards'
 
@@ -31,8 +32,49 @@ const KIND_ORDER = new Map(ENTITY_KINDS.map((k, i) => [k.kind, i]))
 /** A kind's one-record name, or its own word for a kind this build does not know. */
 export const kindLabel = (kind) => ENTITY_KINDS[KIND_ORDER.get(kind)]?.label ?? String(kind ?? '')
 
+/** A kind's name for several, as its group's heading has it, or its own word for a kind this build does not know. */
+export const kindPlural = (kind) => ENTITY_KINDS[KIND_ORDER.get(kind)]?.plural ?? String(kind ?? '')
+
+/** How many of a kind, in words: "81 gateways", "1 person". */
+export const kindCount = (kind, n) => `${n} ${(n === 1 ? kindLabel(kind) : kindPlural(kind)).toLowerCase()}`
+
 /** Where a kind comes in the page's order: last, for one this build does not know. */
 export const kindRank = (kind) => KIND_ORDER.get(kind) ?? ENTITY_KINDS.length
+
+/** Rows as `{ kind, rows }` groups, one for each kind they are of, in the page's order. A group keeps the order its rows came in. */
+export function groupByKind(rows) {
+  const byKind = new Map()
+  for (const row of rows) {
+    if (!byKind.has(row.kind)) byKind.set(row.kind, [])
+    byKind.get(row.kind).push(row)
+  }
+  return [...byKind].map(([kind, of]) => ({ kind, rows: of })).sort((a, b) => kindRank(a.kind) - kindRank(b.kind))
+}
+
+/** How close the auto-purge may come before a row and a drawer warn of it. */
+const PURGE_SOON_DAYS = 7
+
+/** True when the purge is due within PURGE_SOON_DAYS, or already overdue. */
+export function purgeIsSoon(at, now = Date.now()) {
+  return new Date(at).getTime() - now <= PURGE_SOON_DAYS * 24 * 60 * 60 * 1000
+}
+
+/** Whether a playback holds an archived gateway whose timer runs: neither the purge nor Permanent Delete removes it. */
+export const purgeIsHeld = (row) => Boolean(row?.auto_delete_at) && row.playbacks > 0
+
+/** What an archived group's heading says of its timers: the soonest purge, and how many a playback holds. Null where none runs. */
+export function nextPurge(rows) {
+  const due = rows.filter(row => row.auto_delete_at && !purgeIsHeld(row)).map(row => new Date(row.auto_delete_at).getTime())
+  const held = rows.filter(purgeIsHeld).length
+  return [due.length > 0 && `next purge ${formatDay(Math.min(...due))}`, held > 0 && `${held} held by a playback`]
+    .filter(Boolean).join(', ') || null
+}
+
+/** What a retired group's heading says: the day of the last deletion. */
+export function lastDeleted(rows) {
+  const at = Math.max(...rows.map(row => new Date(row.retired_at).getTime()).filter(Number.isFinite))
+  return Number.isFinite(at) ? `last deleted ${formatDay(at)}` : null
+}
 
 /** One row's key among every row of the page. A deleted entity's id is not used again, and a test's may be. */
 export const entityKey = (row) => `${row.state}:${row.kind}:${row.id}`
@@ -56,15 +98,30 @@ export function variantBadge(row) {
   }
 }
 
+/** An archived row's auto-purge where a drawer warns of it: held by a playback, or due within a week. Null otherwise. */
+export function purgeWarning(row, now = Date.now()) {
+  if (row?.state !== 'archived' || !row.auto_delete_at) return null
+  if (purgeIsHeld(row)) {
+    return {
+      id: 'purge-held',
+      tone: 'warning',
+      text: `Held: ${plural(row.playbacks, 'playback')} ${row.playbacks === 1 ? 'names' : 'name'} this gateway, and each is kept on record. Neither the auto-purge, due ${formatDate(row.auto_delete_at)}, nor Permanent Delete removes the gateway. Restore it, or leave it archived.`,
+    }
+  }
+  if (!purgeIsSoon(row.auto_delete_at, now)) return null
+  const due = new Date(row.auto_delete_at).getTime() < now ? 'was due' : 'is due'
+  return { id: 'purge-soon', tone: 'danger', text: `The auto-purge ${due} ${formatDate(row.auto_delete_at)}. It deletes the record for good, unless it is restored first.` }
+}
+
 /** What is wrong with a row, as a drawer's `warnings`. */
 export function entityWarnings(row) {
-  if (row?.variant === 'quarantined') {
-    return [{ id: 'quarantined', tone: 'warning', text: 'Quarantined: nobody has admitted this device yet, so its readings are held. Approve or reject it on the Devices page.' }]
-  }
-  if (row?.variant === 'withdrawn') {
-    return [{ id: 'withdrawn', tone: 'warning', text: 'Withdrawn: the API refuses every token that names this machine identity.' }]
-  }
-  return []
+  return [
+    purgeWarning(row),
+    row?.variant === 'quarantined'
+      && { id: 'quarantined', tone: 'warning', text: 'Quarantined: nobody has admitted this device yet, so its readings are held. Approve or reject it on the Devices page.' },
+    row?.variant === 'withdrawn'
+      && { id: 'withdrawn', tone: 'warning', text: 'Withdrawn: the API refuses every token that names this machine identity.' },
+  ].filter(Boolean)
 }
 
 /** What a kind's further ids are called, first and after, in the words its own drawer uses. */
@@ -83,6 +140,31 @@ const SECOND_ID_LABELS = {
 export function secondIdFields(row) {
   const labels = SECOND_ID_LABELS[row.kind] ?? ['Further ID']
   return (row.second_ids ?? []).map((value, i) => ({ label: labels[Math.min(i, labels.length - 1)], value }))
+}
+
+/** What a row has where nothing says otherwise. */
+const BLANK_ROW = Object.freeze({
+  description: null, variant: null, second_ids: [], area_id: null, cell_id: null, gateway_id: null, device_id: null, page_id: null,
+})
+
+/** An archived row (`/api/v1/archives`), which names its kind in the singular, with what entity_directory says of it. */
+export const archivedRow = (a) =>
+  ({ ...BLANK_ROW, page_id: a.entity_id, ...a.directory, ...a, kind: `${a.entity_type}s`, id: a.entity_id, state: 'archived' })
+
+/** A tombstone (`/api/v1/archives/retired`) as entity_directory's own arm for them has it (0321, mirror check 168). */
+export function retiredRow(r) {
+  const old = r.old_data ?? {}
+  const ids = [r.sparkplug_id, old.reported_identity === r.sparkplug_id ? null : old.reported_identity]
+  return {
+    ...BLANK_ROW,
+    ...r,
+    kind: `${r.entity_type}s`,
+    id: r.entity_id,
+    description: old.description ?? null,
+    state: 'retired',
+    variant: old.shadow_of ? 'replay_lane' : null,
+    second_ids: ids.filter(id => id !== null && id !== undefined),
+  }
 }
 
 /** A person as a row, from list_people() or list_user_accounts(). The email is an id people search by. */

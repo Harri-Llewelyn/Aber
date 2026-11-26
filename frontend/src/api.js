@@ -3312,12 +3312,16 @@ const apiMethods = {
     }
 
     if (path.startsWith('/api/v1/archives')) {
-      const [areasRes, cellsRes, gatewaysRes, devicesRes] = await Promise.all([
+      const [areasRes, cellsRes, gatewaysRes, devicesRes, directoryRes] = await Promise.all([
         supabase.from('areas').select('*').eq('is_archived', true),
         supabase.from('cells').select('*').eq('is_archived', true),
         supabase.from('gateways').select('*').eq('is_archived', true),
-        supabase.from('devices').select('*').eq('is_archived', true)
+        supabase.from('devices').select('*').eq('is_archived', true),
+        // Each one's description, further ids and place, as the Active rows have them. Tolerated: without
+        // it a drawer has the row's own name and id.
+        supabase.from('entity_directory').select('*').eq('state', 'archived')
       ]);
+      const directory = new Map((directoryRes.data || []).map(row => [`${row.kind}:${row.id}`, row]));
 
       if (areasRes.error) throw areasRes.error;
       if (cellsRes.error) throw cellsRes.error;
@@ -3382,7 +3386,8 @@ const apiMethods = {
         auto_delete_at: d.auto_delete_at
       }));
 
-      const combined = [...areas, ...cells, ...gateways, ...devices];
+      const combined = [...areas, ...cells, ...gateways, ...devices]
+        .map(row => ({ ...row, directory: directory.get(`${row.entity_type}s:${row.entity_id}`) || null }));
       combined.sort((a, b) => new Date(b.archived_at || 0) - new Date(a.archived_at || 0));
       return combined;
     }

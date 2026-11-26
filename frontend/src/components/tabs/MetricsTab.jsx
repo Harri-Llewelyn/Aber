@@ -66,12 +66,14 @@ import {
   parsePermittedValues, permittedValuesApply, permittedValuesText
 } from '../../utils/schemaProperty'
 import {
-  IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconRefreshCw,
+  IconPlus, IconAlertTriangle, IconArchive, IconRefreshCw,
   IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck, IconHistory, IconChartLine, IconDownload, IconUpload
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
+import { GroupHeading } from '../common/GroupHeading'
+import { useOpenGroups } from '../../hooks/useOpenGroups'
 import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
 import { FilterDropdown } from '../common/FilterChecklist'
 import { applyFacets } from '../../utils/listFilters'
@@ -293,8 +295,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [editTarget, setEditTarget] = useState(null)
   // Which tab of the card is shown, one per VIEWS entry; the default is the catalog.
   const [view, setView, viewHref] = useUrlTab('metrics', VIEWS.map(v => v.id), 'catalog')
-  // Expansion state for the catalog's group sections, keyed by label; absent means collapsed.
-  const [expandedGroups, setExpandedGroups] = useState({})
   // Filters the catalog by metric name. With groups collapsed by default it is how one metric is
   // found without opening each group.
   const [catalogSearch, setCatalogSearch] = useUrlState('search')
@@ -313,14 +313,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     setCatalogSearch(''); setStandardFilter([]); setUnmappedOnly(false)
   }
 
-  /**
-   * A group is open when the operator opened it. While the search or a filter narrows the catalog it
-   * is open unless explicitly closed: a filter that left the groups shut would show headers and no
-   * matches.
-   */
-  const isGroupOpen = (label) => (catalogFilterCount > 0 ? expandedGroups[label] !== false : expandedGroups[label] === true)
-  const toggleGroup = (label) =>
-    setExpandedGroups(prev => ({ ...prev, [label]: !isGroupOpen(label) }))
+  // The catalog's groups start collapsed, and the search and the filters open what they match.
+  const openGroups = useOpenGroups(catalogFilterCount > 0)
 
   // Closing discards: half-finished input must not leak into the next open, including one started
   // from the Vocabulary page.
@@ -782,11 +776,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const selected = catalog.find(m => m.metric_uuid === selectedId) || null
   // Grouped by the name's first `/`-separated segment; ungrouped metrics fall into a trailing bucket.
   const catalogGroups = groupCatalog(activeCatalog)
-  // Writes every group explicitly, `false` included, so Collapse all also closes what a filter opened.
-  const setAllGroups = (open) => setExpandedGroups(prev => ({
-    ...prev,
-    ...Object.fromEntries(groupCatalog(currentCatalog).map(g => [g.label, open]))
-  }))
+  // Every group there is, not only those shown: Collapse all also closes what a filter opened.
+  const setAllGroups = (open) => openGroups.setOpen(groupCatalog(currentCatalog).map(g => g.label), open)
   // `superseded_by` is a uuid; the Deprecated Metrics tab and the restore modal show the name.
   const metricById = new Map(catalog.map(m => [m.metric_uuid, m]))
 
@@ -1099,7 +1090,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           {view === 'catalog' && (
             <>
               {/* The groups start collapsed, so the search and the filters are how metrics are
-                  reached; they open the groups that matched (isGroupOpen). */}
+                  reached; they open the groups that matched. */}
               <div className="filter-bar">
                 <SearchInput
                   value={catalogSearch}
@@ -1145,7 +1136,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               {loaded && catalogGroups.length > 0 && (
                 <div className="groups-header">
                   <ExpandAllToggle
-                    anyOpen={catalogGroups.some(g => isGroupOpen(g.label))}
+                    anyOpen={catalogGroups.some(g => openGroups.isOpen(g.label))}
                     onExpandAll={() => setAllGroups(true)}
                     onCollapseAll={() => setAllGroups(false)}
                     noun="groups"
@@ -1169,36 +1160,37 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   <table className="metric-table">
                     {metricColumns(false)}
                     <thead><tr>{catalogHeaders(catalogSort)}</tr></thead>
-                    {catalogGroups.map(group => {
-                      const open = isGroupOpen(group.label)
+                    {catalogGroups.map((group, i) => {
+                      const open = openGroups.isOpen(group.label)
+                      const rowsId = `catalog-group-${i}`
                       return (
-                        <tbody key={group.label}>
-                          <tr className="table-group-row">
-                            <td colSpan={7}>
-                              {/* The whole header row is the control, as on the Vocabulary page. */}
-                              <Tooltip text={group.isUngrouped
-                                ? `${group.metrics.length} metric name${group.metrics.length === 1 ? '' : 's'} with no "Group/Metric" prefix, so in no component`
-                                : `${group.metrics.length} metric${group.metrics.length === 1 ? '' : 's'} named "${group.label}/…"`}>
-                                <button
-                                  type="button"
-                                  className="table-group-button"
-                                  onClick={() => toggleGroup(group.label)}
-                                  aria-expanded={open}
-                                >
-                                  {open ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
-                                  <span className={`table-group-label${group.isUngrouped ? ' table-group-label-muted' : ''}`}>
-                                    {group.label}
-                                  </span>
-                                </button>
-                              </Tooltip>
-                            </td>
-                          </tr>
-                          {open && catalogSort.apply(group.metrics).map(m => (
-                            <tr key={m.metric_uuid} {...rowProps(m)}>
-                              {metricCells(m)}
+                        <React.Fragment key={group.label}>
+                          <tbody>
+                            <tr className="table-group-row">
+                              <td colSpan={7}>
+                                <GroupHeading
+                                  open={open}
+                                  onToggle={() => openGroups.toggle(group.label)}
+                                  label={group.label}
+                                  muted={group.isUngrouped}
+                                  count={group.metrics.length}
+                                  countLabel={plural(group.metrics.length, 'metric')}
+                                  title={group.isUngrouped
+                                    ? 'Metric names with no "Group/Metric" prefix, so in no component'
+                                    : `Metrics named "${group.label}/…"`}
+                                  controls={rowsId}
+                                />
+                              </td>
                             </tr>
-                          ))}
-                        </tbody>
+                          </tbody>
+                          <tbody id={rowsId} hidden={!open}>
+                            {open && catalogSort.apply(group.metrics).map(m => (
+                              <tr key={m.metric_uuid} {...rowProps(m)}>
+                                {metricCells(m)}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </React.Fragment>
                       )
                     })}
                   </table>

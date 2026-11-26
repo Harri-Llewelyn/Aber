@@ -324,9 +324,10 @@ slowness, so the list names every value the predicate reads, in the order it rea
 
 `common/GroupHeading.jsx` is the heading of a group of rows a reader can close. It is a disclosure
 button (the WAI-ARIA Disclosure pattern) with a chevron, an optional icon, the group's name and its
-count: "Devices · 12". The chevron points up while open and down while closed, as a table's group
-rows do, and the name takes `.table-group-label`'s look. In place of a count, `detail` takes words,
-cut before the name is (`OverflowText`): a Filters panel's section says what is chosen in its list.
+count: "Devices · 12". The chevron points up while open and down while closed, and the name takes
+`.table-group-label`'s look. `detail` takes words, cut before the name is (`OverflowText`): a Filters
+panel's section says what is chosen in its list. Beside a count they come after it, as on the Entities
+page: "Gateways · 81 · last deleted 25 Nov". Drift check `600` refuses a page's own heading.
 
 ```jsx
 <GroupHeading open={open} onToggle={() => toggle(kind)} label="Devices" count={12}
@@ -336,6 +337,10 @@ cut before the name is (`OverflowText`): a Filters panel's section says what is 
 - **The page keeps the state.** The button only reports a press. The page decides which groups are
   open, hides the element named in `controls` while its group is closed, and lays out the row the
   button sits in. A screen reader hears the name and `countLabel`: "Devices, 12 lanes".
+- **A list whose groups start closed keeps them with `useOpenGroups()`** (`hooks/useOpenGroups.js`): the
+  Metric Catalog, the Vocabulary page and the Entities page. A search or a filter opens every group it
+  matched, whatever a person had closed before it, and a person may close one of those. Once the search
+  goes the groups are as they were. Which are open is kept while the page is open, and not in the address.
 - **A closed group still shows what happened in it.** On the Audit Trail a closed section's heading
   row keeps one summary track, with every event of its lanes clustered as a lane's are. Opening an
   event there opens the section too. The History page is to group its lanes by area and cell
@@ -1660,7 +1665,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
-| Entities | `archived`, `retired` | `find`, which the three tabs share; `kind`, `sort`; `entity`, on Active |
+| Entities | `archived`, `retired` | `find`, which the three tabs share; `kind`, the groups that start open; `sort`; `entity` |
 | System | the group, `logs` | `sort`. Logs: `service`, `level`, `search`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)) |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
@@ -1681,14 +1686,33 @@ apart within its kind, and what each kind's further ids are called.
   else, so a tab and the search cannot disagree. `findRank()` applies the same rule to the rows the
   browser holds, and mirror check `159` holds the two to it.
 - **`?find=` is the search, and the three tabs share it.** It is the address of a "what is this?" link:
-  `/entities?find=<id>`. A whole id that names one row opens that row: an Active row's drawer, or the tab
-  that lists another. It opens once, as an arrival by id does (`useArrivalSelection`), so a drawer that is
-  closed stays closed.
-- **The Active table is the whole list, sorted in the browser,** and draws `ACTIVE_PAGE` rows at a time.
-- **`EntityDrawer` is the same for every kind.** It reads the row and nothing more, except how many
-  automations apply to a device. `entityUrl()` in `routes.js` knows each kind's own page (`ENTITY_PAGES` in
-  `utils/entityPages.js` is the rail's name for it), and `tabIsVisible()` decides whether this reader may
-  open it: an Auditor reads an identity here, and Access Control is an Administrator's.
+  `/entities?find=<id>`. A whole id that names one row opens that row's drawer, on the tab that lists it.
+  It opens once, as an arrival by id does (`useArrivalSelection`), so a drawer that is closed stays closed.
+- **Each tab's rows are groups by kind,** in `ENTITY_KINDS`' order and closed to begin with, as the Metric
+  Catalog's are. A tab that shows one group starts with it open. A tab is one table, so its columns line
+  up from group to group, and a column sorts inside each. Beside its count a heading says the one fact an
+  order across kinds used to show: on Retired the day of the last deletion (`lastDeleted()`), and on
+  Archived the next purge's, with how many a playback holds (`nextPurge()`).
+- **An open group draws `GROUP_PAGE` rows at a time,** with a `ListFoot` of its own, so *Expand all* draws
+  the first of each. `KindRows` and each row are memoised: typing in the search draws no row again.
+- **`?kind=devices` opens that group and no other,** for a link from when Kind was a filter. A list opens
+  each it names. Once a person opens or closes a group, or types a search, the address lets go of it and
+  the groups stay as they are.
+- **An arrival opens the group its row is in:** `?entity=`, or a whole id. Closing that group leaves the
+  drawer open.
+- **`EntityDrawer` is the same for every kind, and every row opens it.** It reads the row and nothing more,
+  except how many automations apply to a device in service. `entityUrl()` in `routes.js` knows each kind's
+  own page (`ENTITY_PAGES` in `utils/entityPages.js` is the rail's name for it), and `tabIsVisible()` decides
+  whether this reader may open it: an Auditor reads an identity here, and Access Control is an
+  Administrator's.
+  - **An archived row's has the acts,** as every drawer has its own: Restore first, its page with the lifecycle
+    filter on Archived, its Audit Trail, Export Bundle for a device, and Permanent Delete last. Restore and
+    Permanent Delete close it, since the row leaves the tab. Its auto-purge is a row, or a warning where it
+    is due within a week or a playback holds it (`purgeWarning()`). `/api/v1/archives` gives each row its
+    own of `entity_directory` (`directory`), for the description, the further ids and the place.
+  - **A retired row's is read-only.** It has no page, so it has no actions: the links of *What Survives* are a
+    section. Its ids are read from the tombstone the page holds already, as the view's own arm for them
+    reads them (`retiredRow()`, mirror check `168`).
 - **A retired row is for `archive:manage` or `audit_trail:read`.** A reader with neither is told so, rather
   than that nothing has been retired.
 
@@ -1767,7 +1791,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example. The page's second tab, **Built-in**, is `BuiltInAlerts` and its drawer `BuiltInAlertDrawer`: the alerts Aber raises about itself, read-only ([The Built-in tab](#the-built-in-tab-lists-the-alerts-aber-raises-about-itself)) |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
-| `EntitiesTab` | The Entities page (tab id `entities`), ungated: one card, a tab for each state of one lifecycle, and one search over the three ([The Entities page](#the-entities-page-lists-every-kind-and-finds-any-id)). **Active**: everything in service this reader may see, of every kind, with `EntityDrawer` for the open row. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (behind a [typed gate](#typed-text-guards-removing-access-and-what-cannot-be-undone)) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
+| `EntitiesTab` | The Entities page (tab id `entities`), ungated: one card, a tab for each state of one lifecycle, and one search over the three ([The Entities page](#the-entities-page-lists-every-kind-and-finds-any-id)). Each tab's rows are groups by kind, with `EntityDrawer` for the open row. **Active**: everything in service this reader may see, of every kind. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (behind a [typed gate](#typed-text-guards-removing-access-and-what-cannot-be-undone)) and, on a device, Export Bundle in the drawer, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each drawer linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
 
@@ -1797,7 +1821,7 @@ the source and fails on an outlined button written into one.
 **A control for a page's groups sits over them, not in the toolbar.** Expand all and Collapse all
 (`ExpandAllToggle`) act on the groups the page draws, not on what it filters, so they are the first
 control, at the far left, of the row above the groups. That row is `.groups-header`, which the Audit
-Trail, History, Metrics and Vocabulary all use. A line saying what is shown goes beside it, as on
+Trail, History, Metrics, Vocabulary and Entities all use. A line saying what is shown goes beside it, as on
 History, and a key goes at its right-hand end. The row sits outside the scroller, so it stays on
 screen. Check 371 (`scripts/check-docs-drift.mjs`) reads the source and fails on a toggle written
 into a toolbar, or anywhere but first in this row.
@@ -2950,10 +2974,11 @@ in "building management system".
   bar inside that card, and the tabs' tooltips and the toolbar row follow [Tabs](#tabs). Buttons go
   in the toolbar, never the heading ([The toolbar](#the-toolbar)).
 - **Scroll.** Every page scrolls inside its card, Access Control, System and Approvals included.
-- **Counts.** None on card headings, section headings or tabs. A count stays where it states what is
-  loaded ("30 of 55" beside Show more), what a filter value or toggle holds (Active 4 beside its
-  checkbox, "Needs attention (3)"), what an export will write, or how much work is waiting (a
-  Quarantine or Awaiting tab, the sidebar).
+- **Counts.** None on a card's heading, a section that does not close, or a tab. A group that opens and
+  closes says how many rows it holds, on every page, because a closed one hides them. A count stays
+  where it states what is loaded ("30 of 55" beside Show more), what a filter value or toggle holds
+  (Active 4 beside its checkbox, "Needs attention (3)"), what an export will write, or how much work is
+  waiting (a Quarantine or Awaiting tab, the sidebar).
 - **Queues are tabs.** Devices' quarantine queue is its Quarantine tab, not a card above the roster;
   a tab with work waiting takes `attention`.
 - **Clear filters (N).** N counts every control that is off its default, the lifecycle filter
@@ -2991,7 +3016,8 @@ in "building management system".
   archive has two numbering schemes, and two files numbered 0074), cite the file name.
 
 **Earlier decisions the 2026-10-01 review reversed**, recorded so the next audit does not undo them:
-counts always showing, including on headings; Settings and Vocabulary keeping a `PageHeading`;
+counts always showing, including on headings (a group that opens and closes says its own again, since
+2026-11-25); Settings and Vocabulary keeping a `PageHeading`;
 Access Control, System and Approvals scrolling the page; the Devices queue as a card above the
 roster.
 
@@ -3539,7 +3565,7 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
   not. A tint (`--bg-glass`, or the card colour mixed with text) was tried and either vanished on a
   white card or showed rows through a pinned header. A header never takes an inline background.
 - **Group and section headings pin to the top of their scroller** while their own rows are in
-  view: `.table-group-row` (Metrics) and `.vocab-section-head` (Vocabulary). A group row sits below
+  view: `.table-group-row` (Metrics, Entities) and `.vocab-section-head` (Vocabulary). A group row sits below
   a pinned `thead` at `--table-head-height`, which `.table-scroll` and `.card-fill > .table-wrap`
   set to the header's fixed height (12px padding twice plus a 16px line, so keep header cells on one
   line). It works the same whether the scroller is a `.card-fill` card body or a `.table-scroll`.
@@ -3579,8 +3605,8 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
     A component that holds several tabs' tables passes `{ active: tab === '…' }`, so a hidden
     table neither reads the sort nor tidies away one meant for the table on screen. A table in a
     modal has no address and uses `useLocalSortableRows`.
-  - **Groups sort inside themselves.** The Metric Catalog's group bands keep their order, and
-    `useTableSort(columns).apply(rows)` sorts each group's rows.
+  - **Groups sort inside themselves.** The Metric Catalog's and the Entities page's groups keep their order,
+    and `useTableSort(columns).apply(rows)` sorts each group's rows.
   - **A table loaded a page at a time from the server keeps its order** and has no sortable headers:
     sorting in the browser would sort only the rows on screen. Backups is the one such table.
   - **The arrow hangs in the header cell's right padding**, so a sortable column is no wider than it

@@ -1857,7 +1857,7 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* Group header row: a collapsible category inside a table body, on the header colour. It pins to
    the top of the scroller, below a pinned `thead` (`--table-head-height`, 0 where the header does
-   not pin), for as long as its own `tbody` is in view. Its hairlines are shadows, since a border
+   not pin), until the next group's covers it. Its hairlines are shadows, since a border
    does not travel with a sticky cell. Under the header's z-index 2. */
 .table-group-row > td {
   position: sticky;
@@ -1890,6 +1890,12 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .table-group-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
+/* A group's Show more, inside the table and under its own rows: the foot has its own inset, and the row
+   above it the rule between them. */
+.table-group-foot > td { padding: 0; }
+.table-group-foot > td > .list-foot { border-top: none; }
+tbody tr.table-group-foot:hover { background: none; }
+
 /* GroupHeading: a table group button with a count after the name ("Devices · 12"), muted beside
    the accent name, and its chevron and icon kept whole. A page sizes it to the row it sits in. */
 .group-heading-chevron,
@@ -1900,13 +1906,16 @@ tbody tr:hover { background: var(--bg-glass); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A heading with a row to itself wraps its name, such as an imported file's, rather than cut it. */
+.table-group-row .group-heading-label,
+.vocab-section-head .group-heading-label { white-space: normal; overflow-wrap: anywhere; }
 .group-heading-count {
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
 }
-/* Words in place of the count (`detail`): cut, and slid by OverflowText, before the name gives way. */
+/* Words after the name or the count (`detail`): cut, and slid by OverflowText, before the name gives way. */
 .group-heading-detail,
 .group-heading-detail-shown { display: flex; min-width: 0; }
 .group-heading-detail { flex-shrink: 100; }
@@ -1949,6 +1958,7 @@ tbody tr:hover { background: var(--bg-glass); }
   align-items: center;
   gap: 4px;
 }
+.cell-purge-date > svg { flex-shrink: 0; }
 .cell-purge-date-soon {
   color: var(--danger-text);
   font-weight: 600;
@@ -1959,22 +1969,28 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-muted);
 }
 
-/* The Active tab of Entities: four columns of one grid, so a long semantic id is cut in its own cell and
-   never widens the table. The widths are the first row's, which fixed layout reads. The kind's holds the
-   longest, Machine Identity, on its one line; the second ids take what is left. */
+/* Entities' three tables, whose first two columns are one grid: a long semantic id is cut in its own cell and
+   never widens the table, and the tabs' shared columns line up. The widths are the first row's, which fixed
+   layout reads; the rest share what is left. The scroller keeps the scrollbar's room whether or not a tab
+   needs it, and holds the rows' sr-only words, which would otherwise lengthen the page. */
+.table-wrap:has(> .table-entities) { position: relative; scrollbar-gutter: stable; container: entities / inline-size; }
 .table-entities { table-layout: fixed; }
-.table-entities th:nth-child(1) { width: 30%; }
-.table-entities th:nth-child(2) { width: 172px; }
-.table-entities th:nth-child(3) { width: 27%; }
+.table-entities th:nth-child(-n + 2) { width: 28%; }
+.table-entities-retired th:nth-child(5) { width: 17%; }
 .table-entities td { overflow-wrap: anywhere; }
 .entity-second-ids { display: block; min-width: 0; font-size: 12px; color: var(--text-muted); }
-@media (max-width: 760px) {
-  .table-entities th, .table-entities td { padding-left: 8px; padding-right: 8px; }
+/* A narrow window, or a drawer beside the table: closer cells, and each table its own widths. */
+@container entities (max-width: 760px) {
+  .table-entities tr:not(.table-group-row) > :is(th, td) { padding-left: 8px; padding-right: 8px; }
   .table-entities th { letter-spacing: 0; }
-  .table-entities th:nth-child(1) { width: 27%; }
-  .table-entities th:nth-child(2) { width: 130px; }
-  .table-entities th:nth-child(3) { width: 23%; }
-  .table-entities .entity-kind { padding: 3px 6px; letter-spacing: 0; }
+  .table-entities td > .badge { padding: 3px 6px; letter-spacing: 0; }
+  .table-entities-archived th:nth-child(1) { width: 25%; }
+  .table-entities-archived th:nth-child(2) { width: 19%; }
+  .table-entities-archived th:nth-child(3) { width: 20%; }
+  .table-entities-retired th:nth-child(1) { width: 24%; }
+  .table-entities-retired th:nth-child(2) { width: 19%; }
+  .table-entities-retired th:nth-child(3) { width: 19%; }
+  .table-entities-retired th:nth-child(5) { width: 23%; }
 }
 
 /* What else a search found, between the toolbar and the table. */
@@ -5995,8 +6011,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 
 /* The row above a page's groups: the control that acts on them first, at the far left over the
    headings, then what the page puts beside it (a status line, a key). The Audit Trail, History,
-   Metrics and Vocabulary draw it with this one class, inset as a card body is and with the same
-   room above and below; what follows it adds none of its own. A page's key that sits at the row's
+   Metrics, Vocabulary and Entities draw it with this one class, inset as a card body is and with the
+   same room above and below; what follows it adds none of its own. A page's key that sits at the row's
    right-hand end takes `margin-left: auto`, as .trail-legend does. */
 .groups-header {
   display: flex;
@@ -8407,7 +8423,7 @@ ol.gateway-steps {
 .metric-table-uncatalogued .context-device-list { margin-top: 0; }
 .metric-table-uncatalogued .chip .cell-meta { font-size: inherit; flex-shrink: 0; }
 
-/* The label of a group header, on Metrics and on the Vocabulary sections. */
+/* The label of a group header, wherever GroupHeading draws one. */
 .table-group-label {
   font-size: 11px;
   font-weight: 600;
@@ -8659,11 +8675,10 @@ ol.gateway-steps {
 .built-in-occurrences-link:hover,
 .built-in-occurrences-link:focus-visible { text-decoration: underline; text-underline-offset: 2px; }
 
-/* VOCABULARY. `.vocab-sections` is the card's scroller (`.card-fill-scroll`). A section header reuses
-   `.table-group-button` and `.table-group-label`; the strip behind it is the header colour, and pins
-   to the top of the scroller for as long as its own section is in view. The button takes only its
-   label's width, so the section's "?" and its "in use" sit beside the title; the strip around them
-   toggles on a click as well. */
+/* VOCABULARY. `.vocab-sections` is the card's scroller (`.card-fill-scroll`). A section header is a
+   GroupHeading; the strip behind it is the header colour, and pins to the top of the scroller for as
+   long as its own section is in view. The button takes only its own words' width, so the section's "?"
+   and its "in use" sit beside them; the strip around them toggles on a click as well. */
 .vocab-sections { padding: 0 0 4px; }
 
 .vocab-section-head {
@@ -8673,6 +8688,7 @@ ol.gateway-steps {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding-right: 16px;
   cursor: pointer;
   background: var(--bg-base);
   box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
@@ -8682,8 +8698,10 @@ ol.gateway-steps {
 
 .vocab-section-head > .table-group-button {
   width: auto;
+  min-width: 0;
   padding-right: 0;
 }
+.vocab-section-head > :not(.table-group-button) { flex-shrink: 0; }
 
 .vocab-in-use {
   font-size: 11px;
