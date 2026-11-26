@@ -18,7 +18,7 @@ A machine identity can propose too, if an Administrator gave it that permission.
 - Each tab has its own search box, **kind** filter and **Clear filters**. The search matches the subject, the proposer, the reason or rationale, or an id. The kind filter takes several kinds: tick each one you want. Each kind says how many proposals the search leaves with it.
 - The columns are **Subject**, **Change** (the kind of change), **Field(s) changed**, **Status** and **When**. Hover a time for the full date. The drawer adds who proposed it, when it was proposed and decided, the reason, the rationale, the proposal's UUID and the Audit Trail row.
 - **A column's heading sorts the table** by that column, on both tabs. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
-- The database decides which fields a proposal may name, and checks again at approval. The dialog disables a field no proposal may name, and says why.
+- The database decides which fields a proposal may name, and checks again at approval. The dialog shows a field no proposal may name as plain text, with its value, and says why.
 
 ## What the states mean
 
