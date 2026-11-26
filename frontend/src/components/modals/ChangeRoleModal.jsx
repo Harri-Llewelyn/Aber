@@ -1,9 +1,10 @@
 import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
-import { IconInfo, IconShieldCheck } from '../common/Icons'
+import { IconShieldCheck } from '../common/Icons'
 import { PERSON_ROLES, personRoleLabel, personRoleWithArticle } from '../../utils/people'
 import { personUrl } from '../../routes'
 import { personLabel } from '../../utils/displayName'
@@ -82,18 +83,15 @@ export function ChangeRoleModal({ person, onClose, onChanged, showToast }) {
       {/* Read out as the choice changes, so a keyboard user hears what it means. */}
       <div aria-live="polite">
         {changed && (
-          <div className="callout callout-info">
-            <IconInfo size={14} className="callout-icon" />
-            <div>
-              {/* Named as the drawer's title names them; the title above gives the email. */}
-              <strong>
-                <bdi>{person.display_name || person.email || person.user_id}</bdi> becomes{' '}
-                {personRoleWithArticle(role)}.
-              </strong>{' '}
-              {chosen.consequence} Node-RED follows within a minute, and Grafana when they next sign
-              in to it.
-            </div>
-          </div>
+          <Callout tone="info">
+            {/* Named as the drawer's title names them; the title above gives the email. */}
+            <strong>
+              <bdi>{person.display_name || person.email || person.user_id}</bdi> becomes{' '}
+              {personRoleWithArticle(role)}.
+            </strong>{' '}
+            {chosen.consequence} Node-RED follows within a minute, and Grafana when they next sign
+            in to it.
+          </Callout>
         )}
       </div>
     </Modal>

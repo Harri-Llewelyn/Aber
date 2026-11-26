@@ -1,5 +1,6 @@
 import React, { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '../../api'
+import { Callout } from '../common/Callout'
 import { RouteLink } from '../common/RouteLink'
 import { entityUrl } from '../../routes'
 import { ENTITY_FIND_LIMIT, PERMISSION_UUIDS } from '../../constants'
@@ -379,10 +380,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, unmappedMetric
         </div>
 
         {found.error && !searching && (
-          <div className="callout callout-danger" role="status">
-            <IconAlertTriangle size={14} className="callout-icon" />
-            <div>The search could not be made: {found.error}</div>
-          </div>
+          <Callout tone="danger" role="status">The search could not be made: {found.error}</Callout>
         )}
         {/* Where else the search found something, so a match on another tab is not missed. */}
         {(elsewhere.length > 0 || cutShort) && (
@@ -420,10 +418,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, unmappedMetric
 
         {stage === 'active' && (<>
         {active.error ? (
-          <div className="callout callout-danger" role="status">
-            <IconAlertTriangle size={14} className="callout-icon" />
-            <div>The entities could not be read: {active.error}</div>
-          </div>
+          <Callout tone="danger" role="status">The entities could not be read: {active.error}</Callout>
         ) : !active.loaded || waiting ? <LoadingState label="entities" /> :
          groups.length === 0 ? (
            <EmptyState

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { api } from '../../api'
 import { AppApprovalsTable } from '../common/AppApprovalsTable'
 import { Badge } from '../common/Badge'
+import { Callout } from '../common/Callout'
 import { ClearFilters } from '../common/ClearFilters'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
@@ -238,10 +239,7 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
 
       {error && (
         <div className="card-body">
-          <div className="callout callout-danger">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>{error}</div>
-          </div>
+          <Callout tone="danger">{error}</Callout>
         </div>
       )}
 

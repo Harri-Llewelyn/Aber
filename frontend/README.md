@@ -2998,6 +2998,13 @@ in "building management system".
   listed first, picked in the order under [The drawer is `ContextPanel`](#the-drawer-is-contextpanel).
 - **Tables.** Every header row, group band and section band is one opaque colour, `--bg-base`
   ([Table and Row Conventions](#table-and-row-conventions)).
+- **A callout is a `Callout`.** `common/Callout.jsx` draws every one: in a dialog, a card or a
+  drawer, and above a page's first card as its banner (`page`). The tone picks the colours and the
+  icon, at one size (14px): info `IconInfo`, warning `IconAlertTriangle`, danger `IconShieldAlert`,
+  success `IconCheck`. A `title` is the strong first line, and an `action` (Stop, Cancel, a dismiss)
+  stands at the end. A caller passes `icon` only with a reason, said beside it: the strip of a
+  running recording, playback or backup names its job. Drift check 611 refuses a callout written by
+  hand.
 - **Callouts in a dialog.** A callout in a dialog's body leaves the gap it has above itself (12px)
   before a table, a list or a form, so a banner never sits flush on what it qualifies. One rule in
   `App.css` does it for every dialog. A replay lane that is offline gets an info callout, not the
@@ -3105,6 +3112,7 @@ that describes a component keeps the detail, and *Not* names what to use instead
 | :--- | :--- | :--- |
 | `AlertPill` | The top bar's alert counter, and the list behind it | |
 | `Badge` | A status or category chip; `ArchivedBadge` is ARCHIVED | A gateway's status: `StatusBadge`. A derived metric: `DerivedTag` |
+| `Callout` | What the reader must not miss, tinted, with its tone's icon; `page` is a banner | A dialog's failure: `Modal`'s `error` |
 | `ConnectionStrip` | The row that says the page has stopped updating | |
 | `DerivedTag` | Marks a derived metric wherever one is named | |
 | `NotificationHistory` | The top bar's bell, and the list behind it | |

@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { api } from '../../api'
+import { Callout } from '../common/Callout'
 import { IconCheck } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
@@ -24,30 +25,26 @@ const metricsWhere = (findings, test) => new Set(findings.filter(test).map(f => 
 function Summary({ result }) {
   if (result.error) {
     return (
-      <div className="callout callout-danger" role="status">
-        <span><strong>Not Validated:</strong> {result.error}</span>
-      </div>
+      <Callout tone="danger" role="status"><strong>Not Validated:</strong> {result.error}</Callout>
     )
   }
   const { findings } = result
   if (findings.length === 0) {
     return (
-      <div className="callout callout-success" role="status">
-        <span><strong>No Findings:</strong> ingestion would store every metric in this payload and record nothing.</span>
-      </div>
+      <Callout tone="success" role="status">
+        <strong>No Findings:</strong> ingestion would store every metric in this payload and record nothing.
+      </Callout>
     )
   }
   const drops = metricsWhere(findings, f => f.enforced)
   const lost = metricsWhere(findings, f => f.dropped)
   return (
-    <div className={`callout ${drops || lost ? 'callout-danger' : 'callout-warning'}`} role="status">
-      <span>
-        <strong>{plural(findings.length, 'Finding')}:</strong> ingestion records each one in the Audit Trail.
-        {drops > 0 && <> A device set to Enforce drops {plural(drops, 'reading')}.</>}
-        {lost > 0 && <> {plural(lost, 'metric')} {lost === 1 ? 'is' : 'are'} never stored, under either policy.</>}
-        {!drops && !lost && <> The readings are stored under either policy.</>}
-      </span>
-    </div>
+    <Callout tone={drops || lost ? 'danger' : 'warning'} role="status">
+      <strong>{plural(findings.length, 'Finding')}:</strong> ingestion records each one in the Audit Trail.
+      {drops > 0 && <> A device set to Enforce drops {plural(drops, 'reading')}.</>}
+      {lost > 0 && <> {plural(lost, 'metric')} {lost === 1 ? 'is' : 'are'} never stored, under either policy.</>}
+      {!drops && !lost && <> The readings are stored under either policy.</>}
+    </Callout>
   )
 }
 

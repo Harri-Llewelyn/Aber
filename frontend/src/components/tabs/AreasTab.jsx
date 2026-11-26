@@ -33,6 +33,7 @@ import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
+import { Callout } from '../common/Callout'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
@@ -54,7 +55,6 @@ import {
   IconRefreshCw,
   IconHistory,
   IconBookOpen,
-  IconShieldAlert,
   IconRadio,
   IconCpu,
   IconMap,
@@ -348,22 +348,15 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       {/* Above the card: the queue this page exists to drain, and the first thing worth knowing
           on arrival. Also the drop target for taking a cell out of its area. */}
       {unfiled.length > 0 && (
-        <div
-          className="callout callout-warning callout-page"
-          onDragOver={handleDragOver}
-          onDrop={e => handleDrop(e, null)}
-        >
-          <IconShieldAlert size={18} className="callout-icon" />
-          <div>
-            <strong>{plural(unfiled.length, 'unfiled cell')}:</strong>{' '}
-            {unfiled.map(cellChip)}{' '}
-            <span className="cell-meta">
-              {canManage
-                ? 'Drag each onto an area below. A cell dropped here is taken out of its area.'
-                : 'File them from the Cells page.'}
-            </span>
-          </div>
-        </div>
+        <Callout tone="warning" page onDragOver={handleDragOver} onDrop={e => handleDrop(e, null)}>
+          <strong>{plural(unfiled.length, 'unfiled cell')}:</strong>{' '}
+          {unfiled.map(cellChip)}{' '}
+          <span className="cell-meta">
+            {canManage
+              ? 'Drag each onto an area below. A cell dropped here is taken out of its area.'
+              : 'File them from the Cells page.'}
+          </span>
+        </Callout>
       )}
 
       <div className="card card-fill">

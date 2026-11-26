@@ -5,6 +5,7 @@ import { navigate } from '../../hooks/useUrlState'
 import { usePolling } from '../../hooks/usePolling'
 import { automationUrl, automationsUrl, deviceUrl, trailUrl, triggerIdOfFingerprint } from '../../routes'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import CopyableId from '../common/CopyableId'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -180,7 +181,7 @@ export function AutomationDetail({ automationKey, showToast, canWrite, hasPermis
       </>
     )
   }
-  if (error && !base) return <div className="callout callout-danger">{`The automation could not be read: ${error}`}</div>
+  if (error && !base) return <Callout tone="danger">{`The automation could not be read: ${error}`}</Callout>
   if (!base) return <LoadingState label="automation" />
 
   return (

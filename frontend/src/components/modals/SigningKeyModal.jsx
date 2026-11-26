@@ -1,9 +1,10 @@
 import React, { useCallback, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { CopyField } from '../common/CopyField'
 import { Modal } from '../common/Modal'
-import { IconLock, IconShieldAlert } from '../common/Icons'
+import { IconLock } from '../common/Icons'
 import { formatDateTime } from '../../utils/format'
 import { notificationsUrl } from '../../routes'
 
@@ -63,34 +64,22 @@ export function SigningKeyModal({ issuedAt, onIssued, onClose, showToast }) {
       ) : null}
     >
       {confirming && (
-        <div className="callout callout-warning">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            {rotating ? (
-              <>
-                <strong>Rotate the signing key issued {formatDateTime(issuedAt)}?</strong>
-                <div>
-                  The old key stops signing at once. A receiver that still checks it refuses every
-                  message until it is given the new one.
-                </div>
-              </>
-            ) : (
-              <strong>Issue the webhook’s signing key?</strong>
-            )}
-            <div>The key is shown <strong>once</strong> and cannot be recovered.</div>
-          </div>
-        </div>
+        <Callout tone="warning" title={rotating ? `Rotate the signing key issued ${formatDateTime(issuedAt)}?` : 'Issue the webhook’s signing key?'}>
+          {rotating && (
+            <div>
+              The old key stops signing at once. A receiver that still checks it refuses every
+              message until it is given the new one.
+            </div>
+          )}
+          <div>The key is shown <strong>once</strong> and cannot be recovered.</div>
+        </Callout>
       )}
 
       {step === 'reveal' && key && (
         <>
-          <div className="callout callout-warning">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>
-              <strong>Copy this now — it is not shown again.</strong>
-              <div>Closing this dialog discards it. Issuing another is the only way back.</div>
-            </div>
-          </div>
+          <Callout tone="warning" title="Copy this now — it is not shown again.">
+            Closing this dialog discards it. Issuing another is the only way back.
+          </Callout>
           <CopyField
             id="signing-key"
             label="Signing Key"

@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { Modal } from '../common/Modal'
 import { TypedGate, useTypedGate } from '../common/TypedGate'
-import { IconRecord, IconShieldAlert } from '../common/Icons'
+import { IconRecord } from '../common/Icons'
 import { formatDateTime } from '../../utils/format'
 
 /**
@@ -67,17 +68,14 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
       }
     >
       {existing && (
-        <div className="callout callout-warning">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            This replaces the capture recorded <strong>{formatDateTime(existing.recorded_at)}</strong>
-            {existing.note ? <> — <strong>{existing.note}</strong></> : null}.
-            {' '}That recording is destroyed once the new one succeeds, and cannot be recovered.
-            {/* The old capture is not destroyed when this starts, so a failed recording leaves it
-                intact. */}
-            {' '}The existing capture survives until the replacement has been written.
-          </div>
-        </div>
+        <Callout tone="warning">
+          This replaces the capture recorded <strong>{formatDateTime(existing.recorded_at)}</strong>
+          {existing.note ? <> — <strong>{existing.note}</strong></> : null}.
+          {' '}That recording is destroyed once the new one succeeds, and cannot be recovered.
+          {/* The old capture is not destroyed when this starts, so a failed recording leaves it
+              intact. */}
+          {' '}The existing capture survives until the replacement has been written.
+        </Callout>
       )}
 
       <TypedGate gate={gate} disabled={pending} />

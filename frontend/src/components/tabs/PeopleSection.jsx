@@ -3,6 +3,7 @@ import { createPortal, flushSync } from 'react-dom'
 import { api } from '../../api'
 import { studioEnabled } from '../../config'
 import { Badge } from '../common/Badge'
+import { Callout } from '../common/Callout'
 import { ClearFilters } from '../common/ClearFilters'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
@@ -516,10 +517,7 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {error && (
         <div className="card-body">
-          <div className="callout callout-danger">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>{error}</div>
-          </div>
+          <Callout tone="danger">{error}</Callout>
         </div>
       )}
 

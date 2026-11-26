@@ -1,6 +1,6 @@
 import React from 'react'
+import { Callout } from '../common/Callout'
 import { CopyField } from '../common/CopyField'
-import { IconShieldAlert } from '../common/Icons'
 
 /**
  * A password manage-people minted, shown once: the warning, the person's address, and the password,
@@ -11,13 +11,7 @@ import { IconShieldAlert } from '../common/Icons'
 export function PasswordShownOnce({ email, password, hint, children }) {
   return (
     <>
-      <div className="callout callout-warning">
-        <IconShieldAlert size={14} className="callout-icon" />
-        <div>
-          <strong>Copy this password now — it is not shown again.</strong>
-          <div>{children}</div>
-        </div>
-      </div>
+      <Callout tone="warning" title="Copy this password now — it is not shown again.">{children}</Callout>
 
       <CopyField id="person-email" label="Email" value={email} copyLabel="email address" />
       <CopyField id="person-password" label="Password" value={password} hint={hint} />

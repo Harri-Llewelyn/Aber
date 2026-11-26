@@ -1764,7 +1764,8 @@ tbody tr {
 tbody tr:hover { background: var(--bg-glass); }
 
 /* Callout: a bordered, tinted banner for a caveat the reader must not miss, inside the card it
-   qualifies. A shape as well as a colour, so it survives a reader who cannot distinguish the hue. */
+   qualifies. A shape as well as a colour, so it survives a reader who cannot distinguish the hue.
+   common/Callout.jsx draws every one: its tone's icon, then one body, then any action. */
 .callout {
   display: flex;
   gap: 10px;
@@ -1780,6 +1781,8 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .callout-icon { flex-shrink: 0; margin-top: 1px; }
+/* The text takes the row, so an action (Stop, Cancel, a dismiss) stands at the callout's end. */
+.callout-body { flex: 1; min-width: 0; }
 
 /* The tint is deliberately SUBTLE: this is a standing property of the page, not an error that has
    just happened, and a full-strength danger banner that is always present is one a reader learns
@@ -1789,7 +1792,9 @@ tbody tr:hover { background: var(--bg-glass); }
   background: color-mix(in srgb, var(--warning) 7%, transparent);
 }
 
-.callout-warning .callout-icon { color: var(--warning); }
+/* --warning-text, not --warning: --warning is below the 3:1 an icon needs on this tint in the light
+   theme (2.95:1, and 2.68:1 on a page banner). The two are one colour in the dark theme. */
+.callout-warning .callout-icon { color: var(--warning-text); }
 
 /* An error or a refusal that stands on the page: the same subtle tint as the warning, in the danger
    hue. The text is --danger-text because --danger is below AA on the tint in the light theme. */
@@ -1808,6 +1813,16 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .callout-info .callout-icon { color: var(--accent-text); }
+
+/* A result that went well, such as a payload with no findings. */
+.callout-success {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--success-text);
+}
+
+.callout-success .callout-icon { color: var(--success); }
+
 .callout strong { color: var(--text-primary); }
 /* A link inside a callout or an empty state (a HelpLink into the panel, a RepoLink out to GitHub):
    accent text with no resting underline, as every link is, underlined on hover and focus. */
@@ -1832,9 +1847,8 @@ tbody tr:hover { background: var(--bg-glass); }
    it leaves above itself, 12px. Another callout after it already has that gap as its own top margin. */
 .modal-body > .callout:has(+ :not(.callout)) { margin-bottom: 12px; }
 
-/* The page banner: a callout above a page's first card, as `callout callout-warning callout-page`
-   with an icon element first and ONE body element (a div or span) after it. Full width, wraps, and
-   the icon centres against the text. AFTER `.callout`, not before: equal specificity, so the later
+/* The page banner: a callout above a page's first card, `<Callout page>`. Full width, wraps, and the
+   icon centres against the text. AFTER `.callout`, not before: equal specificity, so the later
    rule wins the margin, and `.callout`'s inset and missing bottom gap are wrong out on the page.
    The warning form is the stronger tint here: a finding on arrival, not a standing property. */
 .callout-page {
@@ -8516,12 +8530,6 @@ ol.gateway-steps {
 /* A metric name or pattern inside a hint keeps the hint's size; `.mono` alone would set 13px. */
 .validate-payload-hint .mono { font-size: inherit; }
 
-.callout-success {
-  border-color: var(--success);
-  background: color-mix(in srgb, var(--success) 8%, transparent);
-  color: var(--success-text);
-}
-
 /* The schema detail dialog's footer holds up to four buttons, which wrap rather than run past the
    box when one row cannot hold them. */
 .schema-detail-modal .modal-actions { flex-wrap: wrap; }
@@ -8925,8 +8933,6 @@ ol.gateway-steps {
 .capture-card-drop { border-color: var(--accent); }
 /* A failed job's message on the Captures and Playbacks tabs (CaptureHistory). */
 .capture-history-failure { min-width: 240px; font-size: 12px; color: var(--danger-text); }
-/* The line saying a tab lists one job: the sentence takes the room, and the way out stays at the end. */
-.capture-job-line > :not(.callout-icon):not(.btn) { flex: 1; min-width: 0; }
 .capture-drop-overlay {
   position: absolute;
   inset: 0;

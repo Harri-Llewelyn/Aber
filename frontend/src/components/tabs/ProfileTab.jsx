@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { IconUser, IconLock, IconAlertTriangle, IconCopy, IconCheck } from '../common/Icons'
+import { Callout } from '../common/Callout'
+import { IconUser, IconLock, IconCopy, IconCheck } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
@@ -321,13 +322,10 @@ function SourceNotice({ settingsSource }) {
   if (settingsSource !== 'browser') return null
   return (
     <div className="card-body profile-source">
-      <div className="callout callout-warning" role="status">
-        <IconAlertTriangle size={14} className="callout-icon" />
-        <div>
-          Your choices could not be read from your account, so this browser&apos;s are shown.
-          A change you make now applies in this browser only.
-        </div>
-      </div>
+      <Callout tone="warning" role="status">
+        Your choices could not be read from your account, so this browser&apos;s are shown.
+        A change you make now applies in this browser only.
+      </Callout>
     </div>
   )
 }

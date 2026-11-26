@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { IconAlertTriangle, IconPlus, IconX } from '../common/Icons'
+import { Callout } from '../common/Callout'
+import { IconPlus, IconX } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { MetricPicker } from '../common/MetricPicker'
@@ -385,20 +386,14 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
       </div>
 
       {nameError && (
-        <div className="callout callout-danger">
-          <IconAlertTriangle size={13} className="callout-icon" />
-          <span>{nameError}</span>
-        </div>
+        <Callout tone="danger">{nameError}</Callout>
       )}
 
       {caseCollision && (
-        <div className="callout callout-warning">
-          <IconAlertTriangle size={13} className="callout-icon" />
-          <span>
-            Group <span className="mono">{form.newGroup.trim()}</span> already exists as{' '}
-            <span className="mono">{group}</span> — that spelling will be used, so the two do not fork.
-          </span>
-        </div>
+        <Callout tone="warning">
+          Group <span className="mono">{form.newGroup.trim()}</span> already exists as{' '}
+          <span className="mono">{group}</span> — that spelling will be used, so the two do not fork.
+        </Callout>
       )}
     </Modal>
   )

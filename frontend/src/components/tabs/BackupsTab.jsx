@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { api } from '../../api'
 import { usePolling } from '../../hooks/usePolling'
 import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { Callout } from '../common/Callout'
 import { FilterDropdown } from '../common/FilterChecklist'
 import { backupUrl, trailUrl } from '../../routes'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
@@ -16,7 +17,7 @@ import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { BackupDestinationModal } from '../modals/BackupDestinationModal'
 import { CardHeading } from '../common/CardHeading'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { IconAlertTriangle, IconDatabase, IconHardDrive, IconHistory, IconShieldAlert, IconX } from '../common/Icons'
+import { IconAlertTriangle, IconDatabase, IconHardDrive, IconHistory, IconX } from '../common/Icons'
 import { SummaryCard, SummaryCards } from '../common/SummaryCard'
 import { cronIntervalSeconds } from '../../utils/cronInterval'
 import { formatBytes, formatClockTime, formatDateTime, formatDuration, formatRelative, NO_VALUE, plural } from '../../utils/format'
@@ -282,10 +283,7 @@ export function BackupsTab({ showToast, hasPermission }) {
           {/* Above the cards, which it says cannot be trusted while it shows. */}
           {error && (
             <div className="card-body backup-banner">
-              <div className="callout callout-danger">
-                <IconShieldAlert size={14} className="callout-icon" />
-                <div>{error}</div>
-              </div>
+              <Callout tone="danger">{error}</Callout>
             </div>
           )}
 
@@ -762,23 +760,11 @@ function RunningCard({ job, onCancel, cancelPending, historianOn }) {
   const stale = pending && waitedMs > 2 * 60 * 1000
 
   return (
-    <div className={stale ? 'callout callout-warning' : 'callout callout-info'}>
-      <IconHardDrive size={14} className="callout-icon" />
-      <div style={{ flex: 1 }}>
-        <div>
-          <strong>{pending ? 'Queued' : 'Running'}</strong>
-          <span style={{ color: 'var(--text-muted)' }}> · {job.origin === 'requested' ? 'on request' : 'scheduled'}</span>
-          {job.note && <span style={{ color: 'var(--text-muted)' }}> · {job.note}</span>}
-        </div>
-        <div style={{ color: stale ? 'var(--warning-text)' : 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
-          {stale
-            ? 'No backup service has claimed this. Nothing will take it until the service is running; cancel it or start the service.'
-            : pending
-              ? 'Waiting for the backup service to claim it.'
-              : `Started ${formatDateTime(job.started_at)}. Being written: ${componentSentence(historianOn)}.`}
-        </div>
-      </div>
-      {pending && (
+    <Callout
+      tone={stale ? 'warning' : 'info'}
+      // A running job's strip: its icon names the job, as Capture's strips do.
+      icon={IconHardDrive}
+      action={pending && (
         <ActionButton
           className="btn btn-ghost"
           pending={cancelPending}
@@ -790,7 +776,20 @@ function RunningCard({ job, onCancel, cancelPending, historianOn }) {
           Cancel
         </ActionButton>
       )}
-    </div>
+    >
+      <div>
+        <strong>{pending ? 'Queued' : 'Running'}</strong>
+        <span style={{ color: 'var(--text-muted)' }}> · {job.origin === 'requested' ? 'on request' : 'scheduled'}</span>
+        {job.note && <span style={{ color: 'var(--text-muted)' }}> · {job.note}</span>}
+      </div>
+      <div style={{ color: stale ? 'var(--warning-text)' : 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
+        {stale
+          ? 'No backup service has claimed this. Nothing will take it until the service is running; cancel it or start the service.'
+          : pending
+            ? 'Waiting for the backup service to claim it.'
+            : `Started ${formatDateTime(job.started_at)}. Being written: ${componentSentence(historianOn)}.`}
+      </div>
+    </Callout>
   )
 }
 

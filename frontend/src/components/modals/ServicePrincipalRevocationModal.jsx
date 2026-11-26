@@ -1,8 +1,8 @@
 import React, { useCallback, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { Modal } from '../common/Modal'
-import { IconShieldAlert } from '../common/Icons'
 import { identityUrl } from '../../routes'
 import { SIGNATURE_ONLY } from '../../utils/revocationScope'
 
@@ -71,14 +71,11 @@ export function ServicePrincipalRevocationModal({
           <p className="cell-meta">
             This identity may hold tokens again, and the API will stop refusing them.
           </p>
-          <div className="callout callout-warning">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>
-              <strong>Its previous tokens stay revoked.</strong> Reinstating restores the identity,
-              not the credentials that were live when it was withdrawn — those cannot be
-              un-revoked. Issue a new token afterwards.
-            </div>
-          </div>
+          <Callout tone="warning">
+            <strong>Its previous tokens stay revoked.</strong> Reinstating restores the identity,
+            not the credentials that were live when it was withdrawn — those cannot be
+            un-revoked. Issue a new token afterwards.
+          </Callout>
           {revocation?.reason && (
             <p className="cell-meta">
               Withdrawn because: <em>{revocation.reason}</em>
@@ -87,27 +84,24 @@ export function ServicePrincipalRevocationModal({
         </div>
       ) : (
         <>
-          <div className="callout callout-warning">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>
-              <strong>Withdraw this identity?</strong> The API will refuse{' '}
-              <strong>every token naming it</strong> — including ones this stack has no record
-              of, and any issued afterwards. That is what makes this different from revoking
-              tokens one at a time.
-              {activeTokens > 0 && (
-                <div>
-                  {activeTokens === 1
-                    ? 'Its 1 active token will also be revoked individually'
-                    : `Its ${activeTokens} active tokens will also be revoked individually`}
-                  , so reinstating later will not bring them back.
-                </div>
-              )}
+          <Callout tone="warning">
+            <strong>Withdraw this identity?</strong> The API will refuse{' '}
+            <strong>every token naming it</strong> — including ones this stack has no record
+            of, and any issued afterwards. That is what makes this different from revoking
+            tokens one at a time.
+            {activeTokens > 0 && (
               <div>
-                Reversible — but {SIGNATURE_ONLY} verify the signature themselves and will keep
-                accepting existing tokens until they expire.
+                {activeTokens === 1
+                  ? 'Its 1 active token will also be revoked individually'
+                  : `Its ${activeTokens} active tokens will also be revoked individually`}
+                , so reinstating later will not bring them back.
               </div>
+            )}
+            <div>
+              Reversible — but {SIGNATURE_ONLY} verify the signature themselves and will keep
+              accepting existing tokens until they expire.
             </div>
-          </div>
+          </Callout>
 
           <div className="form-group">
             <label className="form-label" htmlFor="principal-revoke-reason">

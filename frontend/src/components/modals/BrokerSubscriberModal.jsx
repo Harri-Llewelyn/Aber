@@ -1,11 +1,11 @@
 import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { CopyField } from '../common/CopyField'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
-import { IconShieldAlert } from '../common/Icons'
 import { useDirectoryBroker } from './EdgeNodeSettings'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { ROOT_CERTIFICATE_PATH } from '../../utils/edgeNodeSettings'
@@ -139,16 +139,10 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
       </>)}
 
       {account && (<>
-        <div className="callout callout-warning">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            <strong>Copy this now — it is not shown again.</strong>
-            <div>
-              Closing this dialog discards the password. The broker keeps only a hash of it. If it
-              is lost, delete the account and create another.
-            </div>
-          </div>
-        </div>
+        <Callout tone="warning" title="Copy this now — it is not shown again.">
+          Closing this dialog discards the password. The broker keeps only a hash of it. If it
+          is lost, delete the account and create another.
+        </Callout>
         <SubscriberSettings account={account} topics={topics} />
       </>)}
     </Modal>

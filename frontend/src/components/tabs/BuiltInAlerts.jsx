@@ -7,10 +7,11 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { Badge } from '../common/Badge'
 import { BuiltInStateBadge } from '../common/BuiltInStateBadge'
+import { Callout } from '../common/Callout'
 import { ClearFilters } from '../common/ClearFilters'
 import { rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
-import { IconAlertTriangle, IconExternalLink, IconZap } from '../common/Icons'
+import { IconExternalLink, IconZap } from '../common/Icons'
 import { OverflowText } from '../common/OverflowText'
 import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
@@ -116,28 +117,25 @@ export function BuiltInAlerts({ head, showToast }) {
           </div>
 
           {error && (
-            <div className="callout callout-warning" role="status">
-              <IconAlertTriangle size={14} className="callout-icon" />
-              <div>Which alerts are firing could not be read, so no rule says it is not firing: {error}</div>
-            </div>
+            <Callout tone="warning" role="status">
+              Which alerts are firing could not be read, so no rule says it is not firing: {error}
+            </Callout>
           )}
           {unlisted && (
-            <div className="callout callout-info" role="status">
-              <div>
-                This release has no built-in alert with the uid <span className="mono">{ruleUid}</span>. A rule
-                written on this site, or one a release has retired, is not listed here.
-                {grafanaEvaluatesBuiltIns && (
-                  <>
-                    {' '}
-                    {/* A real anchor, as the drawer's action is: where a site's own rules live. */}
-                    <a href={grafanaAlertUrl({ rule_uid: ruleUid })} target="_blank" rel="noopener noreferrer">
-                      View in Grafana <IconExternalLink size={11} aria-hidden="true" />
-                    </a>
-                    , where a site's own rules live.
-                  </>
-                )}
-              </div>
-            </div>
+            <Callout tone="info" role="status">
+              This release has no built-in alert with the uid <span className="mono">{ruleUid}</span>. A rule
+              written on this site, or one a release has retired, is not listed here.
+              {grafanaEvaluatesBuiltIns && (
+                <>
+                  {' '}
+                  {/* A real anchor, as the drawer's action is: where a site's own rules live. */}
+                  <a href={grafanaAlertUrl({ rule_uid: ruleUid })} target="_blank" rel="noopener noreferrer">
+                    View in Grafana <IconExternalLink size={11} aria-hidden="true" />
+                  </a>
+                  , where a site's own rules live.
+                </>
+              )}
+            </Callout>
           )}
 
           {rows.length === 0 ? (

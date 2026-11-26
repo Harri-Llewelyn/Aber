@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { Callout } from '../common/Callout'
 import { RouteLink } from '../common/RouteLink'
 import { cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
@@ -76,7 +77,6 @@ import {
   IconBookOpen,
   IconExternalLink,
   IconShieldAlert,
-  IconAlertTriangle,
   IconLayoutDashboard,
   IconDownload,
   IconEye,
@@ -647,42 +647,33 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       <div className="page-main">
 
       {unassignedDevices.length > 0 && (
-        <div className="callout callout-warning callout-page">
-          <IconAlertTriangle size={18} className="callout-icon" />
-          <span>
-            <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
-            {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
-            Assign them from the Devices page.
-          </span>
-        </div>
+        <Callout tone="warning" page>
+          <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
+          {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
+          Assign them from the Devices page.
+        </Callout>
       )}
 
       {/* Says what the rail's colour means before the table is read. */}
       {offlineGateways.length > 0 && (
-        <div className="callout callout-warning callout-page">
-          <IconShieldAlert size={18} className="callout-icon" />
-          <span>
-            <strong>{offlineGateways.length} gateway{offlineGateways.length === 1 ? '' : 's'} offline:</strong>{' '}
-            {offlineGateways.slice(0, 5).map(g => g.gateway_name).join(', ')}{offlineGateways.length > 5 ? ', …' : ''}.
-            Every device underneath is silent with it. Check the appliance, its network, and its broker credential.
-          </span>
-        </div>
+        <Callout tone="warning" page>
+          <strong>{offlineGateways.length} gateway{offlineGateways.length === 1 ? '' : 's'} offline:</strong>{' '}
+          {offlineGateways.slice(0, 5).map(g => g.gateway_name).join(', ')}{offlineGateways.length > 5 ? ', …' : ''}.
+          Every device underneath is silent with it. Check the appliance, its network, and its broker credential.
+        </Callout>
       )}
 
       {/* Said before a Remote gateway is created, because the refusal otherwise arrives from the
           setup dialog after the row exists. Only for those who could create one. */}
       {enrolmentBlocked && canManage && (
-        <div className="callout callout-warning callout-page">
-          <IconShieldAlert size={18} className="callout-icon" />
-          <span>
-            <strong>Remote gateways cannot be enrolled on this deployment:</strong>{' '}
-            {enrolmentProblems.join('; ')}. An appliance dials these addresses, so they are set on
-            the deployment rather than here: set <span className="mono">global.publicBaseDomain</span>{' '}
-            in the chart&rsquo;s values and restart the functions service (the help page{' '}
-            <HelpLink to="site/remote-gateways#the-two-addresses-that-must-be-right">Remote gateways</HelpLink>,
-            <em>The two addresses that must be right</em>). Host and Simulated gateways are unaffected.
-          </span>
-        </div>
+        <Callout tone="warning" page>
+          <strong>Remote gateways cannot be enrolled on this deployment:</strong>{' '}
+          {enrolmentProblems.join('; ')}. An appliance dials these addresses, so they are set on
+          the deployment rather than here: set <span className="mono">global.publicBaseDomain</span>{' '}
+          in the chart&rsquo;s values and restart the functions service (the help page{' '}
+          <HelpLink to="site/remote-gateways#the-two-addresses-that-must-be-right">Remote gateways</HelpLink>,
+          <em>The two addresses that must be right</em>). Host and Simulated gateways are unaffected.
+        </Callout>
       )}
 
       <div className="card card-fill">

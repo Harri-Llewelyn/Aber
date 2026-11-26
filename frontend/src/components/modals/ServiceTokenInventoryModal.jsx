@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
+import { Callout } from '../common/Callout'
 import { FieldError } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { ConfirmModal } from './ConfirmModal'
@@ -112,14 +113,11 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
       </>}
       dismiss="Close"
     >
-      <div className="callout callout-warning">
-        <IconShieldAlert size={14} className="callout-icon" />
-        <div>
-          Revoking stops a token at <strong>{REVOCATION_REACHES}</strong>. {SIGNATURE_ONLY}
-          {' '}verify the signature themselves and keep accepting it until it expires. Revocation
-          {' '}<strong>cannot be undone</strong>.
-        </div>
-      </div>
+      <Callout tone="warning">
+        Revoking stops a token at <strong>{REVOCATION_REACHES}</strong>. {SIGNATURE_ONLY}
+        {' '}verify the signature themselves and keep accepting it until it expires. Revocation
+        {' '}<strong>cannot be undone</strong>.
+      </Callout>
 
       {rows.length === 0 ? (
         <p className="cell-meta">

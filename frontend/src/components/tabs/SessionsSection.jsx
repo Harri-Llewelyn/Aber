@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
 import { studioEnabled } from '../../config'
+import { Callout } from '../common/Callout'
 import { EmptyState } from '../common/EmptyState'
-import { IconLogOut, IconShieldAlert } from '../common/Icons'
+import { IconLogOut } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { SessionsTable } from '../common/SessionsTable'
 import { Tooltip } from '../common/Tooltip'
@@ -95,10 +96,7 @@ export function SessionsSection({ isPerson = true, showToast }) {
         <EmptyState message="A machine identity signs in with a token, so it has no sessions to list." />
       ) : error ? (
         <div className="card-body">
-          <div className="callout callout-danger" role="status">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>{error}</div>
-          </div>
+          <Callout tone="danger" role="status">{error}</Callout>
         </div>
       ) : sessions === undefined ? (
         <LoadingState label="sessions" />

@@ -2,9 +2,10 @@ import React, { useState } from 'react'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { CredentialField, useCredential } from '../common/CredentialField'
 import { Modal } from '../common/Modal'
-import { IconAlertTriangle, IconGlobe, IconTrash } from '../common/Icons'
+import { IconGlobe, IconTrash } from '../common/Icons'
 import { ConfirmModal } from './ConfirmModal'
 import { hostOf, parseHosts } from '../../utils/notifications'
 
@@ -90,16 +91,13 @@ export function WebhookModal({ webhook, saveHosts, writeUrl, onSaved, onRemove, 
           One host a line. An address whose host is not here is refused when a message is sent.
         </p>
         {unlisted && (
-          <div className="callout callout-warning" data-testid="webhook-host-unlisted">
-            <IconAlertTriangle size={14} className="callout-icon" />
-            <div>
-              <span className="mono">{unlisted}</span> is not an allowed host, so every message to
-              this address would be refused.{' '}
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHostsText(t => `${t.trim() ? `${t.trim()}\n` : ''}${unlisted}`)} disabled={pending}>
-                Allow It
-              </button>
-            </div>
-          </div>
+          <Callout tone="warning" data-testid="webhook-host-unlisted">
+            <span className="mono">{unlisted}</span> is not an allowed host, so every message to
+            this address would be refused.{' '}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHostsText(t => `${t.trim() ? `${t.trim()}\n` : ''}${unlisted}`)} disabled={pending}>
+              Allow It
+            </button>
+          </Callout>
         )}
       </div>
 

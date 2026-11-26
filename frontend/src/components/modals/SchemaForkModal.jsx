@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { IconGitBranch, IconAlertTriangle, IconInfo } from '../common/Icons'
+import { Callout } from '../common/Callout'
+import { IconGitBranch } from '../common/Icons'
 import { ConfirmModal } from './ConfirmModal'
 import { nextVersion, nextVersionName, schemaVersion } from '../../utils/schemaVersion'
 import { plural } from '../../utils/format'
@@ -54,25 +55,19 @@ export function SchemaForkModal({ schema, deviceCount = 0, archivedCount = 0, re
         </div>
       </div>
 
-      <div className="callout callout-info">
-        <IconInfo size={13} className="callout-icon" />
-        <div>
-          {/* Naming is the server's call: fork_schema() numbers the draft further while the name is
-              taken, so this predicts and must not promise. */}
-          The draft will be named <span className="mono">{nextVersionName(schema)}</span>. A schema
-          name is unique, so each version carries its own; the lineage is the link between them.
-        </div>
-      </div>
+      <Callout tone="info">
+        {/* Naming is the server's call: fork_schema() numbers the draft further while the name is
+            taken, so this predicts and must not promise. */}
+        The draft will be named <span className="mono">{nextVersionName(schema)}</span>. A schema
+        name is unique, so each version carries its own; the lineage is the link between them.
+      </Callout>
 
       {deviceCount > 0 && (
-        <div className="callout callout-warning">
-          <IconAlertTriangle size={13} className="callout-icon" />
-          <span>
-            {plural(deviceCount, 'device')} currently {deviceCount === 1 ? 'uses' : 'use'} v{schemaVersion(schema)}
-            {outOfService ? `, including ${outOfService}` : ''}.
-            Publishing v{next} will move {deviceCount === 1 ? 'it' : 'them all'} across in a single transaction.
-          </span>
-        </div>
+        <Callout tone="warning">
+          {plural(deviceCount, 'device')} currently {deviceCount === 1 ? 'uses' : 'use'} v{schemaVersion(schema)}
+          {outOfService ? `, including ${outOfService}` : ''}.
+          Publishing v{next} will move {deviceCount === 1 ? 'it' : 'them all'} across in a single transaction.
+        </Callout>
       )}
     </ConfirmModal>
   )
