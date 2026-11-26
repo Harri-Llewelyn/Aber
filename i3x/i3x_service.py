@@ -112,6 +112,10 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://supabase-envoy:8000").rstrip("/
 # space contains.
 SUPABASE_GATEWAY_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 
+# The namespace of the site's AAS shells (supabaseFunctions.aas.baseIri), so a device names its shell
+# in `metadata.system`. Unset, it is shell.ts's default.
+AAS_BASE_IRI = os.getenv("AAS_BASE_IRI")
+
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 # A READ-ONLY broker principal, matching what this service refuses to do in code: the i3x role
@@ -401,6 +405,12 @@ def _read_address_space(pg: PostgrestClient) -> dict:
     # Every schema attached to a device, as the dashboard, the AAS exporter and ingestion read it:
     # one device_submodels row per schema.
     attached = _read_relation(pg, "device_schemas", {"select": "device_id,schema_id"})
+    # The nameplate each device's AAS shell carries, as the dashboard records it. Every authenticated
+    # caller reads it.
+    nameplates = _read_relation(
+        pg, "device_nameplate",
+        {"select": "device_id,updated_at," + ",".join(A.NAMEPLATE_COLUMNS)},
+    )
     # A metric's catalog row is its type on every device that carries it.
     catalog = _read_relation(
         pg,
@@ -429,6 +439,7 @@ def _read_address_space(pg: PostgrestClient) -> dict:
         "schemas": schemas,
         "device_schemas": schemas_by_device,
         "metric_catalog": catalog,
+        "nameplates": {row["device_id"]: row for row in nameplates},
     }
 
 
@@ -571,6 +582,9 @@ def _build_objects(space: dict) -> Dict[str, dict]:
     # Per distinct set of schemas: the metrics they model, and those that are components, sorted.
     modelled_by_set: Dict[tuple, tuple] = {}
 
+    nameplates = space.get("nameplates") or {}
+    nameplates_by_eid: Dict[str, dict] = {}
+
     devices_by_gateway: Dict[str, List[str]] = {}
     # Every level of the location tree: parent elementId -> the elementIds filed under it.
     children: Dict[str, List[str]] = {}
@@ -597,9 +611,16 @@ def _build_objects(space: dict) -> Dict[str, dict]:
             location.get("location_source"), location.get("effective_cell_id"),
             location.get("effective_area_id"), cell_ids, area_ids,
         )
+        nameplate = nameplates.get(device["id"])
+        has_nameplate = A.has_nameplate(nameplate)
         obj = A.device_object(device, parent, type_id, schema, source_type_id=source_type_id,
-                              metric_ids=[m["elementId"] for m in metrics], extensions=extensions)
+                              metric_ids=[m["elementId"] for m in metrics], extensions=extensions,
+                              nameplate=has_nameplate, aas_base_iri=AAS_BASE_IRI)
         objects[obj["elementId"]] = obj
+        if has_nameplate:
+            plate = A.nameplate_object(obj["elementId"])
+            objects[plate["elementId"]] = plate
+            nameplates_by_eid[plate["elementId"]] = nameplate
         children.setdefault(parent, []).append(obj["elementId"])
         if gateway:
             devices_by_gateway.setdefault(gateway["sparkplug_id"], []).append(obj["elementId"])
@@ -650,6 +671,7 @@ def _build_objects(space: dict) -> Dict[str, dict]:
     # ---------------------------------------------------------------------------------------------
     space["_gateways_by_sid"] = {g["sparkplug_id"]: g for g in space["gateways"]}
     space["_devices_by_sid"] = {d["sparkplug_id"]: d for d in space["devices"]}
+    space["_nameplates_by_eid"] = nameplates_by_eid
     return objects
 
 
@@ -660,6 +682,12 @@ def _build_types(space: dict) -> List[dict]:
     that names a catalog metric refers to that metric's type.
     """
     types = list(A.SYNTHETIC_TYPES) + list(A.METRIC_FALLBACK_TYPES)
+    # The Nameplate's type, while a device in the space has one, as a metric's type is served while
+    # its catalog row is.
+    devices = {d["id"] for d in space.get("devices") or ()}
+    if any(A.has_nameplate(row) for device_id, row in (space.get("nameplates") or {}).items()
+           if device_id in devices):
+        types.append(A.NAMEPLATE_TYPE)
     metric_types = {row["name"]: A.metric_type_from_catalog(row) for row in _measured_metrics(space)}
     schemas_by_id = {}
     for schema in space["schemas"]:
@@ -2112,7 +2140,8 @@ def _fill_from_historian(pg: PostgrestClient, space: dict, objects, device_ids) 
         filled = set(_filled)
     for sid in sorted(set(device_ids) - filled):
         rels = (objects.get(sid, {}).get("metadata") or {}).get("relationships") or {}
-        names = {c.partition("/")[2] for c in rels.get("HasComponent", [])} - set(metrics_for(sid))
+        names = {c.partition("/")[2] for c in rels.get("HasComponent", []) if c.startswith(sid + "/")}
+        names -= set(metrics_for(sid))
         if names:
             missing[sid] = names
     if not missing:
@@ -2167,6 +2196,10 @@ def _current_value(objects, space: dict, element_id: str, unfilled=frozenset()):
         device, gateway = _live_rows(space, devices_by_sid[element_id])
         return A.device_value(device, metrics_for(element_id), gateway,
                               unavailable=element_id in unfilled)
+    # A device's Nameplate: what somebody recorded, so not held to the device's liveness.
+    nameplate = (space.get("_nameplates_by_eid") or {}).get(element_id)
+    if nameplate is not None:
+        return A.nameplate_value(nameplate)
     # A metric: `<sparkplug_id>/<metric name>`, split at the first `/`.
     sid, _, name = element_id.partition("/")
     if name and sid in devices_by_sid:
