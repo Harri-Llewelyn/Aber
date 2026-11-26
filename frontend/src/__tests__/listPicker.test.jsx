@@ -96,18 +96,6 @@ describe('ListPicker', () => {
     expect(document.querySelector('.list-picker-search')).toBeNull()
   })
 
-  it('held whole, nothing can be chosen or taken out, and the search still works', () => {
-    render(<Harness initial={['cherry']} disabled legend="Fruit" />)
-    expect(screen.getAllByRole('checkbox').every(cb => cb.disabled)).toBe(true)
-    expect(box('Cherry').checked).toBe(true)
-    expect(document.querySelectorAll('.list-picker-label-disabled')).toHaveLength(3)
-    // Muted to be read, not faded as a row that cannot be chosen among rows that can.
-    expect(document.querySelector('.list-picker-label-blocked')).toBeNull()
-    expect(search().disabled).toBe(false)
-    type('app')
-    expect(screen.getAllByRole('checkbox')).toHaveLength(1)
-  })
-
   it('holds the rows the caller names, unless they are chosen, so they can be taken out', () => {
     render(<Harness initial={['cherry']} isDisabled={i => i.id !== 'apple'} />)
     expect(box('Apple').disabled).toBe(false)

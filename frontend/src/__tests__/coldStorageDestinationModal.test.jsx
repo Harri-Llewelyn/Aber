@@ -196,7 +196,7 @@ describe('what it shows', () => {
   it('shows the site key as a label with its reason, and the destination as something to copy', () => {
     open({ values: COMPLETE })
     // Text, not a greyed field: nobody can change it here.
-    const facts = document.querySelector('.metric-edit-facts')
+    const facts = screen.getByText('Site Key', { selector: 'dt' }).closest('.static-field')
     expect(facts.querySelector('.form-label')).toHaveTextContent('Site Key')
     expect(facts).toHaveTextContent(SITE_KEY)
     expect(facts).toHaveTextContent('Fixed at install by values.yaml coldArchive.s3.siteKey.')
@@ -209,7 +209,7 @@ describe('what it shows', () => {
 
   it('says the site key is not set when the install gave none', () => {
     open({ values: COMPLETE, siteKey: '' })
-    expect(document.querySelector('.metric-edit-facts')).toHaveTextContent('Not set')
+    expect(screen.getByText('Site Key', { selector: 'dt' }).closest('.static-field')).toHaveTextContent('Not set')
   })
 
   it('says what is lost while archiving is off', () => {

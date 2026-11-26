@@ -73,6 +73,8 @@ const names = () => within(picker()).queryAllByRole('checkbox').map(cb => cb.get
 const type = (value) => fireEvent.change(within(picker()).getByLabelText('Search name, description or metric'), { target: { value } })
 const save = () => fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 const schemaWrites = () => api.put.mock.calls.filter(([path]) => path.endsWith('/schemas'))
+/** The dialog's static field of this name. */
+const fixedField = (label) => within(document.querySelector('.modal')).getByText(label, { selector: 'dt' }).closest('.static-field')
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -141,10 +143,10 @@ describe('Edit Device Configuration', () => {
   it('names the metric groups the ticked schemas model, whatever the search lists', async () => {
     await show({ rows: [device({ submodel_schema_ids: [idOf(7)] })] })
     openEdit()
-    expect(within(picker()).getByText('Metric groups these schemas model: Group7')).toBeTruthy()
+    expect(fixedField('Metric Groups').querySelector('.form-static')).toHaveTextContent(/^Group7$/)
     type('spindle')
     fireEvent.click(box('Schema_41'))
-    expect(within(picker()).getByText('Metric groups these schemas model: Group7, Spindle')).toBeTruthy()
+    expect(fixedField('Metric Groups').querySelector('.form-static')).toHaveTextContent(/^Group7, Spindle$/)
   })
 
   it('says what the schemas are for, under the list', async () => {
@@ -156,16 +158,13 @@ describe('Edit Device Configuration', () => {
 })
 
 describe('proposing a change', () => {
-  it('shows the schemas ticked and held, says why, and still searches them', async () => {
-    await show({ rows: [device({ submodel_schema_ids: [idOf(7)] })], hasPermission: asOperator })
+  it('shows the schemas the device has as their names, says why, and offers no list to tick', async () => {
+    await show({ rows: [device({ submodel_schema_ids: [idOf(7), idOf(41)] })], hasPermission: asOperator })
     openEdit('Propose a Change')
-    const boxes = within(picker()).getAllByRole('checkbox')
-    expect(boxes).toHaveLength(59)
-    expect(boxes.every(cb => cb.disabled)).toBe(true)
-    expect(box('Schema_07').checked).toBe(true)
-    expect(within(picker()).getByText(/an Administrator or a Shopfloor Manager changes them/)).toBeTruthy()
-    type('spindle/load')
-    expect(names()).toEqual(['Schema_41'])
-    expect(box('Schema_41').disabled).toBe(true)
+    const schemas = fixedField('Schemas')
+    expect(schemas.querySelector('.form-static')).toHaveTextContent(/^Schema_07, Schema_41$/)
+    expect(schemas).toHaveTextContent(/an Administrator or a Shopfloor Manager changes them/)
+    expect(screen.queryByRole('group', { name: /^Schemas \(optional\)/ })).toBeNull()
+    expect(within(document.querySelector('.modal')).queryAllByRole('checkbox')).toHaveLength(0)
   })
 })

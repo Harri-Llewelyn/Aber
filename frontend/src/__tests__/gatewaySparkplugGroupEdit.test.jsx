@@ -44,7 +44,7 @@ const show = async (row, hasPermission = () => true) => {
   await waitFor(() => expect(screen.getAllByText(row.gateway_name).length).toBeGreaterThan(0))
   fireEvent.click(within(document.querySelector('.page-main')).getByText(row.gateway_name))
   fireEvent.click(within(document.querySelector('.context-panel')).getByRole('button', { name: /Edit Details|Propose a Change/ }))
-  return screen.getByLabelText('Sparkplug Group')
+  return screen.queryByLabelText('Sparkplug Group')
 }
 
 const type = (field, value) => fireEvent.change(field, { target: { value } })
@@ -122,11 +122,14 @@ describe('the Sparkplug group in the Edit Gateway dialog', () => {
     expect(screen.queryByRole('button', { name: /^Use / })).toBeNull()
   })
 
-  it('is withheld, with the reason, from someone who may only propose', async () => {
+  it('is a static field with its value and the reason, for someone who may only propose', async () => {
     const field = await show(gateway({ observed_sparkplug_group: 'Plant-B' }),
       (uuid) => uuid === PERMISSION_UUIDS.PROPOSAL_CREATE)
-    expect(field).toBeDisabled()
-    expect(screen.getByText(/half of this gateway’s address/)).toBeInTheDocument()
+    expect(field).toBeNull()
+    const fixed = screen.getByText('Sparkplug Group', { selector: 'dt' }).closest('.static-field')
+    // An identifier, copied by a click.
+    expect(within(fixed).getByRole('button', { name: 'Copy sparkplug group Aber' })).toBeInTheDocument()
+    expect(fixed).toHaveTextContent(/A proposal can’t change this\. .*half of this gateway’s address/)
     expect(screen.queryByRole('button', { name: 'Use Plant-B' })).toBeNull()
   })
 })

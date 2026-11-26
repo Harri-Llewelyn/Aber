@@ -8,6 +8,7 @@ import { Callout } from '../common/Callout'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
+import { StaticField } from '../common/StaticField'
 import { IconPlay } from '../common/Icons'
 import { plural } from '../../utils/format'
 import { deviceIdKey } from '../../utils/sparkplugId'
@@ -269,17 +270,13 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
           </Callout>
         )}
         {only && (
-          <>
-            <p className="form-static">
-              Plays back as <strong>{only.name}</strong> (<span className="mono">{only.sparkplug_id}</span>)
-              {held && ` — ${held.note}`}
-            </p>
-            <p className="form-hint">
-              A capture is played back only on the Playback gateway: nothing else publishes as it, so
-              a playback never shares a live publisher's sequence numbers.
-            </p>
+          <StaticField
+            label="Playback Gateway"
+            value={<>{only.name} (<span className="mono">{only.sparkplug_id}</span>){held && ` — ${held.note}`}</>}
+            reason="A capture is played back only on the Playback gateway: nothing else publishes as it, so a playback never shares a live publisher's sequence numbers."
+          >
             {passwordInUse && <p className="form-hint">{passwordInUse}</p>}
-          </>
+          </StaticField>
         )}
         {targets !== null && targets.length > 1 && (
           <>

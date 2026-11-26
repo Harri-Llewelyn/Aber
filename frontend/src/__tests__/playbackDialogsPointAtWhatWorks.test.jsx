@@ -61,7 +61,7 @@ describe('the playback dialog', () => {
   it('says an unmapped device is refused, not that it quarantines anything', async () => {
     api.playbackTargets.mockResolvedValue([TARGET])
     render(<StartPlaybackModal capture={CAPTURE} onConfirm={vi.fn()} onCancel={vi.fn()} />)
-    await screen.findByText(/Plays back as/)
+    await screen.findByText('Playback Gateway', { selector: 'dt' })
     const hint = await screen.findByText(/plays back as its replay lane/)
     expect(hint.textContent).toMatch(/left unmapped is refused/)
     expect(document.body.textContent).not.toMatch(/quarantin/)
@@ -72,7 +72,7 @@ describe('the playback dialog', () => {
     api.playbackTargets.mockResolvedValueOnce([TARGET]).mockResolvedValue([{ ...TARGET, devices: [] }])
     api.ensureShadowLanes.mockResolvedValue({ [RECORDED]: LANE })
     render(<StartPlaybackModal capture={CAPTURE} onConfirm={vi.fn()} onCancel={vi.fn()} />)
-    await screen.findByText(/Plays back as/)
+    await screen.findByText('Playback Gateway', { selector: 'dt' })
     // The map starts empty, so the one captured device offers its lane.
     fireEvent.click(await screen.findByText(/Prepare Replay Lanes/))
     expect(await screen.findByText(/replay lanes could not be read/)).toBeInTheDocument()

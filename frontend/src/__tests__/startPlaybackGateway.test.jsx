@@ -4,8 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { StartPlaybackModal } from '../components/modals/StartPlaybackModal'
 
 /**
- * The Playback gateway in the Play back dialog. A site has one, so the dialog names it in a fixed
- * line and uses it; with two (a replacement being swapped in) the person chooses, with nothing
+ * The Playback gateway in the Play back dialog. A site has one, so the dialog names it in a static
+ * field and uses it; with two (a replacement being swapped in) the person chooses, with nothing
  * chosen for them. A gateway that cannot publish says so on its line and holds Play back, with its
  * reason, in the dialog's problem.
  */
@@ -47,6 +47,9 @@ const ONE_DEVICE = { ...NODE_ONLY, manifest: { birth_captured: true, device_ids:
 const workerHolding = (held) => ({ held_edge_nodes: held, reported_at: new Date().toISOString() })
 const flat = (node) => node.textContent.replace(/\s+/g, ' ').trim()
 const playBack = () => screen.getByRole('button', { name: 'Play Back' })
+/** The static field's name, once the dialog has read the gateways, and its value. */
+const gatewayName = () => screen.findByText('Playback Gateway', { selector: 'dt' })
+const gatewayLine = async () => (await gatewayName()).nextElementSibling
 
 function open(capture = NODE_ONLY, onConfirm = vi.fn()) {
   render(<StartPlaybackModal capture={capture} onConfirm={onConfirm} onCancel={vi.fn()} />)
@@ -64,11 +67,10 @@ beforeEach(() => {
 })
 
 describe('a site with one Playback gateway', () => {
-  it('names it in a fixed line, with no select to choose it from', async () => {
+  it('names it in a static field, with no select to choose it from', async () => {
     open()
-    const line = await screen.findByText(/Plays back as/)
-    expect(flat(line)).toBe(`Plays back as Playback (${GW})`)
-    expect(within(line).getByText('Playback').tagName).toBe('STRONG')
+    const line = await gatewayLine()
+    expect(flat(line)).toBe(`Playback (${GW})`)
     expect(line.querySelector('.mono')).toHaveTextContent(GW)
     expect(screen.queryByLabelText('Playback Gateway')).toBeNull()
     expect(screen.queryByRole('combobox', { name: /Playback Gateway/ })).toBeNull()
@@ -77,15 +79,15 @@ describe('a site with one Playback gateway', () => {
 
   it('is a static label, not a control that is switched off', async () => {
     open()
-    const line = await screen.findByText(/Plays back as/)
-    expect(line.tagName).toBe('P')
+    const line = await gatewayLine()
+    expect(line.tagName).toBe('DD')
     expect(line.querySelector('input, select')).toBeNull()
     expect(line.closest('.form-group').querySelector('input, select')).toBeNull()
   })
 
   it('plays back on it, without being asked to choose', async () => {
     const onConfirm = open()
-    await screen.findByText(/Plays back as/)
+    await gatewayName()
     await waitFor(() => expect(playBack()).toBeEnabled())
     fireEvent.click(playBack())
     await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ targetGatewayId: 'gw-playback', deviceMap: {}, speed: 1 }))
@@ -101,7 +103,7 @@ describe('a site with one Playback gateway', () => {
 
   it('says nothing against a gateway that holds a credential the worker holds as well', async () => {
     open()
-    const line = await screen.findByText(/Plays back as/)
+    const line = await gatewayLine()
     await waitFor(() => expect(playBack()).toBeEnabled())
     expect(flat(line)).not.toMatch(/—/)
     edit()
@@ -133,8 +135,8 @@ describe('a site with one Playback gateway', () => {
     it.each(CASES)('$name', async ({ setup, note, reason }) => {
       setup()
       const onConfirm = open()
-      const line = await screen.findByText(/Plays back as/)
-      await waitFor(() => expect(flat(line)).toBe(`Plays back as Playback (${GW}) — ${note}`))
+      const line = await gatewayLine()
+      await waitFor(() => expect(flat(line)).toBe(`Playback (${GW}) — ${note}`))
       // Never as the dialog opens, nor on an edit.
       edit()
       expect(document.querySelector('.modal-problem')).toBeEmptyDOMElement()
@@ -152,7 +154,7 @@ describe('a site with one Playback gateway', () => {
 
   it('explains in a hint why only this gateway plays a capture back', async () => {
     open()
-    await screen.findByText(/Plays back as/)
+    await gatewayName()
     expect(screen.getByText(/nothing else publishes as it/)).toBeInTheDocument()
     expect(screen.queryByText(/Only the Playback gateway is listed/)).toBeNull()
   })
@@ -171,7 +173,7 @@ describe('a site with two Playback gateways', () => {
     expect(within(select).getByRole('option', { name: 'Choose the Playback gateway…' })).toBeInTheDocument()
     expect(within(select).getByRole('option', { name: `Playback (${GW})` })).toBeInTheDocument()
     expect(within(select).getByRole('option', { name: `Playback 2 (${OTHER_GW})` })).toBeInTheDocument()
-    expect(screen.queryByText(/Plays back as/)).toBeNull()
+    expect(screen.queryByText('Playback Gateway', { selector: 'dt' })).toBeNull()
   })
 
   it('sends nothing until one is chosen, and says so on the press', async () => {
@@ -221,7 +223,7 @@ describe('a site where no Playback gateway can be found', () => {
     api.playbackTargets.mockResolvedValue([])
     open()
     expect(await screen.findByText(/could not be found/)).toBeInTheDocument()
-    expect(screen.queryByText(/Plays back as/)).toBeNull()
+    expect(screen.queryByText('Playback Gateway', { selector: 'dt' })).toBeNull()
     expect(screen.queryByLabelText('Playback Gateway')).toBeNull()
     pressHeld(screen.getByRole('dialog'), 'Play Back', 'The Playback gateway could not be found')
   })

@@ -1,5 +1,4 @@
 import React, { useState } from 'react'
-import CopyableId from './CopyableId'
 import { FieldError, fieldErrorProps } from './FieldError'
 import { IconCheck } from './Icons'
 import { MetricPicker } from './MetricPicker'
@@ -7,6 +6,7 @@ import { PropertyRange } from './PropertyRange'
 import { RequiredMark } from './RequiredMark'
 import { SchemaDerivedMetrics } from './SchemaDerivedMetrics'
 import { SemanticIdField } from './SemanticIdField'
+import { StaticEmpty, StaticField } from './StaticField'
 import { Tooltip } from './Tooltip'
 import { derivedOffered, derivedProblems } from '../../utils/derivedMetric'
 import { modelledMetrics } from '../../utils/deviceTags'
@@ -70,18 +70,6 @@ export function schemaFields(idPrefix, { form, catalog, takesRange, derived, nam
   }
 }
 
-/** A value nobody here can change, where its field would be. */
-function StaticField({ label, children, none = null, hint = null }) {
-  const empty = children === null || children === undefined || children === ''
-  return (
-    <div className="form-group">
-      <div className="form-label">{label}</div>
-      <div className={`form-static${empty ? ' form-static-none' : ''}`}>{empty ? none : children}</div>
-      {hint && <div className="form-hint">{hint}</div>}
-    </div>
-  )
-}
-
 /**
  * The body of the dialogs that build a schema, edit a draft of one and show a published version, so a
  * schema is one form wherever it is met: its name, description and semantic id, then its metrics with
@@ -124,9 +112,11 @@ export function SchemaEditor({
     <>
       <div className="schema-editor-fields">
         {version ? (
-          <StaticField label="Schema Name" hint={readOnly ? null : 'Follows the first version’s name, so it cannot be changed.'}>
-            {form.name}
-          </StaticField>
+          <StaticField
+            label="Schema Name"
+            value={form.name}
+            reason={readOnly ? null : 'Follows the first version’s name, so it cannot be changed.'}
+          />
         ) : (
           <div className="form-group">
             <label className="form-label" htmlFor={id('name')}>Schema Name <RequiredMark title={REQUIRED} /></label>
@@ -144,13 +134,11 @@ export function SchemaEditor({
         )}
 
         {version && (
-          <StaticField label="Schema UUID">
-            <CopyableId value={version.uuid} label="schema UUID" onNotify={version.onCopy} />
-          </StaticField>
+          <StaticField label="Schema UUID" value={version.uuid} mono copyable copyLabel="schema UUID" onCopy={version.onCopy} />
         )}
 
         {readOnly ? (
-          <StaticField label="Description" none="—">{form.description}</StaticField>
+          <StaticField label="Description" value={form.description} />
         ) : (
           <div className="form-group">
             <label className="form-label" htmlFor={id('description')}>Description</label>
@@ -165,9 +153,7 @@ export function SchemaEditor({
         )}
 
         {version && (readOnly ? (
-          <StaticField label="Change Description" none="No change description was recorded for this version.">
-            {form.changeDescription}
-          </StaticField>
+          <StaticField label="Change Description" value={form.changeDescription} />
         ) : (
           <div className="form-group">
             <label className="form-label" htmlFor={id('change-description')}>Change Description</label>
@@ -213,7 +199,7 @@ export function SchemaEditor({
       >
         {readOnly ? (
           names.length === 0 ? (
-            <p className="form-static form-static-none">This schema models no metrics.</p>
+            <StaticEmpty>This schema models no metrics.</StaticEmpty>
           ) : (
             <ul className="schema-editor-list">
               {names.map(name => (

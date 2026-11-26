@@ -300,7 +300,7 @@ describe('Add Derived Metric', () => {
   // The Chosen list's metric names, in order: the rows of its list, each with the name in mono.
   const chosen = (dialog) => [...dialog.querySelectorAll('[role="listitem"]')]
     .map(item => item.querySelector('.mono').textContent)
-  const facts = (dialog) => dialog.querySelector('.metric-edit-facts')
+  const facts = (dialog) => dialog.querySelector('.static-fields')
   const typeName = (dialog, value) => fireEvent.change(within(dialog).getByLabelText(/Metric Name/), { target: { value } })
   const count = (dialog) => dialog.querySelector('.section-count').textContent
 

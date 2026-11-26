@@ -7,6 +7,7 @@ import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { HelpTip } from '../common/HelpTip'
 import { Modal } from '../common/Modal'
 import { LoadingState } from '../common/LoadingState'
+import { StaticField } from '../common/StaticField'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { PERMISSION_UUIDS } from '../../constants'
 import { patchFromForm, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
@@ -262,7 +263,35 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
     // its label is a plain div.
     const inputId = inputIdOf(field.column)
     const fieldError = fieldErrors[field.column]
-    const NameTag = isPublished || reading ? 'div' : 'label'
+    // The template's wording on the label, for a pointer; the field's HelpTip, where it has one, is
+    // the keyboard's way to what tells it apart.
+    const wording = element
+      ? `${element.id_short} — ${element.semantic_id_type} ${element.semantic_id}${element.description ? `\n\n${element.description}` : ''}`
+      : null
+    const name = (
+      <>
+        {field.label}
+        {mandatory.includes(field.path) && (
+          <Tooltip text="Mandatory in the IDTA template. The exported nameplate names the template once every field marked like this has a value. You can save without it.">
+            <span style={{ color: 'var(--text-muted)', marginLeft: '4px' }}>*</span>
+          </Tooltip>
+        )}
+      </>
+    )
+    // What the device reported, with its reason: the exporter uses this value, so it cannot be
+    // overridden here. For a reader, the notice above says why nothing here changes.
+    if (isPublished || reading) {
+      return (
+        <StaticField
+          key={field.column}
+          label={<Tooltip text={wording}><span>{name}</span></Tooltip>}
+          help={field.help}
+          helpLabel={`What ${field.label} means`}
+          value={isPublished ? String(deviceValue) : form[field.column]}
+          reason={isPublished ? 'Published by the device at DBIRTH, so the export uses it.' : null}
+        />
+      )
+    }
     return (
       <div key={field.column}>
         {/* The tip is a SIBLING of the label, not a child: a button inside a label is
@@ -270,53 +299,24 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
             the field's name. The row carries the label's bottom margin so the spacing
             is the same as a field without a tip. */}
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: '7px' }}>
-          {/* The template's wording on the label, for a pointer; the field's HelpTip,
-              where it has one, is the keyboard's way to what tells it apart. */}
-          <Tooltip text={element
-            ? `${element.id_short} — ${element.semantic_id_type} ${element.semantic_id}${element.description ? `\n\n${element.description}` : ''}`
-            : null}>
-          <NameTag
-            className="form-label"
-            htmlFor={isPublished || reading ? undefined : inputId}
-            style={{ marginBottom: 0 }}
-          >
-            {field.label}
-            {mandatory.includes(field.path) && (
-              <Tooltip text="Mandatory in the IDTA template. The exported nameplate names the template once every field marked like this has a value. You can save without it.">
-                <span style={{ color: 'var(--text-muted)', marginLeft: '4px' }}>*</span>
-              </Tooltip>
-            )}
-          </NameTag>
+          <Tooltip text={wording}>
+            <label className="form-label" htmlFor={inputId} style={{ marginBottom: 0 }}>{name}</label>
           </Tooltip>
           {/* Only on the fields whose label does not define them. The label's own hover
               text carries the template's wording; this carries how to tell the field
               from its neighbours, which is what the three identifiers actually need. */}
           {field.help && <HelpTip text={field.help} label={`What ${field.label} means`} />}
         </div>
-        {isPublished ? (
-          // What the device reported, as text with its reason: the exporter uses this value,
-          // so it cannot be overridden here.
-          <>
-            <div className="mono" style={{ fontSize: '13px', overflowWrap: 'anywhere' }}>{String(deviceValue)}</div>
-            <div className="form-hint">Published by the device at DBIRTH, so the export uses it.</div>
-          </>
-        ) : reading ? (
-          // The reader's notice above says why: nothing here changes it.
-          <div className="mono" style={{ fontSize: '13px', overflowWrap: 'anywhere' }}>
-            {form[field.column] || <span style={{ color: 'var(--text-muted)' }}>Not set</span>}
-          </div>
-        ) : (
-          <input
-            id={inputId}
-            className="form-control"
-            type={field.type || 'text'}
-            inputMode={field.inputMode}
-            placeholder={field.placeholder || ''}
-            value={form[field.column]}
-            onChange={e => set(field.column, e.target.value)}
-            {...fieldErrorProps(fieldError, `${inputId}-error`)}
-          />
-        )}
+        <input
+          id={inputId}
+          className="form-control"
+          type={field.type || 'text'}
+          inputMode={field.inputMode}
+          placeholder={field.placeholder || ''}
+          value={form[field.column]}
+          onChange={e => set(field.column, e.target.value)}
+          {...fieldErrorProps(fieldError, `${inputId}-error`)}
+        />
         <FieldError id={`${inputId}-error`} error={fieldError} />
       </div>
     )

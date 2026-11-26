@@ -54,6 +54,7 @@ import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
+import { StaticField } from '../common/StaticField'
 import { ActionButton } from '../common/ActionButton'
 import { sameForm, useFormCheck } from '../../hooks/useFormCheck'
 import { ApplianceCommand, ApplianceCommandsHelp } from '../common/ApplianceCommand'
@@ -489,12 +490,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   }
   const groupFollowsTheNode = groupChanged && form.sparkplug_group === editing.observed_sparkplug_group
 
-  /** The note under a field a proposal may not name: disabled with the reason rather than hidden. */
-  const Withheld = ({ field }) => (
-    proposeMode && withheldFields[field]
-      ? <div className="form-hint-locked">{withheldFields[field]}</div>
-      : null
-  )
   // Mirrors the `forge` listener in supabase/envoy.yaml, which admits these two roles.
   const canOpenForge = userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
 
@@ -967,82 +962,90 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           </div>
         </div>
         {/* One select over the legal states rather than two checkboxes, ahead of Location because
-            it governs it. */}
-        <div className="form-group">
-          <label className="form-label" htmlFor="gateway-type">Type</label>
-          <Withheld field="deployment" />
-          <select
-            id="gateway-type"
-            className="form-control"
-            disabled={proposeMode}
-            value={formType}
-            onChange={e => setForm(f => ({
-              ...f,
-              ...gatewayTypeFields(e.target.value),
-              // A simulated gateway cannot hold a cell, so it is cleared here and the picker is disabled.
-              ...(e.target.value === GATEWAY_TYPES.SIMULATED
-                ? { cell_id: '', area_id: '', location_scope: SCOPE_CELL }
-                : {})
-            }))}
-            {...fieldErrorProps(formCheck.errors.type, 'gateway-type-error')}
-          >
-            {SELECTABLE_TYPES.map(t => (
-              <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
-            ))}
-          </select>
-          {/* The consequence, said before it is chosen. */}
-          <div className="form-hint">
-            {gatewayTypeDescription(formType)}
-            {remoteWithheld
-              ? <> <strong className="gateway-withheld">This deployment cannot issue an install command or bundle yet:</strong> {enrolmentProblems.join('; ')}. A Remote gateway cannot be saved until it can. Host and Simulated gateways are unaffected.</>
-              : !editing && formType === GATEWAY_TYPES.REMOTE
-                ? ' On save you will be given an install command, or a bundle, to run on that machine; it enrols itself and appears here as online.'
-                : !editing && formType === GATEWAY_TYPES.THIRD_PARTY
-                && ' On save you will be given its broker credential and every setting its edge node needs.'}
-          </div>
-          {/* What saving a new type ends, from the stored row, before Save is pressed. */}
-          {typeChangeHint && (
-            <div className={typeChange.setup || typeChange.credential ? 'form-hint hint-warning' : 'form-hint'}>
-              {typeChangeHint}
+            it governs it. A proposal cannot change it, so a proposer reads it. */}
+        {proposeMode ? (
+          <StaticField label="Type" value={gatewayTypeLabel(formType)} reason={withheldFields.deployment} />
+        ) : (
+          <div className="form-group">
+            <label className="form-label" htmlFor="gateway-type">Type</label>
+            <select
+              id="gateway-type"
+              className="form-control"
+              value={formType}
+              onChange={e => setForm(f => ({
+                ...f,
+                ...gatewayTypeFields(e.target.value),
+                // A simulated gateway cannot hold a cell, so it is cleared here, and its location is
+                // shown as fixed.
+                ...(e.target.value === GATEWAY_TYPES.SIMULATED
+                  ? { cell_id: '', area_id: '', location_scope: SCOPE_CELL }
+                  : {})
+              }))}
+              {...fieldErrorProps(formCheck.errors.type, 'gateway-type-error')}
+            >
+              {SELECTABLE_TYPES.map(t => (
+                <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
+              ))}
+            </select>
+            {/* The consequence, said before it is chosen. */}
+            <div className="form-hint">
+              {gatewayTypeDescription(formType)}
+              {remoteWithheld
+                ? <> <strong className="gateway-withheld">This deployment cannot issue an install command or bundle yet:</strong> {enrolmentProblems.join('; ')}. A Remote gateway cannot be saved until it can. Host and Simulated gateways are unaffected.</>
+                : !editing && formType === GATEWAY_TYPES.REMOTE
+                  ? ' On save you will be given an install command, or a bundle, to run on that machine; it enrols itself and appears here as online.'
+                  : !editing && formType === GATEWAY_TYPES.THIRD_PARTY
+                  && ' On save you will be given its broker credential and every setting its edge node needs.'}
             </div>
-          )}
-          <FieldError id="gateway-type-error" error={formCheck.errors.type} />
-        </div>
-        {/* One exclusive scope, then the cell or area it calls for. A simulated gateway reads as In a
-            cell with none chosen whatever is stored, since its lane resolves ahead of the stored
-            scope; the stored value is cleared only on the type change that would make it unsaveable. */}
-        <div className="form-group">
-          <label className="form-label">Location</label>
-          <LocationPicker
-            idPrefix="gateway"
-            form={form}
-            onChange={fields => setForm(f => ({ ...f, ...fields }))}
-            cells={cells}
-            areas={areas}
-            disabled={!formAcceptsCell}
-            cellEmptyLabel="— No cell assigned —"
-            error={formCheck.errors.location}
+            {/* What saving a new type ends, from the stored row, before Save is pressed. */}
+            {typeChangeHint && (
+              <div className={typeChange.setup || typeChange.credential ? 'form-hint hint-warning' : 'form-hint'}>
+                {typeChangeHint}
+              </div>
+            )}
+            <FieldError id="gateway-type-error" error={formCheck.errors.type} />
+          </div>
+        )}
+        {/* One exclusive scope, then the cell or area it calls for. A simulated gateway's lane resolves
+            ahead of any stored scope, so its place is fixed and drawn as it is in the drawer; the
+            stored value is cleared only on the type change that would make it unsaveable. */}
+        {!formAcceptsCell ? (
+          <StaticField
+            label="Location"
+            value={`${gatewayTypeLabel(formType)} — no cell`}
+            reason={`Decided by the gateway’s type. Its devices resolve to the ${gatewayTypeLabel(formType)} lane, which takes precedence over cell membership.`}
           />
+        ) : (
+          <div className="form-group">
+            <label className="form-label">Location</label>
+            <LocationPicker
+              idPrefix="gateway"
+              form={form}
+              onChange={fields => setForm(f => ({ ...f, ...fields }))}
+              cells={cells}
+              areas={areas}
+              cellEmptyLabel="— No cell assigned —"
+              error={formCheck.errors.location}
+            />
 
-          <div className="form-hint">
-            {!formAcceptsCell
-              /* Says which lane it lands in instead, so the disabled control reads as an answer. */
-              ? 'Simulated gateways have no cell: their devices resolve to the Simulated lane, which takes precedence over cell membership.'
-              : form.location_scope === SCOPE_SITE_WIDE || form.location_scope === SCOPE_AREA_WIDE
+            <div className="form-hint">
+              {form.location_scope === SCOPE_SITE_WIDE || form.location_scope === SCOPE_AREA_WIDE
                 ? 'Devices set to Follow Gateway take this place with the gateway. A device with a place of its own keeps it, so a machine reached through a host-run connector can still be in a cell.'
                 : form.cell_id
                   ? 'Devices served by this gateway that follow it appear under this cell. A device with a place of its own keeps it.'
                   : null}
+            </div>
           </div>
-        </div>
-        {editing && (
+        )}
+        {editing && proposeMode && (
+          <StaticField label="Sparkplug Group" value={form.sparkplug_group} mono copyable reason={withheldFields.sparkplug_group} />
+        )}
+        {editing && !proposeMode && (
           <div className="form-group">
             <label className="form-label" htmlFor="gateway-sparkplug-group">Sparkplug Group</label>
-            <Withheld field="sparkplug_group" />
             <input
               id="gateway-sparkplug-group"
               className="form-control mono"
-              disabled={proposeMode}
               value={form.sparkplug_group ?? ''}
               onChange={e => setForm(f => ({ ...f, sparkplug_group: e.target.value }))}
               {...fieldErrorProps(formCheck.errors.group, 'gateway-sparkplug-group-error')}

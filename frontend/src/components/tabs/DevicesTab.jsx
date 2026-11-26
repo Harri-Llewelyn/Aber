@@ -29,6 +29,7 @@ import { RequiredMark } from '../common/RequiredMark'
 import { SchemaPicker } from '../common/SchemaPicker'
 import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
+import { StaticField } from '../common/StaticField'
 import { Tooltip } from '../common/Tooltip'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { TagList } from '../common/TagList'
@@ -127,6 +128,12 @@ const STATUS_VALUES = STATUS_OPTIONS.map(o => o.value)
 
 /** Whether two lists of schema ids name the same schemas, in any order. */
 const sameSchemaSet = (a, b) => a.length === b.length && a.every(id => b.includes(id))
+
+/** The Schema Conformance choices, by the value stored, in the words the form shows. */
+const CONFORMANCE_LABELS = {
+  audit: 'Audit — record the violation, keep the reading',
+  enforce: 'Enforce — record it and DROP the reading',
+}
 
 /** The two tabs, in order (navigation.jsx). The description is the tab's tooltip; the help page has the rest. */
 export const VIEWS = DEVICES_TABS
@@ -509,15 +516,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     && editing?.conformance_policy !== 'enforce'
     && formSchemas.length > 0
 
-  /**
-   * The note under a field a proposal may not name. Disabled with the reason printed, rather than
-   * hidden, so the reader learns where the boundary is.
-   */
-  const Withheld = ({ field }) => (
-    proposeMode && withheldFields[field]
-      ? <div className="form-hint-locked">{withheldFields[field]}</div>
-      : null
-  )
   const [editingProposal, setEditingProposal] = useState(null)
 
   // The database refuses Area-Wide with no area and a cell scope with no cell; it would take an empty
@@ -1321,49 +1319,47 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               </div>
             </div>
 
-            <div className="form-group">
-              {editing?.shadow_of ? (
-                // A replay lane stays on the Playback gateway for everyone, so it is shown as text.
-                // The form still holds the id, so a save writes it unchanged.
-                <>
-                  <div className="form-label">Serving Gateway</div>
-                  <div className="mono" style={{ fontSize: '13px', overflowWrap: 'anywhere' }}>
-                    {(() => {
-                      const lane = gateways.find(g => g.gateway_id === form.active_gateway_id)
-                      return lane ? `${lane.gateway_name} (${lane.gateway_id})` : form.active_gateway_id
-                    })()}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <label className="form-label" htmlFor="device-gateway">Serving Gateway</label>
-                  <Withheld field="active_gateway_id" />
-                  <select id="device-gateway" className="form-control" disabled={proposeMode} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))}>
-                    <option value="">— Unassigned Gateway —</option>
-                    {/* Playback is listed but disabled rather than filtered out, so whoever looks for it
-                        finds it, with the hint beneath saying why it cannot be picked. */}
-                    {gateways.filter(g => !g.is_archived).map(g => (
-                      <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
-                        {g.gateway_name} ({g.gateway_id}) — Status: {g.status}
-                        {gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
-                      </option>
-                    ))}
-                    {/* An archived gateway is not offered, and the database refuses one. A device
-                        already on one keeps it (an unchanged gateway passes), so it stays visible. */}
-                    {gateways.filter(g => g.is_archived && g.gateway_id === form.active_gateway_id).map(g => (
-                      <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name} ({g.gateway_id}) — archived</option>
-                    ))}
-                  </select>
-                </>
-              )}
-              {/* Shown always: the question is why Playback cannot be picked, asked while something
-                  else is selected, so the sentence names Playback rather than the selection. */}
-              <div className="form-hint">
-                {editing?.shadow_of
+            {editing?.shadow_of || proposeMode ? (
+              // A replay lane stays on the Playback gateway for everyone, and a proposal cannot move a
+              // device, so either reads its gateway. The form still holds the id, so a save writes it
+              // unchanged. Named as the drawer names it: the name, else the id; none bound is Not set.
+              <StaticField
+                label="Serving Gateway"
+                value={form.active_gateway_id
+                  ? gateways.find(g => g.gateway_id === form.active_gateway_id)?.gateway_name
+                    || (editing?.active_gateway_id === form.active_gateway_id && editing?.gateway_name)
+                    || form.active_gateway_id
+                  : null}
+                reason={editing?.shadow_of
                   ? 'This is a replay lane. It stays on the Playback gateway, and the database refuses a move.'
-                  : `The Playback gateway is not offered. ${noDeviceAssignmentReason({ is_shadow: true })}`}
+                  : withheldFields.active_gateway_id}
+              />
+            ) : (
+              <div className="form-group">
+                <label className="form-label" htmlFor="device-gateway">Serving Gateway</label>
+                <select id="device-gateway" className="form-control" value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))}>
+                  <option value="">— Unassigned Gateway —</option>
+                  {/* Playback is listed but disabled rather than filtered out, so whoever looks for it
+                      finds it, with the hint beneath saying why it cannot be picked. */}
+                  {gateways.filter(g => !g.is_archived).map(g => (
+                    <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
+                      {g.gateway_name} ({g.gateway_id}) — Status: {g.status}
+                      {gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
+                    </option>
+                  ))}
+                  {/* An archived gateway is not offered, and the database refuses one. A device
+                      already on one keeps it (an unchanged gateway passes), so it stays visible. */}
+                  {gateways.filter(g => g.is_archived && g.gateway_id === form.active_gateway_id).map(g => (
+                    <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name} ({g.gateway_id}) — archived</option>
+                  ))}
+                </select>
+                {/* Shown always: the question is why Playback cannot be picked, asked while something
+                    else is selected, so the sentence names Playback rather than the selection. */}
+                <div className="form-hint">
+                  {`The Playback gateway is not offered. ${noDeviceAssignmentReason({ is_shadow: true })}`}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Where the device is, which is not how its data reaches us. Follow Gateway stores
                 nothing and takes the gateway's place; a cell, an area or the site is the device's
@@ -1389,6 +1385,19 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               const followedLine = followedPlaceLine(formGateway, { cells, areas })
               const unplaced = location.location_source === SOURCE_UNASSIGNED
 
+              // A synthetic gateway's lane resolves ahead of the device's own place, so the gateway
+              // decides it, in the drawer's words. Deliberately does not clear `cell_id`: nothing
+              // here is refused on save, so a stored cell applies again if the gateway changes.
+              if (!acceptsCell) {
+                return (
+                  <StaticField
+                    label="Location"
+                    value={locationSourceLabel(location.location_source)}
+                    reason={`Follows the gateway. ${noCellReason(formGateway)} Any cell already set on it is kept, and applies again if that changes.`}
+                  />
+                )
+              }
+
               return (
                 <div className="form-group">
                   <label className="form-label">Location</label>
@@ -1402,30 +1411,24 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     onChange={fields => setForm(f => ({ ...f, ...fields }))}
                     cells={cells}
                     areas={areas}
-                    disabled={!acceptsCell}
                     followGateway
                     // In a cell requires one: the empty option is a prompt, not an answer.
                     cellEmptyLabel="— Choose a cell —"
                     error={formCheck.errors.location}
                   />
 
-                  <div className={`form-hint${acceptsCell && following && unplaced ? ' hint-warning' : ''}`}>
-                    {!acceptsCell
-                      /* Deliberately does not clear `cell_id`: nothing here is refused on save, so
-                         a stored cell is kept and applies again if the gateway stops being
-                         synthetic. */
-                      ? `${noCellReason(formGateway)} Any cell already set on it is kept, and applies again if that changes.`
-                      : following
-                        ? (unplaced
-                          ? <><IconAlertTriangle size={12} /> {followedLine}. {followedPlaceFix(formGateway)}</>
-                          : `${followedLine}. It moves when the gateway does.`)
-                        : siteWide
-                          ? 'Reported as Site-Wide rather than under any cell. Use this for campus-wide or mobile assets.'
-                          : areaWide
-                            ? `Reported as Area-Wide in ${chosenAreaName || 'this area'} rather than under any cell in it. Use this for a building management system or anything that serves the whole area.`
-                            : form.cell_id
-                              ? `Set on this device — it stays in ${nameOf(location.effective_cell_id) || 'this cell'} even if its gateway moves.`
-                              : 'Choose the cell this device is in, or use Follow Gateway to take its gateway’s place.'}
+                  <div className={`form-hint${following && unplaced ? ' hint-warning' : ''}`}>
+                    {following
+                      ? (unplaced
+                        ? <><IconAlertTriangle size={12} /> {followedLine}. {followedPlaceFix(formGateway)}</>
+                        : `${followedLine}. It moves when the gateway does.`)
+                      : siteWide
+                        ? 'Reported as Site-Wide rather than under any cell. Use this for campus-wide or mobile assets.'
+                        : areaWide
+                          ? `Reported as Area-Wide in ${chosenAreaName || 'this area'} rather than under any cell in it. Use this for a building management system or anything that serves the whole area.`
+                          : form.cell_id
+                            ? `Set on this device — it stays in ${nameOf(location.effective_cell_id) || 'this cell'} even if its gateway moves.`
+                            : 'Choose the cell this device is in, or use Follow Gateway to take its gateway’s place.'}
                   </div>
 
                   {location.cell_mismatch && (
@@ -1439,56 +1442,65 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               )
             })()}
 
-            <SchemaPicker
-              legend="Schemas (optional)"
-              note={<Withheld field="schema_ids" />}
-              schemas={offeredSchemas}
-              value={form.schema_ids || []}
-              onToggle={toggleSchema}
-              disabled={proposeMode}
-            >
-              {/* What the ticked schemas make of the device, as text: nothing here can be typed
-                  into. Absent while no ticked schema models a group. */}
-              {formGroups.length > 0 && (
-                <p className="form-static schema-groups">Metric groups these schemas model: {formGroups.join(', ')}</p>
-              )}
-              {/* The contract every DDATA value is judged against comes first; the quarantine hint
-                  second, since suggestMatches() weights a modelled-metric overlap above name
-                  similarity. */}
-              <div className="form-hint">
-                The contracts this device's metrics are judged against. A metric any of them models
-                is modelled. Once the device exists, its Schema Conformance setting decides whether a
-                violation is recorded or the reading is dropped. Optional: with none ticked nothing is
-                judged. They also help identify this device if it turns up in the Quarantine queue
-                under another name, by matching the metrics it reports against their required fields.
-              </div>
-              {/* Said only when it applies: the device is on a version its lineage has moved past,
-                  which is a migration to finish. */}
-              {formSchemas.some(s => !isAssignableSchema(s)) && (
-                <div className="form-hint hint-warning">
-                  This device is still on an archived version. It stays ticked so saving does not
-                  silently detach it — move it forward by publishing from the Schemas page, not from here.
+            {proposeMode ? (
+              <StaticField
+                label="Schemas"
+                value={formSchemas.map(s => s.schema_name).join(', ')}
+                reason={withheldFields.schema_ids}
+              />
+            ) : (
+              <SchemaPicker
+                legend="Schemas (optional)"
+                schemas={offeredSchemas}
+                value={form.schema_ids || []}
+                onToggle={toggleSchema}
+              >
+                {/* The contract every DDATA value is judged against comes first; the quarantine hint
+                    second, since suggestMatches() weights a modelled-metric overlap above name
+                    similarity. */}
+                <div className="form-hint">
+                  The contracts this device's metrics are judged against. A metric any of them models
+                  is modelled. Once the device exists, its Schema Conformance setting decides whether a
+                  violation is recorded or the reading is dropped. Optional: with none ticked nothing is
+                  judged. They also help identify this device if it turns up in the Quarantine queue
+                  under another name, by matching the metrics it reports against their required fields.
                 </div>
-              )}
-            </SchemaPicker>
+                {/* Said only when it applies: the device is on a version its lineage has moved past,
+                    which is a migration to finish. */}
+                {formSchemas.some(s => !isAssignableSchema(s)) && (
+                  <div className="form-hint hint-warning">
+                    This device is still on an archived version. It stays ticked so saving does not
+                    silently detach it — move it forward by publishing from the Schemas page, not from here.
+                  </div>
+                )}
+              </SchemaPicker>
+            )}
+
+            {/* What the ticked schemas make of the device: nothing here can be typed into. Absent
+                while no ticked schema models a group. */}
+            {formGroups.length > 0 && <StaticField label="Metric Groups" value={formGroups.join(', ')} />}
 
             {/* Only when editing: a device being created has no schema yet, and the column defaults
                 to 'audit' server-side. */}
-            {editing && (
+            {editing && proposeMode && (
+              <StaticField
+                label="Schema Conformance"
+                value={CONFORMANCE_LABELS[form.conformance_policy || 'audit']}
+                reason={withheldFields.conformance_policy}
+              />
+            )}
+            {editing && !proposeMode && (
               <div className="form-group">
                 <label className="form-label" htmlFor="device-conformance">Schema Conformance</label>
-                <Withheld field="conformance_policy" />
                 <select
                   id="device-conformance"
                   className="form-control"
-                  disabled={proposeMode}
                   value={form.conformance_policy || 'audit'}
                   onChange={e => setForm(f => ({ ...f, conformance_policy: e.target.value }))}
                   // A choice that can be saved, so not aria-invalid.
                   aria-describedby={startsEnforcing ? 'device-conformance-error' : undefined}
                 >
-                  <option value="audit">Audit — record the violation, keep the reading</option>
-                  <option value="enforce">Enforce — record it and DROP the reading</option>
+                  {Object.entries(CONFORMANCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
                 <div className="form-hint">
                   Applies to DDATA values judged against the schemas bound to this device. Only the

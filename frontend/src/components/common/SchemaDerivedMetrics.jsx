@@ -2,6 +2,7 @@ import React, { useMemo } from 'react'
 import { FieldError } from './FieldError'
 import { IconCheck, IconTag } from './Icons'
 import { MetricPicker } from './MetricPicker'
+import { StaticEmpty } from './StaticField'
 import { derivationText, isDerived } from '../../utils/derivedMetric'
 
 /** A list longer than this has a search, as the metric list above it has. */
@@ -50,7 +51,7 @@ export function SchemaDerivedMetrics({ id, readOnly = false, names, catalog = []
         </p>
         <div className="schema-derived-choice" role="group" aria-label="Derived Metrics" aria-describedby={error ? `${id}-error` : undefined}>
           {readOnly && names.size === 0 ? (
-            <p className="form-static form-static-none">This schema names no derived metrics.</p>
+            <StaticEmpty>This schema names no derived metrics.</StaticEmpty>
           ) : readOnly ? (
             <ul className="schema-editor-list schema-derived-list">
               {[...names].sort().map(name => (
@@ -62,7 +63,7 @@ export function SchemaDerivedMetrics({ id, readOnly = false, names, catalog = []
               ))}
             </ul>
           ) : listed.length === 0 ? (
-            <p className="form-static form-static-none">No derived metric is computed from the ticked metrics alone.</p>
+            <StaticEmpty>No derived metric is computed from the ticked metrics alone.</StaticEmpty>
           ) : (
             <MetricPicker
               metrics={listed}

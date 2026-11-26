@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { IconPencil } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
 import { SemanticIdField } from '../common/SemanticIdField'
+import { StaticField, StaticFields } from '../common/StaticField'
 import { FurtherSemanticIdsEditor } from '../common/FurtherSemanticIds'
 import { PermittedValuesField } from '../common/PermittedValuesField'
 import { datatypeLabel } from '../../utils/sparkplugDatatype'
@@ -111,16 +112,10 @@ export function EditMetricSemanticIdModal({
         </ActionButton>
       }
     >
-      <div className="form-group metric-edit-facts">
-        <div>
-          <div className="form-label">Name</div>
-          <div className="mono">{metric.name}</div>
-        </div>
-        <div>
-          <div className="form-label">Sparkplug Datatype</div>
-          <div>{datatypeLabel(metric.datatype)}</div>
-        </div>
-      </div>
+      <StaticFields>
+        <StaticField label="Name" value={metric.name} mono copyable copyLabel="metric name" />
+        <StaticField label="Sparkplug Datatype" value={datatypeLabel(metric.datatype)} />
+      </StaticFields>
 
       <SemanticIdField
         idPrefix="metric-edit"

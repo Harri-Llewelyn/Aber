@@ -23,7 +23,6 @@ import React, { useId, useMemo, useState } from 'react'
  * @param {React.ReactNode} [filters] Controls drawn beside the search box.
  * @param {(item: object) => boolean} [passes] What those controls let through.
  * @param {boolean} [single] One choice: radio buttons, and choosing another replaces it.
- * @param {boolean} [disabled] Nothing can be chosen or taken out. The search still works.
  * @param {(item: object) => boolean} [isDisabled] An item that cannot be chosen now. A chosen one
  * stays enabled so it can be taken out.
  * @param {(items: object[]) => {key: string, items: object[], heading: (picked: number) => React.ReactNode}[]} [groupsOf]
@@ -44,7 +43,7 @@ import React, { useId, useMemo, useState } from 'react'
  */
 export function ListPicker({
   items, keyOf, isPicked, onPick, searchLabel, matches, filters = null, passes,
-  single = false, disabled = false, isDisabled, groupsOf, renderItem, renderExtra, inputProps,
+  single = false, isDisabled, groupsOf, renderItem, renderExtra, inputProps,
   emptyText, noMatchText, listStyle, listClass, legend, note = null, children
 }) {
   const [search, setSearch] = useState('')
@@ -58,17 +57,17 @@ export function ListPicker({
 
   const row = (item) => {
     const picked = isPicked(item)
-    const blocked = !disabled && !picked && !!isDisabled?.(item)
+    const blocked = !picked && !!isDisabled?.(item)
     const extra = renderExtra?.(item, picked) ?? null
     return (
       // Any extra sits outside the label, so using it never toggles the tick.
       <div key={keyOf(item)} className={`list-picker-row${extra ? ' list-picker-row-extra' : ''}`}>
-        <label className={`list-picker-label${blocked ? ' list-picker-label-blocked' : ''}${disabled ? ' list-picker-label-disabled' : ''}`}>
+        <label className={`list-picker-label${blocked ? ' list-picker-label-blocked' : ''}`}>
           <input
             type={single ? 'radio' : 'checkbox'}
             name={single ? groupName : undefined}
             checked={picked}
-            disabled={disabled || blocked}
+            disabled={blocked}
             onChange={() => onPick(item)}
             {...inputProps?.(item)}
           />

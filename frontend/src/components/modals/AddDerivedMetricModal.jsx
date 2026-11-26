@@ -6,6 +6,7 @@ import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { MetricPicker } from '../common/MetricPicker'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
+import { StaticField, StaticFields } from '../common/StaticField'
 import { Tooltip } from '../common/Tooltip'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
@@ -356,16 +357,10 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
 
       {/* Facts nobody chooses, as Edit Metric shows a name and a datatype it cannot change: the
           unit follows the inputs, and a derived value is a Double. */}
-      <div className="form-group metric-edit-facts">
-        <div>
-          <div className="form-label">Units</div>
-          <div>{describeUnit(form.kind, inputRows)}</div>
-        </div>
-        <div>
-          <div className="form-label">Sparkplug Datatype</div>
-          <div>Double</div>
-        </div>
-      </div>
+      <StaticFields>
+        <StaticField label="Units" value={describeUnit(form.kind, inputRows)} />
+        <StaticField label="Sparkplug Datatype" value="Double" />
+      </StaticFields>
 
       <div className="form-group">
         <label className="form-label" htmlFor="derived-description">Description</label>

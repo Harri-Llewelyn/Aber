@@ -39,20 +39,19 @@ function locationFieldsFor(scope, form, areas = []) {
  * `followGateway` offers Follow Gateway first, for a device: a gateway has no gateway to follow, and
  * its form leaves the choice out and lets the cell stay empty (`cellEmptyLabel`).
  *
- * `disabled` withholds the whole control and shows its first choice, which is how a synthetic
- * gateway's stored scope reads everywhere else (`device_locations` resolves `simulated` ahead of
- * it). The caller's hint beneath says why. `error` is what is missing of the place chosen, said under
- * the dropdown that asks for it.
+ * Where the gateway decides the place (a synthetic gateway, which `device_locations` resolves ahead
+ * of any stored scope), the caller draws a StaticField instead. `error` is what is missing of the
+ * place chosen, said under the dropdown that asks for it.
  */
 export function LocationPicker({
-  idPrefix, form, onChange, cells = [], areas: allAreas = [], disabled = false,
+  idPrefix, form, onChange, cells = [], areas: allAreas = [],
   followGateway = false, cellEmptyLabel = '— No cell assigned —', error = null
 }) {
   // The database refuses making anything Area-Wide in an archived area.
   const areas = allAreas.filter(a => !a.is_archived)
-  const scope = disabled ? (followGateway ? SCOPE_GATEWAY : SCOPE_CELL) : normaliseScope(form.location_scope)
+  const scope = normaliseScope(form.location_scope)
   const chosenCell = cells.find(c => c.cell_id === form.cell_id)
-  const choose = (next) => { if (!disabled) onChange(locationFieldsFor(next, form, areas)) }
+  const choose = (next) => onChange(locationFieldsFor(next, form, areas))
 
   const choices = [
     ...(followGateway ? [{
@@ -76,13 +75,13 @@ export function LocationPicker({
             keyboard's focus on the radio inside. */}
         {choices.map(c => (
           <Tooltip key={c.scope} text={c.title}>
-            <label className={`location-choice${disabled || c.off ? ' is-disabled' : ''}`}>
+            <label className={`location-choice${c.off ? ' is-disabled' : ''}`}>
               <input
                 type="radio"
                 name={`${idPrefix}-location-scope`}
                 value={c.scope}
                 checked={scope === c.scope}
-                disabled={disabled || c.off}
+                disabled={c.off}
                 onChange={() => choose(c.scope)}
               />
               {c.label}
@@ -95,8 +94,7 @@ export function LocationPicker({
         <select
           id={`${idPrefix}-cell`}
           className="form-control"
-          value={disabled ? '' : (form.cell_id || '')}
-          disabled={disabled}
+          value={form.cell_id || ''}
           onChange={e => onChange({ location_scope: SCOPE_CELL, cell_id: e.target.value, area_id: '' })}
           aria-label="Cell"
           {...fieldErrorProps(error, `${idPrefix}-location-error`)}

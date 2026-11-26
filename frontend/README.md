@@ -518,7 +518,7 @@ draft and of a read-only version, so a person meets one form. Drift check 592 ho
   the two take no more from the metric list than one, and the dialog's body does not scroll at 1920 × 917.
   Opened, the Derived Metrics section takes its height from the metric list, which then goes below 210px.
   Neither opens by itself, since the list would move under the pointer.
-- **A read-only version is the same body as text.** Each value is `.form-static` where its field was, a
+- **A read-only version is the same body as text.** Each value is a `StaticField` where its field was, a
   range is in words, and the list is as tall as its metrics, or scrolls inside itself. A draft is read the
   same way by a role that may not manage schemas.
 
@@ -684,27 +684,38 @@ with Restore Access; it is guarded because a slip blocks a person's sign-in at o
 
 A value that no one looking at it can change is text, never a greyed-out input. A disabled control
 reads as "you could change this if you were allowed", which is wrong for a fixed or computed value.
-Show it as Edit Metric shows a name it cannot change (`form-group metric-edit-facts`): the field's
-name in `form-label` over the value, and the reason in words under it, not only in a tooltip. In a
-table cell, as on Settings, the value is `.setting-static`.
+In a table cell, as on Settings, the value is `.setting-static`.
 
-- **Fixed for everyone** is a label: Add Metric's Units for a type that takes none, the Sparkplug
-  group and the archive site key, a nameplate value the device publishes, Cold Storage's site key,
-  a schema version's name, and a replay lane's Serving Gateway, which stays on Playback. Its hint says
-  why.
-- **Fixed for this role** is a label too. A Settings row for anyone but an Administrator shows its
-  value as text, and Actions says who can change it. The Notifications tab's rows are the same rows.
-  So is a draft schema for a role that may not manage schemas, and a Digital Nameplate for one that may
-  neither edit nor propose; a notice at the top says so. The nameplate's problem line says from the open,
-  in every mode, which fields the template still asks for before an export names it. That is no problem
-  with the form, so `.nameplate-standing` gives the line the hint's look. A refused press takes the
-  line's place until the next edit.
-- **Conditional stays a control, with its reason in words.** A field that is open to someone else, or
-  once something else is set, keeps its control: a proposal's fields that a proposal cannot carry
-  (`nonProposableFields()` words each), and Reference Type until an id is given. The reason sits
-  beside it, in `form-hint`.
+**In a dialog or a form it is a `StaticField`** (`common/StaticField.jsx`), where the field would be.
+It reads as a drawer field reads: the field's name over its value, and Not set for an empty one. It is
+a description list, so a screen reader reads the name with the value. Drift check 613 refuses
+`.form-static` outside it, a read-only input, and a control switched off for a proposer.
+
+- **The reason is in words under the value** (`reason`), not only in a tooltip: "A proposal can't
+  change this", "Fixed at install", "Decided by the gateway's type".
+- **An identifier is `mono`, and `copyable`** where a person takes it elsewhere: a metric's name, a
+  Sparkplug group, a semantic id, a site key, a schema's UUID. The copy is a `CopyableId`, as in a drawer.
+- **Two side by side** are in `StaticFields`, as Edit Metric's name and datatype. A list in a form that
+  has nothing to show says so in `StaticEmpty`.
+- **Fixed for everyone:** Add Metric's Units for a type that takes none, a derived metric's units and
+  datatype, a nameplate value the device publishes, Cold Storage's site key, a schema version's name,
+  the one Playback gateway a capture plays on, and a replay lane's Serving Gateway, which stays on
+  Playback.
+- **Decided by something else:** the field says what decides it. A device whose gateway takes no cell
+  follows the gateway, and a Simulated gateway's location is decided by its type.
+- **Fixed for this role.** A proposer's Edit Device Configuration shows the gateway, the schemas and
+  Schema Conformance as static fields, and Edit Gateway the type and the Sparkplug group, each with the
+  sentence `nonProposableFields()` gives. What a proposal can change stays an input. A Settings row for
+  anyone but an Administrator shows its value as text, and Actions says who can change it. The
+  Notifications tab's rows are the same rows. So is a draft schema for a role that may not manage
+  schemas, and a Digital Nameplate for one that may neither edit nor propose; a notice at the top says
+  so. The nameplate's problem line says from the open, in every mode, which fields the template still
+  asks for before an export names it. That is no problem with the form, so `.nameplate-standing` gives
+  the line the hint's look. A refused press takes the line's place until the next edit.
+- **Conditional stays a control, with its reason in words.** A field that opens once something else is
+  set keeps its control: Reference Type until an id is given. The reason sits beside it, in `form-hint`.
 - **A label is not a `<label>`.** A `<label htmlFor>` names a control. A value drawn as text has none,
-  so its name is a plain `form-label` div.
+  so its name is the field's `<dt>`.
 - **A value to copy has a box** ([A value to copy](#a-value-to-copy)), and is text all the same.
 
 ### A value to copy
@@ -3106,6 +3117,7 @@ that describes a component keeps the detail, and *Not* names what to use instead
 | `SaveDiscard` | Save and Discard for an unsaved choice, on a page or in a drawer | |
 | `SegmentedControl` | One choice from a few, as one pill of segments | A page's tabs: `TabStrip` |
 | `SemanticIdField` | A semantic id and its reference type, with the vocabulary search | |
+| `StaticField` | A value nobody can change, where its field would be, with why | A value to copy: `CopyField` |
 
 #### A picker
 
