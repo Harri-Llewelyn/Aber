@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useEffect, useLayoutEffect, useR
 import { RouteLink } from '../common/RouteLink'
 import { OverflowText } from '../common/OverflowText'
 import { areaUrl, cellUrl, deviceUrl, gatewayUrl, tabUrl } from '../../routes'
-import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../../utils/alertSubjects'
 import { api } from '../../api'
 import { REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'

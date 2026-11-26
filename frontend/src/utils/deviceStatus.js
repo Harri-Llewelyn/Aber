@@ -51,7 +51,7 @@ export function deviceStatusChipClass(status) {
  * the hollow chip: still red, since it still fires, but somebody has it.
  *
  * @param {object} device  a device row
- * @param {object|null} alert  the alert that decides its state -- see utils/deviceAlerts.js
+ * @param {object|null} alert  the alert that decides its state -- see utils/alertSubjects.js
  */
 export function deviceChipClass(device, alert) {
   if (device?.is_archived) return 'chip-offline';

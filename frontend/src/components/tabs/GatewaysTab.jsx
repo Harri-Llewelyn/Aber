@@ -25,10 +25,10 @@ import { enrolmentStands, hadEnrolled, setupRevokesCredential } from '../../util
 import { CONVERGE_JOURNAL, FLOW_SYNC_LOG, RESET_BUNDLE_EDITOR_PASSWORD, RESET_EDITOR_PASSWORD } from '../../utils/applianceCommands'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags } from '../../utils/deviceStatus'
 import { inServiceDevices } from '../../utils/inService'
-import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertForGateway, alertState, statusSortRank } from '../../utils/alertSubjects'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import { isShadowGateway } from '../../utils/fleetCounts'
-import { PLAYBACK_GATEWAY_LABEL, PLAYBACK_GATEWAY_PARAM, PLAYBACK_GATEWAY_TIP, playbackProblem } from '../../utils/playbackGateway'
+import { PLAYBACK_GATEWAY_LABEL, PLAYBACK_GATEWAY_PARAM, PLAYBACK_GATEWAY_TIP, playbackAlert, playbackProblem } from '../../utils/playbackGateway'
 import { flowDriftState, flowDriftLabel, flowEditedOnAppliance, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
 import {
   applianceReportMissing, gatewayHealthProblems, healthWarnings, rowTone, foldHealthRows, TONE_DANGER, TONE_WARNING
@@ -41,6 +41,7 @@ import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
 import { StatusBadge, gatewayStatusTone } from '../common/StatusBadge'
+import { AlertBadge } from '../common/AlertBadge'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
@@ -94,7 +95,6 @@ import {
   LIFECYCLE_ALIASES, LIFECYCLE_DEFAULT, LIFECYCLE_OPTIONS, LIFECYCLE_VALUES, applyFacets, lifecycleChanged, lifecycleOf
 } from '../../utils/listFilters'
 import { useSortableRows } from '../../hooks/useTableSort'
-import { severityRank } from '../../utils/tableSort'
 
 /** No list filter chosen. */
 const NONE = Object.freeze([])
@@ -198,8 +198,19 @@ const editorPasswordGroup = (gatewayId, showToast) => ({
 })
 
 export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevice, hasPermission, userRole, activeAlerts = [] }) {
-  /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
+  /** Devices Grafana currently has an alert firing on, for the drawer's device chips: see utils/alertSubjects.js. */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
+  /**
+   * The gateway's own alert, drawn on its row and at the top of its drawer as Devices draws a
+   * device's. A suppressed one colours no row; only the drawer's banner, which says so, is handed one.
+   * The Playback gateway's may be one on a playback, which only it publishes (playbackAlert()).
+   */
+  const gatewayAlerts = React.useMemo(() => alertIndex(activeAlerts, 'gateway'), [activeAlerts])
+  const bannerAlerts = React.useMemo(() => alertIndex(activeAlerts, 'gateway', { suppressed: true }), [activeAlerts])
+  const alertOf = React.useCallback((g, { banner = false } = {}) => (isShadowGateway(g)
+    ? playbackAlert(g, activeAlerts, { suppressed: banner })
+    : alertForGateway(banner ? bannerAlerts : gatewayAlerts, g)
+  ), [activeAlerts, bannerAlerts, gatewayAlerts])
   const [gateways, setGateways] = useState([])
   const [assets, setAssets]     = useState([])
   const [cells, setCells]       = useState([])
@@ -530,7 +541,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const playbackShowing = !showPlayback && playbackReasons.length > 0
 
   // Each column sorts on what its cell shows. An archived gateway shows no status and no devices,
-  // and a location that does not apply shows none, so those go last.
+  // and a location that does not apply shows none, so those go last. Status sorts as Devices does:
+  // a firing alert, then an acknowledged one, then the status (statusSortRank()).
   const sortColumns = React.useMemo(() => {
     const cellNames = new Map(cells.map(c => [c.cell_id, c.cell_name]))
     const location = (g) => {
@@ -544,11 +556,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       uuid: { type: 'text', value: g => g.gateway_id },
       type: { type: 'text', value: g => gatewayTypeLabel(gatewayType(g)) },
       location: { type: 'text', value: location },
-      status: { type: 'rank', value: g => (g.is_archived ? null : severityRank(gatewayStatusTone(gatewayDisplayStatus(g)))) },
+      status: { type: 'rank', value: g => (g.is_archived ? null : statusSortRank(alertOf(g), gatewayStatusTone(gatewayDisplayStatus(g)))) },
       last_heartbeat: { type: 'time', value: g => g.last_heartbeat },
       devices: { type: 'number', value: g => (g.is_archived ? null : countedDevices(g.devices).length) }
     }
-  }, [cells])
+  }, [cells, alertOf])
   const [filteredGateways, sort] = useSortableRows(matchingGateways, sortColumns)
 
   // The filters inside the Filters panel, which its button counts; the bar's Clear counts all.
@@ -868,7 +880,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                          <td>
                            {g.is_archived
                              ? <span className="cell-meta">—</span>
-                             : <StatusBadge status={liveStatus} />}
+                             : (
+                               // The alert sits beside the status, not instead of it, as on Devices.
+                               <div className="badge-col">
+                                 <StatusBadge status={liveStatus} size="sm" />
+                                 <AlertBadge alert={alertOf(g)} />
+                               </div>
+                             )}
                          </td>
                          <Tooltip text={g.last_heartbeat ? new Date(g.last_heartbeat).toLocaleString() : null}>
                            <td className={`cell-meta${liveStatus === 'STALE' ? ' gateway-cell-warning' : ''}`}>
@@ -1137,6 +1155,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         onClose={() => setSelectedId(null)}
         type="GATEWAY"
         onCopy={showToast}
+        alert={selected ? alertOf(selected, { banner: true }) : null}
         icon={<IconRadio size={16} />}
         title={selected?.gateway_name || ''}
         subtitle={selected && (
