@@ -394,7 +394,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           />
         ) : (
           <div className="table-wrap">
-            <table>
+            {/* Fits its card: a column the card has no room for goes, and the drawer has it (App.css). */}
+            <table className="table-fit table-schemas">
               <thead>
                 <tr>
                   <th className="automation-select">
@@ -408,8 +409,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                   </th>
                   <SortHeader sort={sort} column="name">Schema Name</SortHeader>
                   <SortHeader sort={sort} column="version" title="Lineage position and lifecycle state. Only a draft is editable.">Version</SortHeader>
-                  <SortHeader sort={sort} column="change" title="Why this version exists, recorded when it was created">Change Description</SortHeader>
-                  <SortHeader sort={sort} column="uuid">Schema UUID</SortHeader>
+                  <SortHeader sort={sort} column="change" className="fit-700" title="Why this version exists, recorded when it was created">Change Description</SortHeader>
+                  <SortHeader sort={sort} column="uuid" className="fit-id fit-520">Schema UUID</SortHeader>
                   <SortHeader sort={sort} column="devices" title="Devices in service using this version, not counting quarantined ones. The link opens the Devices page on them.">Devices</SortHeader>
                 </tr>
               </thead>
@@ -456,10 +457,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                         </span>
                       </td>
                       {/* Capped: a change description is free text, and an unbounded cell widens the table. */}
-                      <td className="cell-meta schema-change-cell">
+                      <td className="cell-meta schema-change-cell fit-700">
                         {sch.change_description || '—'}
                       </td>
-                      <td><CopyableId value={sch.schema_uuid} label="schema UUID" onNotify={showToast} /></td>
+                      <td className="fit-id fit-520"><CopyableId value={sch.schema_uuid} label="schema UUID" onNotify={showToast} /></td>
                       <td>
                         {/* A link to "which devices are these?": the Devices page filtered to this
                             schema. Nothing to open at zero, so a plain dash. */}

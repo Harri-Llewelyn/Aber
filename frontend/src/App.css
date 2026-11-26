@@ -2036,14 +2036,18 @@ tbody tr.table-group-foot:hover { background: none; }
   .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
   .table-fit tr:not(.table-group-row) > :is(th, td) { padding-left: 8px; padding-right: 8px; }
   .table-fit th { letter-spacing: 0; }
+  /* The last header shown keeps the room its sort arrow hangs in. */
+  .table-fit thead th:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880)) { padding-right: 16px; }
 }
 @container table (max-width: 699px) {
   .table-fit .fit-700 { display: none; }
   .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880, .fit-700)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
+  .table-fit thead th:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880, .fit-700)) { padding-right: 16px; }
 }
 @container table (max-width: 519px) {
   .table-fit .fit-520 { display: none; }
   .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880, .fit-700, .fit-520)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
+  .table-fit thead th:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880, .fit-700, .fit-520)) { padding-right: 16px; }
   .table-fit:not(:has(.table-group-row)) th { white-space: normal; }
 }
 
@@ -8452,10 +8456,9 @@ ol.gateway-steps {
 .metric-form .form-group { margin: 0; }
 
 /* The Metrics tables: one fixed column set (MetricsTab's colgroup), so opening a group cannot move a
-   column and the two tabs line up. Description takes what is left; under the min-width, which keeps
-   it legible, the table scrolls sideways. Each width holds its header on one line. */
-.metric-table { table-layout: fixed; min-width: 1090px; }
-.metric-table-deprecated { min-width: 1310px; }
+   column and the two tabs line up. Description takes what is left. Each width holds its header on one
+   line. Each table fits its card (`.table-fit`): the steps are below. */
+.metric-table { table-layout: fixed; }
 .metric-table td { overflow-wrap: anywhere; }
 .metric-col-name { width: 200px; }
 .metric-col-standard { width: 124px; }
@@ -8466,16 +8469,29 @@ ol.gateway-steps {
 .metric-col-semantic-id { width: 252px; }
 .metric-col-superseded { width: 220px; }
 /* Derived: Definition takes what is left, which is why it is the one column with no width. */
-.metric-table-derived { min-width: 976px; }
 .metric-col-kind { width: 140px; }
 .metric-col-description { width: 240px; }
 /* Uncatalogued: Declared By takes what is left, and its chips wrap within it. */
-.metric-table-uncatalogued { min-width: 860px; }
 .metric-col-count { width: 80px; }
 .metric-col-declared { width: 160px; }
 .metric-col-action { width: 130px; }
 .metric-table-uncatalogued .context-device-list { margin-top: 0; }
 .metric-table-uncatalogued .chip .cell-meta { font-size: inherit; flex-shrink: 0; }
+/* A narrower card hides columns (`fit-N`, MetricsTab's colgroup) and narrows those left, so the
+   columns shown still fit; the two tabs still line up. */
+@container table (max-width: 1099px) {
+  .metric-col-name { width: 180px; }
+  .metric-col-semantic-id { width: 160px; }
+}
+@container table (max-width: 699px) {
+  .metric-col-name { width: 160px; }
+  .metric-col-units { width: 120px; }
+  .metric-col-superseded { width: 180px; }
+}
+@container table (max-width: 519px) {
+  .metric-col-name { width: 40%; }
+  .metric-col-action { width: 120px; }
+}
 
 /* The label of a group header, wherever GroupHeading draws one. */
 .table-group-label {
@@ -8588,6 +8604,9 @@ ol.gateway-steps {
 .automation-select input,
 .automation-switch input { accent-color: var(--accent); }
 .automation-summary { max-width: 420px; }
+/* In the list, which fits its card, Watches takes a share of it and its words are cut to that. */
+.table-automations .automation-summary { width: 35%; }
+.table-automations td.automation-summary { max-width: 0; }
 .automation-summary-text { display: block; min-width: 0; }
 .automation-switch {
   display: inline-flex;

@@ -106,7 +106,7 @@ The elements come from IDTA's own files, which are under CC BY 4.0. The credit i
 
 ## The Imported tab
 
-The Imported tab holds vocabularies your site brought in itself. It can be your group's naming standard, a customer's specification, or the terms of a standard you hold a copy of. Every role can read them. Only an Administrator can import, remove or share one, and the buttons are greyed for anyone else.
+The Imported tab holds vocabularies your site brought in itself. It can be your group's naming standard, a customer's specification, or the terms of a standard you hold a copy of. Every role can read them. Only an Administrator can import, remove or share one, and the buttons are greyed for anyone else. The table of files fits the window. With less room, it hides **Imported by** and **Imported** first, then the counts, then **What it is** and **Version**, then **Definitions**. Widen the window to see them again.
 
 ## Import a vocabulary
 
