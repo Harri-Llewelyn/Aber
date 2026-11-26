@@ -31,7 +31,6 @@ import uuid
 from pathlib import Path
 
 import psycopg2
-from psycopg2 import sql
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
@@ -63,6 +62,11 @@ ASKED = {
 }
 
 HERE = Path(__file__).resolve().parent
+
+# DROP POLICY for the policy and table set in test.policy and test.table.
+DROP_NAMED = ("DO $drop$ BEGIN EXECUTE format('DROP POLICY %I ON %s', current_setting('test.policy'), "
+              "current_setting('test.table')::regclass); END $drop$;")
+
 BASELINE = HERE / "0001_baseline_schema.sql"
 OWNER = HERE / "0338_every_read_policy_checks_the_caller_once.sql"
 
@@ -114,6 +118,12 @@ class Base(unittest.TestCase):
 
     def live(self, table, name):
         return self.one("SELECT public.live_policy_statement(%s::regclass, %s);", (f"public.{table}", name))
+
+    def drop(self, table, name):
+        """Drops one policy, named as a bound value: the statement is composed by the server."""
+        self.cur.execute("SELECT set_config('test.policy', %s, true), set_config('test.table', %s, true);",
+                         (name, f"public.{table}"))
+        self.cur.execute(DROP_NAMED)
 
     def policy_oid(self, table, name):
         return self.one("SELECT oid FROM pg_policy WHERE polrelid = %s::regclass AND polname = %s;",
@@ -220,7 +230,7 @@ class WhereEachIsStated(Base):
         for table, (name, _) in ASKED.items():
             with self.subTest(table=table):
                 self.cur.execute("SAVEPOINT fresh;")
-                self.cur.execute(sql.SQL("DROP POLICY {} ON public.{};").format(sql.Identifier(name), sql.Identifier(table)))
+                self.drop(table, name)
                 self.cur.execute(call_for(BASELINE, table, name))
                 self.assertRegex(self.live(table, name), r"USING \(public\.has_role\(")
                 self.cur.execute(call_for(OWNER, table, name))
