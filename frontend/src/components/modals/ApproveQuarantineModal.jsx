@@ -10,7 +10,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { gatewayAcceptsDevices } from '../../utils/gatewayType'
-import { approvalGatewayId, approvalLocation, cameThroughLine } from '../../utils/quarantineHold'
+import { approvalGatewayId, approvalLocation, cameThroughLine, isHeldAgain } from '../../utils/quarantineHold'
 import {
   SCOPE_GATEWAY, SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, followedPlaceFix, followedPlaceLine, resolveDeviceLocation
 } from '../../utils/cellResolution'
@@ -77,13 +77,17 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
 
   return (
     <Modal
-      title={`Approve Discovered ${isGateway ? 'Gateway' : 'Device'}`}
+      title="Approve & Onboard"
       subject={item.asset_name}
       icon={<IconShieldAlert size={18} />}
       size="md"
       busy={busy}
       onClose={onCancel}
-      lead={`Admits the ${isGateway ? 'gateway' : 'device'} Aber held, under the name and in the place chosen here.`}
+      lead={isGateway
+        ? 'Admits a gateway nobody has registered, under the name and in the place chosen here.'
+        : isHeldAgain(item)
+          ? 'Admits again a registered device that Quarantine held, under the name and in the place chosen here.'
+          : 'Admits a device nobody has registered, under the name and in the place chosen here.'}
       problem={check.problem}
       error={error}
       dismiss="Cancel"

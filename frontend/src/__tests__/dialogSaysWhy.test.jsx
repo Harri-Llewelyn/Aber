@@ -287,7 +287,7 @@ const DIALOGS = [
     sends: () => window.open,
   },
   {
-    name: /Approve Discovered Device/,
+    name: /^Approve & Onboard — /,
     render: (spy) => (
       <ApproveQuarantineModal
         item={{ asset_id: 'd1', asset_name: 'CNC_9', entity_type: 'DEVICE', reported_identity: 'cnc9' }}

@@ -8,6 +8,7 @@ import { IconArchive, IconPencil } from '../components/common/Icons'
 import { ConfirmModal } from '../components/modals/ConfirmModal'
 import { ArchiveModal } from '../components/modals/ArchiveModal'
 import { RestoreEntityModal } from '../components/modals/RestoreEntityModal'
+import { ApproveQuarantineModal } from '../components/modals/ApproveQuarantineModal'
 import { declaration } from '../test/themeColours'
 
 /**
@@ -54,11 +55,25 @@ describe("a dialog's header", () => {
   })
 })
 
-describe('Archive and Restore name what they act on', () => {
+describe('Archive, Restore and Approve & Onboard name what they act on', () => {
   it('Archive names the type and the record', () => {
     render(<ArchiveModal type="device" entityId="d-1" displayName="CNC Mill 01" onArchive={vi.fn()} onCancel={vi.fn()} />)
     expect(heading()).toHaveTextContent('Archive Device — CNC Mill 01')
     expect(within(heading()).getByText('CNC Mill 01')).toHaveClass('modal-subject')
+  })
+
+  it.each([
+    ['a device nobody registered', {}, /^Admits a device nobody has registered/],
+    ['a registered device held again', { requarantined_at: '2026-11-20T10:00:00Z' }, /^Admits again a registered device/],
+  ])('Approve & Onboard names the device, and its lead says it is %s', (_, held, lead) => {
+    render(
+      <ApproveQuarantineModal
+        item={{ asset_id: 'd-1', asset_name: 'CNC 9', reported_identity: 'cnc-9', entity_type: 'DEVICE', gateway_id: null, ...held }}
+        cells={[]} gateways={[]} suggestion={null} onApprove={vi.fn()} onMerge={vi.fn()} onCancel={vi.fn()}
+      />
+    )
+    expect(heading()).toHaveTextContent('Approve & Onboard — CNC 9')
+    expect(screen.getByRole('dialog')).toHaveAccessibleDescription(lead)
   })
 
   it('Restore names them the same way', () => {
