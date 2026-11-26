@@ -31,6 +31,7 @@ import uuid
 from pathlib import Path
 
 import psycopg2
+from psycopg2 import sql
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
@@ -219,7 +220,7 @@ class WhereEachIsStated(Base):
         for table, (name, _) in ASKED.items():
             with self.subTest(table=table):
                 self.cur.execute("SAVEPOINT fresh;")
-                self.cur.execute(f"DROP POLICY {name} ON public.{table};")
+                self.cur.execute(sql.SQL("DROP POLICY {} ON public.{};").format(sql.Identifier(name), sql.Identifier(table)))
                 self.cur.execute(call_for(BASELINE, table, name))
                 self.assertRegex(self.live(table, name), r"USING \(public\.has_role\(")
                 self.cur.execute(call_for(OWNER, table, name))
