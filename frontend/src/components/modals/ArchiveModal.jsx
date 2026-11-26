@@ -7,7 +7,8 @@ import { Tooltip } from '../common/Tooltip'
 /**
  * Archive an entity: out of service and off the asset pages, restorable, with an auto-purge timer
  * that deletes the archived record for good. `onArchive` receives the timer in days, or '' for
- * none. `type` is the entity's (area, cell, gateway or device), which the title names, as Restore's does.
+ * none. `type` is the entity's (area, cell, gateway or device), which the title and the button name, as
+ * Restore's do.
  */
 export function ArchiveModal({ type, entityId, displayName, onArchive, onCancel }) {
   const [retentionDays, setRetentionDays] = useState(30)
@@ -21,11 +22,11 @@ export function ArchiveModal({ type, entityId, displayName, onArchive, onCancel 
       message={<>
         Archiving <strong>{displayName}</strong> <span className="mono">[{entityId}]</span> takes
         it out of service and off the asset pages. Its record, its audit trail and its identifiers
-        are kept, and Restore on the Entities page brings it back. Archiving a gateway
-        also revokes its broker credential and archives its forge repository. Raw readings are
-        not held back: they still age out of the historian on its raw window.
+        are kept, and Restore on the Entities page brings it back.
+        {type === 'gateway' && ' It also revokes its broker credential and archives its forge repository.'}
+        {' '}Raw readings are not held back: they still age out of the historian on its raw window.
       </>}
-      confirmLabel="Archive"
+      confirmLabel={`Archive ${TYPE_WORD[type] || 'Entity'}`}
       pendingLabel="Archiving…"
       onConfirm={() => onArchive(retentionDays)}
       onCancel={onCancel}

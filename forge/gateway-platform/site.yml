@@ -4,7 +4,7 @@
 #
 # Order matters once: `appliance` needs Docker, and `converge` installs the timer that will run
 # this again, so a first run that fails before it leaves no timer behind to retry with. The
-# installer retries the first run itself.
+# installer then stops and says so, and a person runs the same command again.
 - name: Aber gateway appliance
   hosts: localhost
   connection: local

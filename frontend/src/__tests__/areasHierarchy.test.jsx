@@ -679,7 +679,7 @@ describe('AreasTab files cells into areas', () => {
     fireEvent.click(screen.getByRole('button', { name: /Archive Area/ }))
     const dialog = document.querySelector('.modal')
     expect(within(dialog).getByRole('heading')).toHaveTextContent('Archive Area — Press Hall')
-    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Archive' })) })
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Archive Area' })) })
     expect(api.post).toHaveBeenCalledWith('/api/v1/areas/area-b/archive', { auto_delete_days: 30 })
     expect(api.delete).not.toHaveBeenCalled()
   })

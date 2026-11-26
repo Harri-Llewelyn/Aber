@@ -468,7 +468,7 @@ def _modelled_metrics(schema_definition) -> set:
 
     ONE OF FIVE IMPLEMENTATIONS, all held to `test-harness/fixtures/modelled-metrics.json` -- with
     deviceTags.js, `modelled_metrics()` in ingestion/validate.py, `modelledMetrics()` in
-    supabase/functions/aas-export/index.ts, and the database's. This one is asserted by
+    supabase/functions/_shared/aas/shell.ts, and the database's. This one is asserted by
     `ModelledMetricsContractTest` in test_i3x_service.py.
 
     `!isinstance(props, dict)` IS LOAD-BEARING: an array `properties` must contribute nothing, and

@@ -321,7 +321,7 @@ describe('an entity\'s drawer', () => {
   it('says where a device is, as links, and that it is quarantined at the top', async () => {
     await show({ role: 'Operator', entities: [AREA, CELL, GATEWAY, { ...HELD, area_id: AREA.id, cell_id: CELL.id, gateway_id: GATEWAY.id }] })
     await openRow('Lathe 9')
-    expect(within(drawer().getByRole('list', { name: 'Warnings' })).getByRole('listitem')).toHaveTextContent(/Quarantined: nobody has admitted/)
+    expect(within(drawer().getByRole('list', { name: 'Warnings' })).getByRole('listitem')).toHaveTextContent(/Quarantined: its readings are held until somebody approves it/)
     expect(fieldsOf().slice(4)).toEqual([
       ['Sparkplug Device ID', 'devb00000000000400080000'], ['Serving Gateway', 'Edge 1'], ['Cell', 'Bay 1'], ['Area', 'Machine Shop'],
     ])

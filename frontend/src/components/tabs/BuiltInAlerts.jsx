@@ -174,7 +174,7 @@ export function BuiltInAlerts({ head, showToast }) {
                       {!compact && <td className="cell-meta">{holdWords(e.hold)}</td>}
                       {!compact && (
                         <td className="automation-summary">
-                          <Tooltip text={e.fires}>
+                          <Tooltip text={e.fires} describe={false}>
                             <span tabIndex={0} className="automation-summary-text"><OverflowText>{e.fires}</OverflowText></span>
                           </Tooltip>
                         </td>

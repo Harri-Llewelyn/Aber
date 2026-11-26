@@ -251,7 +251,7 @@ function AutomationList({ showToast, canWrite, onExport, onUpload, version }) {
                       <div className="cell-meta mono">{breakAfterSeparators(e.key)}</div>
                     </td>
                     <td className="automation-summary fit-520">
-                      <Tooltip text={e.summary}>
+                      <Tooltip text={e.summary} describe={false}>
                         <span tabIndex={0} className="automation-summary-text"><OverflowText>{e.summary}</OverflowText></span>
                       </Tooltip>
                     </td>
