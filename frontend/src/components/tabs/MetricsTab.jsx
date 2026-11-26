@@ -220,6 +220,14 @@ const AppliesTo = ({ devices, naming }) => (devices.length === 0 ? appliesToNone
   </div>
 ))
 
+/**
+ * A metric this page names, as a chip that opens it on its tab. The icon and the page are given, not
+ * the kind: the kind's key is the catalogue's table name, which drift check 450 reads as a query of it.
+ */
+const MetricChip = ({ metric }) => (
+  <RecordChip icon={<IconTag size={11} />} page="Metrics" to={metricUrl(metric.metric_uuid, metric.deprecated, isDerived(metric))} name={metric.name} />
+)
+
 // Schema versions the drawer's Schemas field draws as chips before one link to the rest.
 const SCHEMAS_SHOWN = 6
 
@@ -1373,7 +1381,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                             {metricCells(m, true)}
                             <td>
                               {replacement
-                                ? <RecordChip kind="metric_catalog" to={metricUrl(replacement.metric_uuid, replacement.deprecated, isDerived(replacement))} name={replacement.name} />
+                                ? <MetricChip metric={replacement} />
                                 : <span className="cell-meta">—</span>}
                             </td>
                           </tr>
@@ -1550,7 +1558,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           selected.deprecated && {
             label: 'Superseded By',
             value: selectedReplacement
-              ? <RecordChip kind="metric_catalog" to={metricUrl(selectedReplacement.metric_uuid, selectedReplacement.deprecated, isDerived(selectedReplacement))} name={selectedReplacement.name} />
+              ? <MetricChip metric={selectedReplacement} />
               : null,
             full: Boolean(selectedReplacement),
             help: selectedReplacement ? undefined : 'No replacement was named'
