@@ -35,6 +35,7 @@ import { Sidebar } from './components/common/Sidebar'
 import { GlobalSearch } from './components/common/GlobalSearch'
 import { AberMark } from './components/common/AberMark'
 import { ConnectionStrip } from './components/common/ConnectionStrip'
+import { OverflowText } from './components/common/OverflowText'
 import { focusPageSearch } from './components/common/SearchInput'
 import { SingleKeyShortcutsContext, singleKeyShortcutAllowed, stepPageTab } from './shortcuts'
 
@@ -376,7 +377,7 @@ function UserMenu({
           aria-label={`Signed in as ${signedInAs} (${userRole}) — open account menu`}
         >
           <AccountAvatar pictureUrl={pictureUrl} displayName={displayName} />
-          <span className="sidebar-item-label user-menu-email">{displayName ? <bdi>{displayName}</bdi> : persona}</span>
+          <OverflowText className="sidebar-item-label user-menu-email">{displayName ? <bdi>{displayName}</bdi> : persona}</OverflowText>
         </button>
       </Tooltip>
 
@@ -673,8 +674,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
           >
             <div className="brand-icon"><AberMark size={28} /></div>
             <div className="brand-text">
-              <div className="brand-name">Aber</div>
-              <div className="brand-sub">The shopfloor data platform</div>
+              <OverflowText className="brand-name">Aber</OverflowText>
+              <OverflowText className="brand-sub">The shopfloor data platform</OverflowText>
             </div>
           </button>
         </Tooltip>

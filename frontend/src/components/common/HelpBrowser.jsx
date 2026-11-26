@@ -3,6 +3,7 @@ import { HelpMarkdown } from './HelpMarkdown'
 import { HelpLink } from './HelpLink'
 import { SearchInput } from './SearchInput'
 import { IconBookOpen, IconChevronRight } from './Icons'
+import { OverflowText } from './OverflowText'
 import { CONTENTS_FILE, HELP_FILES, helpTitle, pageHelpFile } from '../../help'
 import { helpTarget } from '../../help/openHelp'
 import { HELP_RESULT_LIMIT, searchHelp } from '../../help/searchIndex'
@@ -64,7 +65,7 @@ function Results({ query, results, onOpen }) {
                   {r.heading}
                   {r.heading !== r.page && <span className="help-result-page"> · {r.page}</span>}
                 </span>
-                {r.snippet && <span className="help-result-snippet">{r.snippet}</span>}
+                {r.snippet && <OverflowText className="help-result-snippet">{r.snippet}</OverflowText>}
               </button>
             </li>
           ))}

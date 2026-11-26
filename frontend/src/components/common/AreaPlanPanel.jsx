@@ -128,6 +128,7 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
       {replacement && (
         <ConfirmModal
           title="Replace Area Plan"
+          subject={area.area_name}
           icon={<IconUpload size={18} />}
           message={`Replace the plan of ${area.area_name} with "${replacement.file.name}"? ${STORED_FILE_REPLACED}`}
           confirmLabel="Replace Plan"
@@ -139,6 +140,7 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
       {confirm && (
         <ConfirmModal
           title="Remove Area Plan"
+          subject={area.area_name}
           icon={<IconTrash size={18} />}
           message={`Remove the plan from ${area.area_name}? Cells keep their places on the default outline. ${STORED_FILE_DELETED}`}
           confirmLabel="Remove Plan"

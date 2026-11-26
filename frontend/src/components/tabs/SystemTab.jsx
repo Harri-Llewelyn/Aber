@@ -2,7 +2,8 @@ import React, { useState, useCallback } from 'react'
 import { api } from '../../api'
 import { GRAFANA_URL, POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
-import { IconExternalLink, IconServer, IconAlertTriangle } from '../common/Icons'
+import { Callout } from '../common/Callout'
+import { IconExternalLink, IconServer } from '../common/Icons'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { CardHeading } from '../common/CardHeading'
@@ -509,12 +510,9 @@ export function SystemTab({ showToast, userRole = null, rolePending = false }) {
     <div className="page-layout page-fill">
       <div className="page-main">
         {loadError && lastGoodAt && (
-          <div className="callout callout-warning callout-page">
-            <IconAlertTriangle size={18} className="callout-icon" />
-            <div>
-              {`The latest read of the service list failed (${loadError}). The list is as of ${formatDateTime(lastGoodAt)}.`}
-            </div>
-          </div>
+          <Callout tone="warning" page>
+            {`The latest read of the service list failed (${loadError}). The list is as of ${formatDateTime(lastGoodAt)}.`}
+          </Callout>
         )}
 
         <div className="card card-fill">
@@ -527,9 +525,7 @@ export function SystemTab({ showToast, userRole = null, rolePending = false }) {
           {loading ? (
             <LoadingState label="services" />
           ) : loadError && !lastGoodAt ? (
-            <div className="callout callout-danger">
-              {`The service list could not be read: ${loadError}`}
-            </div>
+            <Callout tone="danger">{`The service list could not be read: ${loadError}`}</Callout>
           ) : !active ? (
             <EmptyState
               icon={<IconServer size={36} />}

@@ -2,7 +2,7 @@ import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
-import { IconScan } from '../common/Icons'
+import { IconTrash } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { CODE_LENGTH, factorLabel, isCode } from '../../utils/secondFactor'
@@ -41,8 +41,9 @@ export function RemoveSecondFactorModal({ factor, others = [], needsCode = false
 
   return (
     <Modal
-      title={`Remove ${label}`}
-      icon={<IconScan size={18} />}
+      title="Remove Authenticator"
+      subject={label}
+      icon={<IconTrash size={18} />}
       busy={busy}
       onClose={onClose}
       lead={others.length

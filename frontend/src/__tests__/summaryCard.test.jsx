@@ -174,7 +174,7 @@ describe('a summary card', () => {
   it('marks a flagged detail line as a warning of its own, with an icon', () => {
     render(<SummaryCard title="Backup runs" testId="c" value="2h ago" detail="29 of 30 succeeded" flagged state="Up to date" tip="One failed." />)
     const detail = screen.getByText('29 of 30 succeeded')
-    expect(detail).toHaveClass('summary-card-flagged')
+    expect(detail.closest('.summary-card-detail')).toHaveClass('summary-card-flagged')
     expect(detail.querySelector('svg')).not.toBeNull()
   })
 
@@ -190,12 +190,16 @@ describe('a summary card', () => {
     expect(lines({ state: `Failed 1h ago: ${'x'.repeat(300)}`, tone: 'danger' })).toEqual(fine)
     expect(fine).toEqual(['summary-card-head', 'summary-card-value', 'summary-card-detail', 'summary-card-state'])
 
-    // In App.css: each line keeps to one line and ends in an ellipsis.
+    // Each line holds an OverflowText, which keeps it to one line and ends it in an ellipsis.
+    const { unmount } = render(<SummaryCard title="Historian" testId="h" value="2h ago" detail="Next 02:00" state="Up to date" tip="t" />)
+    const drawn = [...screen.getByTestId('h').querySelectorAll('.summary-card-title, .summary-card-value, .summary-card-detail, .summary-card-state')]
+    expect(drawn).toHaveLength(4)
+    for (const line of drawn) expect(line.firstElementChild).toHaveClass('overflow-text')
+    unmount()
     const rule = APP_CSS.match(/\n\.summary-card-value,\n\.summary-card-detail,\n\.summary-card-state \{([^}]*)\}/)
-    expect(rule, 'the one-line rule for the card lines').not.toBeNull()
-    expect(rule[1]).toMatch(/white-space:\s*nowrap/)
-    expect(rule[1]).toMatch(/text-overflow:\s*ellipsis/)
-    expect(rule[1]).toMatch(/overflow:\s*hidden/)
+    expect(rule, 'the rule for the card lines').not.toBeNull()
+    expect(rule[1]).toMatch(/display:\s*block/)
+    expect(rule[1]).toMatch(/min-width:\s*0/)
     expect(APP_CSS).toMatch(/\n\.summary-card-head \{[^}]*height:\s*16px/)
   })
 

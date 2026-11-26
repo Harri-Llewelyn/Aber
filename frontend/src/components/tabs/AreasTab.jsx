@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
+import { OverflowText } from '../common/OverflowText'
 import { Tooltip } from '../common/Tooltip'
 import { areaHistoryUrl, areaUrl, cellUrl, deviceUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
@@ -33,6 +34,7 @@ import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
+import { Callout } from '../common/Callout'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
@@ -54,7 +56,6 @@ import {
   IconRefreshCw,
   IconHistory,
   IconBookOpen,
-  IconShieldAlert,
   IconRadio,
   IconCpu,
   IconMap,
@@ -336,7 +337,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       title={`${c.cell_name} — ${inServiceDevices(devicesByCell.get(c.cell_id)).length} device(s). ${canManage ? 'Drag onto an area to file it; click' : 'Click'} to open on the Cells page`}
     >
       <CellIcon cell={c} size={11} />
-      <span className="chip-name">{c.cell_name}</span>
+      <OverflowText className="chip-name">{c.cell_name}</OverflowText>
       {c.is_archived && <span className="chip-flag">ARCHIVED</span>}
     </RouteLink>
   )
@@ -348,22 +349,15 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       {/* Above the card: the queue this page exists to drain, and the first thing worth knowing
           on arrival. Also the drop target for taking a cell out of its area. */}
       {unfiled.length > 0 && (
-        <div
-          className="callout callout-warning callout-page"
-          onDragOver={handleDragOver}
-          onDrop={e => handleDrop(e, null)}
-        >
-          <IconShieldAlert size={18} className="callout-icon" />
-          <div>
-            <strong>{plural(unfiled.length, 'unfiled cell')}:</strong>{' '}
-            {unfiled.map(cellChip)}{' '}
-            <span className="cell-meta">
-              {canManage
-                ? 'Drag each onto an area below. A cell dropped here is taken out of its area.'
-                : 'File them from the Cells page.'}
-            </span>
-          </div>
-        </div>
+        <Callout tone="warning" page onDragOver={handleDragOver} onDrop={e => handleDrop(e, null)}>
+          <strong>{plural(unfiled.length, 'unfiled cell')}:</strong>{' '}
+          {unfiled.map(cellChip)}{' '}
+          <span className="cell-meta">
+            {canManage
+              ? 'Drag each onto an area below. A cell dropped here is taken out of its area.'
+              : 'File them from the Cells page.'}
+          </span>
+        </Callout>
       )}
 
       <div className="card card-fill">
@@ -490,6 +484,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       {showForm && (
         <Modal
           title={editing ? 'Edit Area' : 'New Area'}
+          subject={editing?.area_name}
+          icon={editing ? <IconPencil size={18} /> : <IconPlus size={18} />}
+          lead={proposeMode ? 'Files this as a proposal, for an approver to decide.' : editing ? 'Saves the changes to this area.' : 'Adds an area of the site, for cells to be filed into.'}
           size="md"
           busy={saving}
           onClose={() => { setShowForm(false); setEditingProposal(null) }}
@@ -566,7 +563,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
       {archiveTarget && (
         <ArchiveModal
-          entityId={archiveTarget.area_id} displayName={archiveTarget.area_name}
+          type="area" entityId={archiveTarget.area_id} displayName={archiveTarget.area_name}
           onArchive={archiveArea} onCancel={() => setArchiveTarget(null)}
         />
       )}
@@ -592,6 +589,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       {filing && (
         <ConfirmModal
           title={filing.areaId ? 'Move Cell' : 'Unfile Cell'}
+          subject={filing.cell.cell_name}
+          icon={<IconFactory size={18} />}
           message={filingQuestion(filing)}
           confirmLabel={filing.areaId ? 'Move Cell' : 'Unfile Cell'}
           pendingLabel={filing.areaId ? 'Moving…' : 'Unfiling…'}
@@ -633,12 +632,12 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                 <div className="context-device-list">
                   {selectedWideGateways.map(g => (
                     <RouteLink key={g.gateway_id} className="chip chip-link chip-gw" to={gatewayUrl(g.gateway_id)} onNavigate={() => onSelectGateway?.(g.gateway_id)} title={`Open ${g.gateway_name} on the Gateways page`}>
-                      <IconRadio size={11} /><span className="chip-name">{g.gateway_name}</span>
+                      <IconRadio size={11} /><OverflowText className="chip-name">{g.gateway_name}</OverflowText>
                     </RouteLink>
                   ))}
                   {selectedWideDevices.map(d => (
                     <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} onNavigate={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page`}>
-                      <IconCpu size={11} /><span className="chip-name">{d.asset_name}</span>
+                      <IconCpu size={11} /><OverflowText className="chip-name">{d.asset_name}</OverflowText>
                     </RouteLink>
                   ))}
                 </div>

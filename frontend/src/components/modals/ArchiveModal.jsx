@@ -1,19 +1,21 @@
 import React, { useState } from 'react'
 import { IconArchive } from '../common/Icons'
 import { ConfirmModal } from './ConfirmModal'
+import { TYPE_WORD } from './RestoreEntityModal'
 import { Tooltip } from '../common/Tooltip'
 
 /**
  * Archive an entity: out of service and off the asset pages, restorable, with an auto-purge timer
  * that deletes the archived record for good. `onArchive` receives the timer in days, or '' for
- * none.
+ * none. `type` is the entity's (area, cell, gateway or device), which the title names, as Restore's does.
  */
-export function ArchiveModal({ entityId, displayName, onArchive, onCancel }) {
+export function ArchiveModal({ type, entityId, displayName, onArchive, onCancel }) {
   const [retentionDays, setRetentionDays] = useState(30)
 
   return (
     <ConfirmModal
-      title="Archive Entity"
+      title={`Archive ${TYPE_WORD[type] || 'Entity'}`}
+      subject={displayName}
       size="default"
       icon={<IconArchive size={18} />}
       message={<>

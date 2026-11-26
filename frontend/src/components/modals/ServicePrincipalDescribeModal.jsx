@@ -2,6 +2,7 @@ import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
+import { IconPencil } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { identityUrl } from '../../routes'
@@ -51,7 +52,9 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
 
   return (
     <Modal
-      title={`Describe “${principal.name}”`}
+      title="Describe Machine Identity"
+      subject={principal.name}
+      icon={<IconPencil size={18} />}
       busy={busy}
       onClose={onClose}
       lead="The name and purpose only. What the identity holds is fixed at creation: a wider grant would reach every token already issued for it, so that is a new machine identity."

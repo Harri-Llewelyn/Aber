@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
+import { Callout } from '../common/Callout'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { SearchInput } from '../common/SearchInput'
@@ -353,7 +354,7 @@ export function HistoryTab({ showToast, userRole, onSelectDevice, onSelectGatewa
           <TabStrip ariaLabel="History" value={tab} onChange={openTab} hrefFor={tabPath} tabs={HISTORY_TABS} />
 
           {error ? (
-            <div className="callout callout-danger">{`The devices could not be read: ${error}`}</div>
+            <Callout tone="danger">{`The devices could not be read: ${error}`}</Callout>
           ) : !loaded ? (
             <LoadingState label="devices" />
           ) : tab === 'overview' ? (

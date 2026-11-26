@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef,
 import { createPortal } from 'react-dom'
 import { COVERAGE_SMALL_SELECTION, api } from '../../api'
 import { useSetting } from '../../hooks/useSettings'
+import { Callout } from '../common/Callout'
 import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import { RefreshButton } from '../common/RefreshButton'
@@ -798,7 +799,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, catalog, win, 
         ) : reading?.problem ? (
           <EmptyState icon={<IconChartLine size={36} />} message={reading.problem} />
         ) : reading?.error ? (
-          <div className="callout callout-danger">{`Where readings arrived could not be read: ${reading.error}`}</div>
+          <Callout tone="danger">{`Where readings arrived could not be read: ${reading.error}`}</Callout>
         ) : !reading?.counts ? (
           <LoadingState label="where readings arrived" />
         ) : (

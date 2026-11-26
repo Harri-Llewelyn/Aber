@@ -1,5 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react'
+import { Callout } from '../common/Callout'
 import { RouteLink } from '../common/RouteLink'
+import { OverflowText } from '../common/OverflowText'
 import { areaUrl, cellHistoryUrl, cellUrl, deviceUrl, devicesInCellUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
@@ -55,7 +57,7 @@ import { RequiredMark } from '../common/RequiredMark'
 import { breakAfterSeparators, plural } from '../../utils/format'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
 import { inServiceDevices, inServiceGateways } from '../../utils/inService'
-import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../../utils/alertSubjects'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { FilterDropdown } from '../common/FilterChecklist'
@@ -66,7 +68,7 @@ import { useSortableRows } from '../../hooks/useTableSort'
 import { Tooltip } from '../common/Tooltip'
 
 export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewTrail, onShowOnSiteMap, hasPermission, userRole = null, activeAlerts = [] }) {
-  /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js. */
+  /** Devices Grafana currently has an alert firing on -- see utils/alertSubjects.js. */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   const [cells, setCells]       = useState([])
   const [areas, setAreas]       = useState([])
@@ -323,15 +325,12 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
       <div className="page-main">
       {/* Above the card: a page-level finding, and the first thing worth knowing on arrival. */}
       {unlinkedDevices.length > 0 && (
-        <div className="callout callout-warning callout-page">
-          <IconShieldAlert size={18} className="callout-icon" />
-          <div>
-            <strong>{plural(unlinkedDevices.length, 'device')} not linked to any cell:</strong>{' '}
-            {unlinkedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unlinkedDevices.length > 5 ? ', …' : ''}.
-            Set a cell on each device from the Devices page, give its gateway a cell on the Gateways page,
-            or mark it Site-Wide or Area-Wide if it belongs to no single cell.
-          </div>
-        </div>
+        <Callout tone="warning" page>
+          <strong>{plural(unlinkedDevices.length, 'device')} not linked to any cell:</strong>{' '}
+          {unlinkedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unlinkedDevices.length > 5 ? ', …' : ''}.
+          Set a cell on each device from the Devices page, give its gateway a cell on the Gateways page,
+          or mark it Site-Wide or Area-Wide if it belongs to no single cell.
+        </Callout>
       )}
 
       {/* One card, composed as every card is: the title, then the toolbar that narrows what is
@@ -512,6 +511,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
       {showForm && (
         <Modal
           title={editing ? 'Edit Cell' : 'New Cell'}
+          subject={editing?.cell_name}
+          icon={editing ? <IconPencil size={18} /> : <IconPlus size={18} />}
+          lead={proposeMode ? 'Files this as a proposal, for an approver to decide.' : editing ? 'Saves the changes to this cell.' : 'Adds a cell, where gateways and devices are placed.'}
           size="md"
           busy={saving}
           onClose={closeForm}
@@ -621,7 +623,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
 
       {archiveTarget && (
         <ArchiveModal
-          entityId={archiveTarget.cell_id} displayName={archiveTarget.cell_name}
+          type="cell" entityId={archiveTarget.cell_id} displayName={archiveTarget.cell_name}
           onArchive={archiveCell} onCancel={() => setArchiveTarget(null)}
         />
       )}
@@ -663,10 +665,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                   className="chip chip-link"
                   to={areaUrl(selectedCell.area_id)}
                   onNavigate={() => onSelectArea?.(selectedCell.area_id)}
-                  title="Open this area on the Areas page"
+                  title={`Open ${selectedCellArea?.area_name || selectedCell.area_id} on the Areas page`}
                 >
-                  <AreaIcon area={areas.find(a => a.area_id === selectedCell.area_id)} size={11} />
-                  <span className="chip-name">{areas.find(a => a.area_id === selectedCell.area_id)?.area_name || selectedCell.area_id}</span>
+                  <AreaIcon area={selectedCellArea} size={11} />
+                  <OverflowText className="chip-name">{selectedCellArea?.area_name || selectedCell.area_id}</OverflowText>
                 </RouteLink>
               )
               : 'Unfiled',
@@ -688,7 +690,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                       title={`Open ${g.gateway_name} on the Gateways page`}
                     >
                       <IconRadio size={11} />
-                      <span className="chip-name">{g.gateway_name}</span>
+                      <OverflowText className="chip-name">{g.gateway_name}</OverflowText>
                     </RouteLink>
                   ))}
                 </div>
@@ -718,7 +720,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                       >
                         {/* A ring once the alert is acknowledged, filled while it is nobody's. */}
                         <span className="badge-dot" style={deviceDotStyle(d, alert)} />
-                        <span className="chip-name">{d.asset_name}</span>
+                        <OverflowText className="chip-name">{d.asset_name}</OverflowText>
                         {d.is_archived && <span className="chip-flag">ARCHIVED</span>}
                       </RouteLink>
                     )

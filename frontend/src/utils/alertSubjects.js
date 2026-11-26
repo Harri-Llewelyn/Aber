@@ -1,14 +1,15 @@
-import { deviceIds } from './sparkplugId';
+import { deviceIds, gatewaySparkplugId } from './sparkplugId';
 import { isAcknowledged } from './alertAcknowledgement';
 import { isSuppressed } from './alertSuppression';
+import { severityRank } from './tableSort';
 
 /**
- * Matching a firing alert to the device it is about, shared by the Site Map, Cells, Gateways and
- * Devices. Device-scoped alerts only, filtered on `entity_type`, so a gateway, platform or
- * machine-identity alert can never colour a device chip; the top bar's pill does not filter.
- * Indexed on both `sparkplug_id` (the issued id, which telemetry and so Grafana's series are keyed
- * on) and the nullable `entity_id`, so a rename or a re-provision under a new UUID does not lose
- * the alert.
+ * Matching a firing alert to the device or gateway it is about, shared by the Site Map, Cells,
+ * Gateways and Devices. An index holds one kind of subject, filtered on `entity_type`, so a gateway,
+ * platform or machine-identity alert can never colour a device chip, nor a device's a gateway row;
+ * the top bar's pill does not filter. Indexed on both `sparkplug_id` (the issued id, which telemetry
+ * and so Grafana's series are keyed on) and the nullable `entity_id`, so a rename or a re-provision
+ * under a new UUID does not lose the alert.
  */
 
 /** Severity ranking. A device with a critical AND a warning has a critical on it. */
@@ -63,10 +64,39 @@ export function alertIndex(activeAlerts = [], entityType = 'device', { suppresse
 export function alertForDevice(index, device) {
   if (!index || !device) return null;
   const { issued } = deviceIds(device);
-  const byIssued = (issued && index.get(issued)) || null;
-  const byRow = (device.asset_id && index.get(device.asset_id)) || null;
-  if (!byIssued || !byRow) return byIssued || byRow;
-  return rank(byRow) > rank(byIssued) ? byRow : byIssued;
+  return worstAlert(issued && index.get(issued), device.asset_id && index.get(device.asset_id));
+}
+
+/**
+ * The alert that decides `gateway`'s state, or null, from an index of gateway alerts
+ * (`alertIndex(alerts, 'gateway')`). Looks up its Sparkplug edge node id and its row's UUID, and
+ * the edge node id's alert wins a tie, as a device's issued id does.
+ */
+export function alertForGateway(index, gateway) {
+  if (!index || !gateway) return null;
+  const node = gateway.sparkplug_id || gatewaySparkplugId(gateway.gateway_id);
+  return worstAlert(node && index.get(node), gateway.gateway_id && index.get(gateway.gateway_id));
+}
+
+/** The worst of `alerts` by the rank an index keeps, or null; the first wins a tie. Empty ones are skipped. */
+export function worstAlert(...alerts) {
+  return alerts.reduce((worst, alert) => (alert && (!worst || rank(alert) > rank(worst)) ? alert : worst), null);
+}
+
+// A status column's sort bands: a firing alert, then an acknowledged one, then the subject's own
+// state. Each band holds the severity ranks of utils/tableSort.js, which run 0 to 8.
+const SORT_BAND_ACKNOWLEDGED = 10;
+const SORT_BAND_STATE = 20;
+
+/**
+ * A status column's value for a `rank` sort, as the Devices and Gateways tables sort: a firing alert
+ * first, the worst severity first, then an acknowledged one, then `stateTone`, the Badge tone of the
+ * subject's own status. A suppressed alert is no alert.
+ */
+export function statusSortRank(alert, stateTone) {
+  if (!alert || isSuppressed(alert)) return SORT_BAND_STATE + severityRank(stateTone);
+  const severity = severityRank(alert.severity === 'critical' ? 'danger' : 'warning');
+  return (isAcknowledged(alert) ? SORT_BAND_ACKNOWLEDGED : 0) + severity;
 }
 
 /**

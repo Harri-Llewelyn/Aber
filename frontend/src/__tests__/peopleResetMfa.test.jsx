@@ -88,7 +88,7 @@ describe('Reset MFA', () => {
 
     fireEvent.click(reset)
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent('Reset MFA for operator@site.test')
+    expect(dialog).toHaveTextContent('Reset MFA — operator@site.test')
     expect(dialog).toHaveTextContent('signing in asks only for their password')
     expect(dialog).toHaveTextContent('Their sessions stay signed in: to sign them out, use End Sessions as well.')
     expect(within(dialog).getByRole('button', { name: 'Reset MFA' })).toBeInTheDocument()

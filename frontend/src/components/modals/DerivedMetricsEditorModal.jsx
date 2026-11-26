@@ -5,7 +5,7 @@ import { ActionButton } from '../common/ActionButton'
 import CopyableId from '../common/CopyableId'
 import { DropZone } from '../common/DropZone'
 import { Modal } from '../common/Modal'
-import { IconTag } from '../common/Icons'
+import { IconPencil, IconPlus, IconUpload } from '../common/Icons'
 import { RequiredMark } from '../common/RequiredMark'
 import { ApplyDerivedMetricsModal } from './ApplyDerivedMetricsModal'
 import { useFormCheck } from '../../hooks/useFormCheck'
@@ -53,8 +53,9 @@ export function DerivedMetricsEditorModal({ uploads = false, catalog, showToast,
   return (
     <>
       <Modal
-        title={source ? `Edit ${source}` : uploads ? 'Upload Derived Metrics' : 'New Derived Metrics in YAML'}
-        icon={<IconTag size={18} />}
+        title={source ? 'Edit Derived Metrics' : uploads ? 'Upload Derived Metrics' : 'New Derived Metrics in YAML'}
+        subject={source}
+        icon={source ? <IconPencil size={18} /> : uploads ? <IconUpload size={18} /> : <IconPlus size={18} />}
         size="wide"
         lead={editing
           ? 'Write each derived metric under a dash, with its name, kind and inputs. Nothing is applied until you check the file and confirm what it would do. A definition is fixed once saved, so only a description can change.'

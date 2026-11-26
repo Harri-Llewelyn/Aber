@@ -19,7 +19,7 @@ const WORDS = /\bcannot be (?:undone|recovered|restored)\b|\bfor good\b|\bperman
 
 /** The gated dialogs: the file under components/, and text the dialog's title contains. */
 const GATED = [
-  ['tabs/PeopleSection.jsx', 'Remove Access for'],
+  ['tabs/PeopleSection.jsx', 'Remove Access'],
   ['tabs/EntitiesTab.jsx', 'Permanently Delete'],
   ['tabs/SchemasTab.jsx', 'Discard Draft'],
   ['tabs/DevicesTab.jsx', 'Reject Device'],
@@ -31,16 +31,16 @@ const GATED = [
 
 /** The dialogs that use the words and take no gate, with why. */
 const UNGATED = [
-  ['modals/ServiceTokenInventoryModal.jsx', 'Tokens for', 'revoking a token must stay quick, and another can be issued'],
+  ['modals/ServiceTokenInventoryModal.jsx', 'Tokens', 'revoking a token must stay quick, and another can be issued'],
   ['modals/ServiceTokenInventoryModal.jsx', 'Revoke Token', 'revoking a token must stay quick, and another can be issued'],
-  ['modals/ServiceTokenModal.jsx', 'Token for', 'the token is shown once; issuing one destroys nothing'],
+  ['modals/ServiceTokenModal.jsx', 'Issue Token', 'the token is shown once; issuing one destroys nothing'],
   ['modals/SigningKeyModal.jsx', 'Signing Key', 'the key is shown once; rotating it must stay quick, and another can be issued'],
-  ['modals/GatewayCredentialModal.jsx', 'Broker Credential for', "the password is shown once; the dialog asks for the gateway's name itself"],
+  ['modals/GatewayCredentialModal.jsx', 'Generate Broker Credential', "the password is shown once; the dialog asks for the gateway's name itself"],
   ['modals/SchemaForkModal.jsx', 'Create Version', 'what it keeps permanently is a description; nothing is destroyed'],
   ['modals/ColdStorageDestinationModal.jsx', 'Cold Storage Destination', 'with archiving off, the retention window drops the readings, not a click'],
   ['common/CredentialField.jsx', 'Replace the', 'nothing is overwritten until the dialog saves, and a key can be issued again where it came from'],
   ['tabs/DevicesTab.jsx', 'Edit Device Configuration', 'Enforce keeps later values out; it destroys nothing the site holds'],
-  ['modals/ArchiveModal.jsx', 'Archive Entity', "Restore undoes an archive, and its timer's deletion is not a click"],
+  ['modals/ArchiveModal.jsx', 'Archive', "Restore undoes an archive, and its timer's deletion is not a click"],
 ];
 
 /** The text of JSX source: no comments, string joins or inline markup, and one space between words. */

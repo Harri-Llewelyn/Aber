@@ -99,7 +99,7 @@ describe('the panel’s search box', () => {
     Element.prototype.scrollIntoView = scrolled
     render(<HelpPanel open tabId="devices" onClose={() => {}} />)
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search help' }), { target: { value: 'quarantine' } })
-    expect(screen.getByText('Search help', { selector: '.context-panel-title' })).toBeInTheDocument()
+    expect(screen.getByText('Search help', { selector: '.context-panel-title *' })).toBeInTheDocument()
     expect(screen.getByRole('status').textContent).toMatch(/result/)
     const results = screen.getAllByRole('button', { name: /·|Quarantine/ }).filter((b) => b.classList.contains('help-result'))
     expect(results.length).toBeGreaterThan(1)
@@ -111,7 +111,7 @@ describe('the panel’s search box', () => {
 
     const glossary = results.find((b) => /Glossary/.test(b.textContent) && /^Quarantine\b/.test(b.textContent))
     fireEvent.click(glossary)
-    expect(screen.getByText('Glossary', { selector: '.context-panel-title' })).toBeInTheDocument()
+    expect(screen.getByText('Glossary', { selector: '.context-panel-title *' })).toBeInTheDocument()
     expect(scrolled).toHaveBeenCalled()
     expect(scrolled.mock.contexts.at(-1).dataset.heading).toBe('quarantine')
     // The box empties: the search is a step Back returns to, with its words.

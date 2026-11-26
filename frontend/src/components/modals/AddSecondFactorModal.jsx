@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
-import { IconScan } from '../common/Icons'
+import { IconPlus } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { useFormCheck } from '../../hooks/useFormCheck'
@@ -79,7 +79,7 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
   return (
     <Modal
       title="Add Authenticator"
-      icon={<IconScan size={18} />}
+      icon={<IconPlus size={18} />}
       busy={busy}
       onClose={cancel}
       lead={enrolment

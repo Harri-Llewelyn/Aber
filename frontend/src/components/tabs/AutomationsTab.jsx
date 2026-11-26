@@ -7,6 +7,7 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { automationUrl, automationsUrl, newAutomationUrl } from '../../routes'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { CardHeading } from '../common/CardHeading'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
@@ -194,7 +195,7 @@ function AutomationList({ showToast, canWrite, onExport, onUpload, version }) {
       </div>
 
       {error && data === null ? (
-        <div className="callout callout-danger">{`The automations could not be read: ${error}`}</div>
+        <Callout tone="danger">{`The automations could not be read: ${error}`}</Callout>
       ) : waiting ? (
         <LoadingState label="automations" />
       ) : rows.length === 0 ? (

@@ -89,9 +89,9 @@ describe('a GroupHeading', () => {
 
   it('is drawn in the secondary colour where its group is a remainder', () => {
     const { rerender } = render(<GroupHeading open={false} label="Ungrouped" muted onToggle={() => {}} />)
-    expect(screen.getByText('Ungrouped')).toHaveClass('table-group-label', 'table-group-label-muted')
+    expect(screen.getByText('Ungrouped').closest('.overflow-text')).toHaveClass('table-group-label', 'table-group-label-muted')
     rerender(<GroupHeading open={false} label="Axes" onToggle={() => {}} />)
-    expect(screen.getByText('Axes')).not.toHaveClass('table-group-label-muted')
+    expect(screen.getByText('Axes').closest('.overflow-text')).not.toHaveClass('table-group-label-muted')
   })
 })
 
@@ -105,7 +105,8 @@ describe('the rules the groups are laid out by', () => {
   }
 
   it('wrap a long name on a row of its own, which a lane\'s label column cuts', () => {
-    expect(ruleOf('.group-heading-label')).toContain('white-space: nowrap')
+    // The name is an OverflowText, which keeps it to one line where nothing lets it wrap.
+    expect(ruleOf('.overflow-text')).toContain('white-space: nowrap')
     expect(ruleOf('.vocab-section-head .group-heading-label')).toContain('white-space: normal')
     expect(APP_CSS).toContain('\n.table-group-row .group-heading-label,\n.vocab-section-head .group-heading-label {')
     expect(ruleOf('.vocab-section-head > .table-group-button')).toContain('min-width: 0')

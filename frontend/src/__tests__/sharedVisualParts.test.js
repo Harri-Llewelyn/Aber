@@ -83,7 +83,7 @@ describe('rows and utilities', () => {
     expect(inline('.row-actions .btn + .btn')).toMatch(/margin-left:\s*8px/)
   })
 
-  it.each(['.form-hint', '.eyebrow', '.truncate', '.hint-underline'])('%s exists after .cell-meta', (sel) => {
+  it.each(['.form-hint', '.eyebrow', '.hint-underline'])('%s exists after .cell-meta', (sel) => {
     expect(rule(sel)).toBeTruthy()
     expect(APP_CSS.indexOf(`\n${sel} {`)).toBeGreaterThan(APP_CSS.indexOf('\n.cell-meta {'))
   })
@@ -92,8 +92,9 @@ describe('rows and utilities', () => {
     expect(inline('.stack > * + *')).toMatch(/margin-top:\s*var\(--stack\)/)
   })
 
-  it('.truncate is the ellipsis triplet', () => {
-    const r = rule('.truncate')
+  it('has no .truncate: a line cut short is an OverflowText, the one rule with the ellipsis triplet', () => {
+    expect(rule('.truncate')).toBeFalsy()
+    const r = rule('.overflow-text')
     expect(r).toMatch(/overflow:\s*hidden/)
     expect(r).toMatch(/text-overflow:\s*ellipsis/)
     expect(r).toMatch(/white-space:\s*nowrap/)

@@ -391,8 +391,28 @@ export function clusterSummary(events, kindOf) {
        + 'Click to open the first — narrow the time window to separate them'
 }
 
-/** A lane's key: the stored kind and the entity, so a device, its nameplate and its schemas are three lanes. */
-export const laneKeyOf = (e) => `${String(e.entity_type).toLowerCase()}:${e.entity_id}`
+/**
+ * The table whose lane a row is drawn in: its own, but a further semantic id's is its metric's, whose
+ * id is its `entity_id` (0299). A device's nameplate and schemas keep lanes of their own.
+ */
+const LANE_TABLES = { metric_semantic_ids: 'metric_catalog' }
+const laneTableOf = (e) => {
+  const table = String(e.entity_type).toLowerCase()
+  return LANE_TABLES[table] || table
+}
+
+/** A lane's key: the lane's table and the entity, so a device, its nameplate and its schemas are three lanes. */
+export const laneKeyOf = (e) => `${laneTableOf(e)}:${e.entity_id}`
+
+/**
+ * What an event did, as the marker, the drawer and the status line say it: its action, but a further
+ * semantic id's row, drawn in its metric's lane, says what it was.
+ */
+const FURTHER_ID_WORDS = {
+  INSERT: 'Further semantic id added', UPDATE: 'Further semantic id changed', DELETE: 'Further semantic id removed',
+}
+export const eventWords = (e) => (String(e.entity_type).toLowerCase() === 'metric_semantic_ids'
+  && FURTHER_ID_WORDS[e.event_type]) || e.event_type
 
 /**
  * Oldest first, and the rows of one transaction, which share a time, in the order they were
@@ -423,7 +443,9 @@ const SPOKEN_ACTIONS = { INSERT: 'Created', UPDATE: 'Updated', DELETE: 'Deleted'
 
 /** What the status line says of an event: "Event 4 of 7: Updated, 14:02". */
 export function eventNews(index, count, event) {
-  const action = SPOKEN_ACTIONS[event.event_type] || AUDIT_TRAIL_ACTIONS[event.event_type] || event.event_type
+  const words = eventWords(event)
+  const action = (words !== event.event_type && words)
+    || SPOKEN_ACTIONS[event.event_type] || AUDIT_TRAIL_ACTIONS[event.event_type] || event.event_type
   const time = new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   return `Event ${index + 1} of ${count}: ${action}, ${time}`
 }
@@ -1577,7 +1599,7 @@ export function AuditTrailTab({ userRole, showToast }) {
     for (const e of events) {
       const key = laneKeyOf(e)
       if (!byEntity.has(key)) {
-        byEntity.set(key, { key, kind: entityKind(e.entity_type), entityId: e.entity_id, events: [] })
+        byEntity.set(key, { key, kind: entityKind(laneTableOf(e)), entityId: e.entity_id, events: [] })
       }
       byEntity.get(key).events.push(e)
     }
@@ -2082,14 +2104,14 @@ export function AuditTrailTab({ userRole, showToast }) {
       /* What, who, when, a line each; the rest is in the drawer. */
       <Tooltip
         key={e.event_id}
-        text={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e, machinePrincipals)}\n${new Date(e.timestamp).toLocaleString()}`}
+        text={`${eventWords(e)} · ${MARKERS[kind].label}\n${actorLabel(e, machinePrincipals)}\n${new Date(e.timestamp).toLocaleString()}`}
       >
         <button
           type="button"
           className={`trail-node trail-node-${kind}${isSelected ? ' trail-node-selected' : ''}`}
           style={{ left: offsetForFraction(item.xOffset) }}
           onClick={() => onOpen(e)}
-          aria-label={`${e.event_type} on ${nameOf(e)} at ${new Date(e.timestamp).toLocaleString()}`}
+          aria-label={`${eventWords(e)} on ${nameOf(e)} at ${new Date(e.timestamp).toLocaleString()}`}
           aria-pressed={isSelected}
         >
           <TrailMarker kind={kind} selected={isSelected} />
@@ -2184,7 +2206,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                 onClick={() => setChangedBy([])}
                 aria-label={`Changed by ${changedByWords}. Show everyone's changes`}
               >
-                <span className="chip-name">Changed by {changedByWords}</span>
+                <OverflowText className="chip-name">Changed by {changedByWords}</OverflowText>
                 <IconX size={11} aria-hidden="true" />
               </button>
             </Tooltip>
@@ -2395,7 +2417,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                                       ? <OverflowText className="trail-lane-name">{lane.name}</OverflowText>
                                       /* Neither the join nor a snapshot could name it: the shortened
                                          id, monospaced. */
-                                      : <span className="trail-lane-name trail-lane-unnamed mono">{shortId(lane.entityId)}</span>}
+                                      : <OverflowText className="trail-lane-name trail-lane-unnamed mono">{shortId(lane.entityId)}</OverflowText>}
                                     {/* Must survive truncation: each version of a schema has a name of
                                         its own, and they differ only at the end, which is what a long
                                         name loses. */}
@@ -2404,7 +2426,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                                     )}
                                     {/* A person's email beside their display name: the name alone is
                                         not enough to tell who it was. */}
-                                    {lane.email && <span className="trail-lane-email">{lane.email}</span>}
+                                    {lane.email && <OverflowText className="trail-lane-email">{lane.email}</OverflowText>}
                                     {/* `gone`, not `fromSnapshot`: a name from a snapshot says where
                                         the label came from, and a settings or backup lane is named
                                         that way while existing perfectly well. */}
@@ -2487,8 +2509,9 @@ export function AuditTrailTab({ userRole, showToast }) {
         title={drawerName}
         subtitle={selected && (
           <div className="trail-drawer-nav-badges">
-            <Tooltip text="The audit event type">
-              <span className="badge badge-warning">{selected.event_type}</span>
+            <Tooltip text={eventWords(selected) === selected.event_type ? 'The audit event type'
+              : `The audit event type: ${selected.event_type} on one of this metric's further semantic ids`}>
+              <span className="badge badge-warning">{eventWords(selected)}</span>
             </Tooltip>
             <Tooltip text={MARKERS[selectedAnalysis?.kind]?.hint}>
               <span className={`badge trail-badge-${selectedAnalysis?.kind}`}>

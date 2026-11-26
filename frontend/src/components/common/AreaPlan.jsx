@@ -3,6 +3,7 @@ import { loadAreaPlanUrl } from '../../api'
 import {
   planFrameAspect, planRotation, planFractionsFromEvent, placeInFrame, placeOnDrawing, drawingBoxInFrame
 } from '../../utils/areaPlans'
+import { OverflowText } from './OverflowText'
 import { Tooltip } from './Tooltip'
 
 /**
@@ -128,25 +129,32 @@ function DefaultOutline({ aspect, unavailable }) {
  * here, or `muted` for a pin that is context rather than the subject. Without `onClick` the pin
  * is a mark, not a control: a span, so a read-only plan puts no dead stops in the tab order.
  * `--pin-x` lets the label slide inward at the plan's side edges while the disc stays put. `title`
- * is its tooltip, the shared one, for what the label beneath it does not say. `x` and `y` are the
- * place on the drawing as uploaded; the pin draws it where the plan's turn puts it.
+ * is its tooltip, the shared one, for what the label beneath it does not say. A label too long for
+ * the pin is cut and slides on the pin's hover or focus, and while it is cut the tooltip leads with
+ * it, since reduced motion stops the slide. `x` and `y` are the place on the drawing as uploaded;
+ * the pin draws it where the plan's turn puts it.
  */
 export function AreaPlanPin({ x, y, status = 'idle', Icon, label, title, selected = false, onClick, small = false, iconSize = null }) {
   const className = `area-plan-pin area-plan-pin-${status}${selected ? ' area-plan-pin-selected' : ''}${small ? ' area-plan-pin-small' : ''}`
   const at = placeInFrame({ x, y }, useContext(PlanRotation))
   const style = { left: `${at.x * 100}%`, top: `${at.y * 100}%`, '--pin-x': at.x }
+  // The pin is the label's control, even where it is a mark inside a card that takes the focus.
+  const pin = useRef(null)
+  const [cut, setCut] = useState(false)
+  const tip = cut ? (title ? `${label}. ${title}` : label) : title
   const content = (
     <>
       <span className="area-plan-pin-disc">{Icon && <Icon size={iconSize ?? (small ? 9 : 18)} />}</span>
-      <span className="area-plan-pin-label">{label}</span>
+      <OverflowText className="area-plan-pin-label" host={pin} onMeasure={setCut}>{label}</OverflowText>
     </>
   )
   if (!onClick) {
-    return <Tooltip text={title}><span className={className} style={style} data-status={status}>{content}</span></Tooltip>
+    return <Tooltip text={tip}><span ref={pin} className={className} style={style} data-status={status}>{content}</span></Tooltip>
   }
   return (
-    <Tooltip text={title}>
+    <Tooltip text={tip}>
       <button
+        ref={pin}
         type="button"
         className={className}
         style={style}

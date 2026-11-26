@@ -15,7 +15,7 @@ import { STANDARDS } from '../../utils/standards'
 import { ActionButton } from './ActionButton'
 import { EmptyState } from './EmptyState'
 import { ExpandAllToggle } from './ExpandAllToggle'
-import { IconBookOpen, IconUpload } from './Icons'
+import { IconBookOpen, IconFileCode, IconTrash, IconUpload } from './Icons'
 import { LoadingState } from './LoadingState'
 import { PersonName } from './PersonName'
 import { SearchInput } from './SearchInput'
@@ -318,7 +318,9 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
 
       {removing && (
         <ConfirmModal
-          title={<>Remove Vocabulary <span className="mono">{removing.name}</span></>}
+          title="Remove Vocabulary"
+          subject={removing.name}
+          icon={<IconTrash size={18} />}
           message={<>
             This removes <strong>{removing.name}</strong> and its {plural(removing.concept_count, 'concept')} from this site.
             {' '}{usedBy(removing) > 0
@@ -335,7 +337,9 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
 
       {sharing && (
         <ConfirmModal
-          title={<>Share the Definitions of <span className="mono">{sharing.name}</span></>}
+          title="Share the Definitions"
+          subject={sharing.name}
+          icon={<IconFileCode size={18} />}
           message={<>
             An export will carry the definition of each of its concepts, and so will the AAS API.
             {' '}<strong>The licence is the site's responsibility.</strong> Confirm only that it lets you share these definitions.

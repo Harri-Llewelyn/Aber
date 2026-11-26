@@ -32,10 +32,13 @@ export function gatewayStatusTone(status) {
   return 'warning'
 }
 
-/** The gateway status chip, drawn through Badge. A status that is not its own explanation says why in its tooltip. */
-export function StatusBadge({ status }) {
+/**
+ * The gateway status chip, drawn through Badge. A status that is not its own explanation says why in its tooltip.
+ * `size` is Badge's: "sm" in a table cell.
+ */
+export function StatusBadge({ status, size }) {
   const playback = PLAYBACK_STATES[status]
-  if (playback) return <Badge tone={playback.tone} dot title={playback.title}>{GATEWAY_STATUS_LABELS[status]}</Badge>
+  if (playback) return <Badge tone={playback.tone} size={size} dot title={playback.title}>{GATEWAY_STATUS_LABELS[status]}</Badge>
 
   const isPending = status === 'PENDING_ENROLLMENT' || status === 'AWAITING_BIRTH'
   const tone = gatewayStatusTone(status)
@@ -47,5 +50,5 @@ export function StatusBadge({ status }) {
       ? 'A bundle has been generated for this gateway. It is waiting for the appliance to run it and enrol.'
       : 'The appliance enrolled and holds a broker credential. It has not published its first Sparkplug birth yet.'
 
-  return <Badge tone={tone} dot title={title}>{label}</Badge>
+  return <Badge tone={tone} size={size} dot title={title}>{label}</Badge>
 }

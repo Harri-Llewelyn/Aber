@@ -78,7 +78,7 @@ describe('the 3D model view', () => {
     await openView()
     const open = dialog()
     expect(open.querySelector('.modal')).toHaveClass('modal-full')
-    expect(within(open).getByRole('heading', { name: 'CNC_01' })).toBeInTheDocument()
+    expect(within(open).getByRole('heading', { name: '3D Model — CNC_01' })).toBeInTheDocument()
     const viewer = await within(open).findByTestId('model-3d-viewer')
     expect(viewer.tagName).toBe('MODEL-VIEWER')
     expect(viewer.hasAttribute('auto-rotate')).toBe(false)

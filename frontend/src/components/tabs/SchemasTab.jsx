@@ -508,6 +508,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
       {discardTarget && (
         <ConfirmModal
           title="Discard Draft"
+          subject={discardTarget.schema_name}
           icon={<IconTrash size={18} />}
           message={
             <>
@@ -627,7 +628,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                       title={`Open ${d.asset_name} on the Devices page`}
                     >
                       <IconCpu size={11} />
-                      <span className="chip-name">{d.asset_name}</span>
+                      <OverflowText className="chip-name">{d.asset_name}</OverflowText>
                     </RouteLink>
                   ))}
                 </div>

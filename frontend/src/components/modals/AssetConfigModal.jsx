@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { SPARKPLUG_TYPES } from '../../constants'
 import { modelledMetricsAcross, schemasForDevice } from '../../utils/deviceTags'
-import { IconFileText, IconShieldAlert, IconClipboardList, IconCheck, IconAlertTriangle, IconInfo } from '../common/Icons'
+import { Callout } from '../common/Callout'
+import { IconFileText, IconCheck, IconAlertTriangle } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
@@ -110,39 +111,33 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
     /* Wide: a five-column table, and a narrower one clips the middle of a Sparkplug path, the part
        that distinguishes `Axes/X/...` from `Axes/Y/...`. */
     <Modal
-      title={`Device Configuration Parameters — ${asset.asset_name || asset.asset_id}`}
+      title="Device Configuration Parameters"
+      subject={asset.asset_name || asset.asset_id}
       icon={<IconFileText size={18} />}
       size="wide"
       onClose={onClose}
       dismiss="Close"
     >
       {attachedSchemas.length > 0 && (
-        <div className="callout callout-info">
-          <IconClipboardList size={13} className="callout-icon" />
-          <span>
-            Compared against {attachedSchemas.length === 1 ? 'assigned schema' : `${attachedSchemas.length} attached submodels`}{' '}
-            <strong>{attachedSchemas.map(s => s.schema_name).join(', ')}</strong>
-          </span>
-        </div>
+        <Callout tone="info">
+          Compared against {attachedSchemas.length === 1 ? 'assigned schema' : `${attachedSchemas.length} attached submodels`}{' '}
+          <strong>{attachedSchemas.map(s => s.schema_name).join(', ')}</strong>
+        </Callout>
       )}
 
       {isOffline && isLane && (
-        <div className="callout callout-info">
-          <IconInfo size={13} className="callout-icon" />
-          <span>
-            A replay lane publishes only while a playback runs.{' '}
-            {isNeverSeen(asset) ? 'No playback has run on it yet.' : 'Its last values are from the last playback.'}
-          </span>
-        </div>
+        <Callout tone="info">
+          A replay lane publishes only while a playback runs.{' '}
+          {isNeverSeen(asset) ? 'No playback has run on it yet.' : 'Its last values are from the last playback.'}
+        </Callout>
       )}
 
       {isOffline && !isLane && (
-        <div className="callout callout-warning">
-          <IconShieldAlert size={16} className="callout-icon" />
+        <Callout tone="warning">
           {isNeverSeen(asset)
-            ? <span><strong>Awaiting first birth</strong> — this device has not published yet.</span>
-            : <span><strong>Device Offline (DDEATH Received):</strong> This device received a Sparkplug B disconnect payload via gateway <strong>{gatewayLink}</strong>. Telemetry ingestion is suspended.</span>}
-        </div>
+            ? <><strong>Awaiting first birth</strong> — this device has not published yet.</>
+            : <><strong>Device Offline (DDEATH Received):</strong> This device received a Sparkplug B disconnect payload via gateway <strong>{gatewayLink}</strong>. Telemetry ingestion is suspended.</>}
+        </Callout>
       )}
 
       {loading ? (

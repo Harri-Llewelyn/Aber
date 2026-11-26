@@ -627,7 +627,7 @@ describe('AccessControlTab', () => {
 
       fireEvent.click(await screen.findByRole('button', { name: 'Delete Line 4 OEE board' }))
       const dialog = screen.getByRole('dialog')
-      expect(within(dialog).getByText(/Delete the Read-Only Account “Line 4 OEE board”/)).toBeTruthy()
+      expect(within(dialog).getByRole('heading')).toHaveTextContent('Delete Account — Line 4 OEE board')
       expect(within(dialog).getByText(SUB)).toBeTruthy()
       expect(within(dialog).getByText(/It is connected now/)).toBeTruthy()
       expect(api.deleteBrokerSubscriber).not.toHaveBeenCalled()

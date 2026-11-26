@@ -15,7 +15,8 @@ export default function check() {
     'frontend/src/components/tabs/HistoryAlerts.jsx': ['<PersonName', 'emailOnHover', 'useDisplayNames(', 'withAcknowledgerNames('],
     'frontend/src/components/common/SuppressionWindows.jsx': ['<PersonName', 'emailOnHover', 'useDisplayNames('],
     'frontend/src/hooks/usePlatformAlerts.js': ['useDisplayNames(', 'withAcknowledgerNames('],
-    'frontend/src/components/tabs/DevicesTab.jsx': ['acknowledgerName(alert)'],
+    // The Devices and Gateways rows' alert badge.
+    'frontend/src/components/common/AlertBadge.jsx': ['acknowledgerName(alert)'],
   };
   const straight = /(?:acknowledged_by_email|created_by_email|ended_by_email) \|\| '/;
   const problems364 = [];
@@ -33,6 +34,6 @@ export default function check() {
   if (problems364.length) {
     fail(`an acknowledger or a window's author is not drawn through the one helper:\n${problems364.map((p) => `        ${p}`).join('\n')}`);
   } else {
-    pass("the counter, the banner, History's Alerts tab, the Devices table and the Suppression windows draw who acknowledged an alert or scheduled a window by display name with the email as a tooltip, one read for each list");
+    pass("the counter, the banner, History's Alerts tab, the Devices and Gateways tables and the Suppression windows draw who acknowledged an alert or scheduled a window by display name with the email as a tooltip, one read for each list");
   }
 }

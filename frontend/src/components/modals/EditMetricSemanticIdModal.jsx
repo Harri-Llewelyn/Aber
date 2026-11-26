@@ -95,11 +95,13 @@ export function EditMetricSemanticIdModal({
 
   return (
     <Modal
-      title={<>Edit Metric <span className="mono">{metric.name}</span></>}
+      title="Edit Metric"
+      subject={metric.name}
       icon={<IconPencil size={18} />}
       size="md"
       busy={saving}
       onClose={onCancel}
+      lead={`Changes the metric's semantic id and further IDs${takesValues ? ', and the values it permits' : ''}.`}
       problem={check.problem}
       error={error}
       dismiss="Cancel"

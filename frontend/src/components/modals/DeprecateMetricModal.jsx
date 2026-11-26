@@ -13,7 +13,8 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
 
   return (
     <ConfirmModal
-      title={<>Deprecate Metric <span className="mono">{metric.name}</span></>}
+      title="Deprecate Metric"
+      subject={metric.name}
       size="md"
       icon={<IconAlertTriangle size={18} />}
       message={metric.derivation ? <>

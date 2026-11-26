@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Callout } from '../common/Callout'
 import { RouteLink } from '../common/RouteLink'
 import { captureJobUrl, captureSubjectUrl, schemaUrl } from '../../routes'
 import { api, isMachineMetric } from '../../api'
@@ -18,7 +19,7 @@ import { StartPlaybackModal } from '../modals/StartPlaybackModal'
 import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import { JobHistory } from './CaptureHistory'
 import {
-  IconClipboardList, IconCpu, IconDownload, IconInfo, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash,
+  IconClipboardList, IconCpu, IconDownload, IconPlay, IconRadio, IconRecord, IconTrash,
   IconX
 } from '../common/Icons'
 import { OverflowText } from '../common/OverflowText'
@@ -548,10 +549,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               there is nothing to say, and the container then collapses (:empty in App.css). */}
           <div className="capture-strips">
             {error && (
-              <div className="callout callout-danger">
-                <IconShieldAlert size={14} className="callout-icon" />
-                <div>{error}</div>
-              </div>
+              <Callout tone="danger">{error}</Callout>
             )}
             <RunningCard job={activeJob} onStop={onStop} stopPending={stopPending} canManage={canManage} />
             <RecentFailures jobs={recentJobs} />
@@ -920,6 +918,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       {deleteFor && (
         <ConfirmModal
           title="Delete Capture"
+          subject={deleteFor.subject.name}
           icon={<IconTrash size={18} />}
           message={`Delete the capture of ${deleteFor.subject.name}, recorded ${formatDateTime(deleteFor.capture.recorded_at)}${deleteFor.capture.note ? ` — ${deleteFor.capture.note}` : ''}? The file is removed from storage and cannot be recovered.`}
           requireTyped={deleteFor.subject.name}
@@ -953,82 +952,85 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
   const stale = silentFor > STALE_RECORDING_SECONDS
 
   return (
-    <div className="callout callout-info">
-      <IconRecord size={14} className="callout-icon" />
-      <div style={{ flex: 1 }}>
-        <div>
-          <strong>{pending ? 'Queued' : 'Recording'} — {subject}</strong>
-          {job.note && <span style={{ color: 'var(--text-muted)' }}> · {job.note}</span>}
+    <Callout
+      tone="info"
+      // A running job's strip: its icon names the job.
+      icon={IconRecord}
+      action={(
+        <ActionButton
+          className="btn btn-ghost"
+          permitted={canManage}
+          deniedTitle={DENIED_TITLE}
+          pending={stopPending}
+          pendingLabel="Stopping…"
+          onClick={onStop}
+          title={stale
+            ? 'End this recording now. The daemon has stopped reporting on it, so nothing from it is stored.'
+            : 'Finish this capture now and keep what it has recorded'}
+        >
+          Stop
+        </ActionButton>
+      )}
+    >
+      <div>
+        <strong>{pending ? 'Queued' : 'Recording'} — {subject}</strong>
+        {job.note && <span style={{ color: 'var(--text-muted)' }}> · {job.note}</span>}
+      </div>
+      {pending ? (
+        <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
+          Waiting for the ingestion daemon to pick it up. If this does not start within a few
+          seconds, the daemon is not running.
         </div>
-        {pending ? (
-          <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
-            Waiting for the ingestion daemon to pick it up. If this does not start within a few
-            seconds, the daemon is not running.
-          </div>
-        ) : (
-          <>
-            {/* A bar for the clock and numbers for the other two caps: a single bar at 10% would
-                promise 90% remaining when the message cap might fire in two seconds. The caps are
-                NOT NULL columns, but the tooltip must not be the thing that throws if one is absent. */}
-            <Tooltip text={job.max_messages && job.max_bytes
-              ? `The recording also stops at ${job.max_messages.toLocaleString()} messages or ${formatBytes(job.max_bytes)}, whichever comes first.`
-              : null}>
+      ) : (
+        <>
+          {/* A bar for the clock and numbers for the other two caps: a single bar at 10% would
+              promise 90% remaining when the message cap might fire in two seconds. The caps are
+              NOT NULL columns, but the tooltip must not be the thing that throws if one is absent. */}
+          <Tooltip text={job.max_messages && job.max_bytes
+            ? `The recording also stops at ${job.max_messages.toLocaleString()} messages or ${formatBytes(job.max_bytes)}, whichever comes first.`
+            : null}>
+            <div
+              style={{
+                height: '4px', borderRadius: '2px', background: 'var(--bg-glass)',
+                overflow: 'hidden', margin: '8px 0 6px'
+              }}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={job.max_seconds}
+              aria-valuenow={Math.min(job.elapsed_seconds, job.max_seconds)}
+              aria-label="Elapsed against the duration cap"
+            >
               <div
                 style={{
-                  height: '4px', borderRadius: '2px', background: 'var(--bg-glass)',
-                  overflow: 'hidden', margin: '8px 0 6px'
+                  width: `${Math.min(100, (job.elapsed_seconds / Math.max(job.max_seconds, 1)) * 100)}%`,
+                  height: '100%', background: 'var(--accent)', transition: 'width 1s linear'
                 }}
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={job.max_seconds}
-                aria-valuenow={Math.min(job.elapsed_seconds, job.max_seconds)}
-                aria-label="Elapsed against the duration cap"
-              >
-                <div
-                  style={{
-                    width: `${Math.min(100, (job.elapsed_seconds / Math.max(job.max_seconds, 1)) * 100)}%`,
-                    height: '100%', background: 'var(--accent)', transition: 'width 1s linear'
-                  }}
-                />
-              </div>
-            </Tooltip>
-            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
-              {job.elapsed_seconds}s of {job.max_seconds}s ·{' '}
-              {plural(job.messages, 'message')} · {formatBytes(job.bytes)}
-              {' · '}
-              {job.birth_captured ? 'birth certificate captured' : 'no birth certificate yet'}
+              />
             </div>
-          </>
-        )}
-        {stale && (
-          <div style={{ color: 'var(--warning-text)', fontSize: '12px', marginTop: '4px' }}>
-            The ingestion daemon has not reported on this recording for{' '}
-            {formatDuration(silentFor)}. Stop ends it here, and nothing from it is stored. Until
-            then no other capture can start.
+          </Tooltip>
+          <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+            {job.elapsed_seconds}s of {job.max_seconds}s ·{' '}
+            {plural(job.messages, 'message')} · {formatBytes(job.bytes)}
+            {' · '}
+            {job.birth_captured ? 'birth certificate captured' : 'no birth certificate yet'}
           </div>
-        )}
-        {/* Settles into `birth_captured` on the finished record. */}
-        {!pending && !job.birth_captured && job.elapsed_seconds > 10 && (
-          <div style={{ color: 'var(--warning-text)', fontSize: '12px', marginTop: '4px' }}>
-            No <code>NBIRTH</code> has arrived. A playback of a capture without the edge node’s
-            birth certificate is refused. The finished capture will be marked <strong>no birth</strong>.
-          </div>
-        )}
-      </div>
-      <ActionButton
-        className="btn btn-ghost"
-        permitted={canManage}
-        deniedTitle={DENIED_TITLE}
-        pending={stopPending}
-        pendingLabel="Stopping…"
-        onClick={onStop}
-        title={stale
-          ? 'End this recording now. The daemon has stopped reporting on it, so nothing from it is stored.'
-          : 'Finish this capture now and keep what it has recorded'}
-      >
-        Stop
-      </ActionButton>
-    </div>
+        </>
+      )}
+      {stale && (
+        <div style={{ color: 'var(--warning-text)', fontSize: '12px', marginTop: '4px' }}>
+          The ingestion daemon has not reported on this recording for{' '}
+          {formatDuration(silentFor)}. Stop ends it here, and nothing from it is stored. Until
+          then no other capture can start.
+        </div>
+      )}
+      {/* Settles into `birth_captured` on the finished record. */}
+      {!pending && !job.birth_captured && job.elapsed_seconds > 10 && (
+        <div style={{ color: 'var(--warning-text)', fontSize: '12px', marginTop: '4px' }}>
+          No <code>NBIRTH</code> has arrived. A playback of a capture without the edge node’s
+          birth certificate is refused. The finished capture will be marked <strong>no birth</strong>.
+        </div>
+      )}
+    </Callout>
   )
 }
 
@@ -1041,56 +1043,59 @@ function PlaybackStrip({ job, onStop, stopPending, canManage }) {
   const total = job.messages_total || 0
 
   return (
-    <div className="callout callout-info">
-      <IconPlay size={14} className="callout-icon" />
-      <div style={{ flex: 1 }}>
-        <div>
-          <strong>{pending ? 'Queued' : 'Playing back'} as {target}</strong>
-          <span style={{ color: 'var(--text-muted)' }}> · {job.speed}× speed</span>
-        </div>
-        {/* A bar is unambiguous here, unlike the capture strip: a playback has exactly one total.
-            Rendered only once `messages_total` is written by the worker's first progress call, so a
-            queued job shows no bar at 0%. */}
-        {!pending && total > 0 && (
+    <Callout
+      tone="info"
+      // A running job's strip: its icon names the job.
+      icon={IconPlay}
+      action={(
+        <ActionButton
+          className="btn btn-ghost"
+          permitted={canManage}
+          deniedTitle={DENIED_TITLE}
+          pending={stopPending}
+          pendingLabel="Stopping…"
+          onClick={onStop}
+          title="Stop the playback now. What has already been published stays in the historian."
+        >
+          Stop
+        </ActionButton>
+      )}
+    >
+      <div>
+        <strong>{pending ? 'Queued' : 'Playing back'} as {target}</strong>
+        <span style={{ color: 'var(--text-muted)' }}> · {job.speed}× speed</span>
+      </div>
+      {/* A bar is unambiguous here, unlike the capture strip: a playback has exactly one total.
+          Rendered only once `messages_total` is written by the worker's first progress call, so a
+          queued job shows no bar at 0%. */}
+      {!pending && total > 0 && (
+        <div
+          style={{
+            height: '4px', borderRadius: '2px', background: 'var(--bg-glass)',
+            overflow: 'hidden', margin: '8px 0 6px'
+          }}
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={total}
+          aria-valuenow={Math.min(job.messages_sent, total)}
+          aria-label="Messages played back against the capture's total"
+        >
           <div
             style={{
-              height: '4px', borderRadius: '2px', background: 'var(--bg-glass)',
-              overflow: 'hidden', margin: '8px 0 6px'
+              width: `${Math.min(100, (job.messages_sent / Math.max(total, 1)) * 100)}%`,
+              height: '100%', background: 'var(--accent)', transition: 'width 1s linear'
             }}
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={total}
-            aria-valuenow={Math.min(job.messages_sent, total)}
-            aria-label="Messages played back against the capture's total"
-          >
-            <div
-              style={{
-                width: `${Math.min(100, (job.messages_sent / Math.max(total, 1)) * 100)}%`,
-                height: '100%', background: 'var(--accent)', transition: 'width 1s linear'
-              }}
-            />
-          </div>
-        )}
-        <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
-          {pending
-            ? (playbackWorkerDeployed()
-                ? 'Waiting for the playback worker to pick it up. If this does not start within a few seconds, the worker is not running.'
-                : 'Stop this, or set playback.enabled: true in the Helm values and upgrade. The playback worker is not deployed on this site, so it will not start.')
-            : `${job.messages_sent}${total ? ` of ${total}` : ''} message${job.messages_sent === 1 ? '' : 's'} played back · ${job.elapsed_seconds}s`}
+          />
         </div>
+      )}
+      <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
+        {pending
+          ? (playbackWorkerDeployed()
+              ? 'Waiting for the playback worker to pick it up. If this does not start within a few seconds, the worker is not running.'
+              : 'Stop this, or set playback.enabled: true in the Helm values and upgrade. The playback worker is not deployed on this site, so it will not start.')
+          : `${job.messages_sent}${total ? ` of ${total}` : ''} message${job.messages_sent === 1 ? '' : 's'} played back · ${job.elapsed_seconds}s`}
       </div>
-      <ActionButton
-        className="btn btn-ghost"
-        permitted={canManage}
-        deniedTitle={DENIED_TITLE}
-        pending={stopPending}
-        pendingLabel="Stopping…"
-        onClick={onStop}
-        title="Stop the playback now. What has already been published stays in the historian."
-      >
-        Stop
-      </ActionButton>
-    </div>
+    </Callout>
   )
 }
 
@@ -1165,29 +1170,29 @@ function RecentFailures({ jobs, kind = 'capture' }) {
         const detail = job.error ? `: ${job.error}`
           : cancelled && kind === 'playback' ? `: ${reached} published before it was stopped.` : '.'
         return (
-          <div key={job.id} className={`callout ${cancelled ? 'callout-info' : 'callout-danger'}`}>
-            {cancelled
-              ? <IconInfo size={14} className="callout-icon" />
-              : <IconShieldAlert size={14} className="callout-icon" />}
-            <div style={{ fontSize: '12px', flex: 1 }}>
-              <strong>
-                {job.devices?.name || job.gateways?.name
-                  || job.subject_sparkplug_id || job.target_edge_node_id}
-              </strong>
-              {' — '}{kind === 'playback' ? 'playback ' : ''}
-              {outcome}
-              {detail}
-            </div>
-            <Tooltip text="Dismiss this notice. It will not come back, on this browser.">
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => dismiss(job.id)}
-                aria-label={`Dismiss the ${kind} ${cancelled ? 'outcome' : 'failure'} notice`}
-              >
-                <IconX size={13} />
-              </button>
-            </Tooltip>
-          </div>
+          <Callout
+            key={job.id}
+            tone={cancelled ? 'info' : 'danger'}
+            action={(
+              <Tooltip text="Dismiss this notice. It will not come back, on this browser.">
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => dismiss(job.id)}
+                  aria-label={`Dismiss the ${kind} ${cancelled ? 'outcome' : 'failure'} notice`}
+                >
+                  <IconX size={13} />
+                </button>
+              </Tooltip>
+            )}
+          >
+            <strong>
+              {job.devices?.name || job.gateways?.name
+                || job.subject_sparkplug_id || job.target_edge_node_id}
+            </strong>
+            {' — '}{kind === 'playback' ? 'playback ' : ''}
+            {outcome}
+            {detail}
+          </Callout>
         )
       })}
     </>
@@ -1227,27 +1232,29 @@ function RecentDiscards({ jobs }) {
         const lost = job.messages_out_of_window
         const total = job.messages_sent || job.messages_total || 0
         return (
-          <div key={job.id} className="callout callout-warning">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div style={{ fontSize: '12px', flex: 1 }}>
-              <strong>{job.gateways?.name || job.target_edge_node_id}</strong>
-              {' — '}
-              {lost} of {plural(total, 'published message')} carried timestamps too old or too
-              far in the future for the historian, and those readings were discarded on ingest. The
-              playback itself succeeded.
-              {' '}
-              <HelpTip label="Why readings were discarded" text="Playback keeps the gap between a reading's timestamp and its message's arrival. A reading already old when recorded, or stamped by a fast device clock, stays outside the window. A slow speed stretches the gap: try 1x." />
-            </div>
-            <Tooltip text="Dismiss this notice. It will not come back, on this browser.">
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => dismiss(job.id)}
-                aria-label="Dismiss the discarded-readings notice"
-              >
-                <IconX size={13} />
-              </button>
-            </Tooltip>
-          </div>
+          <Callout
+            key={job.id}
+            tone="warning"
+            action={(
+              <Tooltip text="Dismiss this notice. It will not come back, on this browser.">
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => dismiss(job.id)}
+                  aria-label="Dismiss the discarded-readings notice"
+                >
+                  <IconX size={13} />
+                </button>
+              </Tooltip>
+            )}
+          >
+            <strong>{job.gateways?.name || job.target_edge_node_id}</strong>
+            {' — '}
+            {lost} of {plural(total, 'published message')} carried timestamps too old or too
+            far in the future for the historian, and those readings were discarded on ingest. The
+            playback itself succeeded.
+            {' '}
+            <HelpTip label="Why readings were discarded" text="Playback keeps the gap between a reading's timestamp and its message's arrival. A reading already old when recorded, or stamped by a fast device clock, stays outside the window. A slow speed stretches the gap: try 1x." />
+          </Callout>
         )
       })}
     </>

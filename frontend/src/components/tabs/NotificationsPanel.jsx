@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { usePolling } from '../../hooks/usePolling'
 import { notificationsUrl } from '../../routes'
 import { Badge } from '../common/Badge'
+import { Callout } from '../common/Callout'
 import { IconAlertTriangle, IconGlobe, IconLock, IconMail, IconZap } from '../common/Icons'
 import { OverflowText } from '../common/OverflowText'
 import { Tooltip } from '../common/Tooltip'
@@ -89,10 +90,7 @@ function EmailStatus({ email }) {
   return (
     <section className="notification-email" aria-label="Email" data-testid="email-status">
       {unavailable && (
-        <div className="callout callout-warning">
-          <IconAlertTriangle size={14} className="callout-icon" />
-          <div>Email cannot be sent yet. {email.relay.reason}</div>
-        </div>
+        <Callout tone="warning">Email cannot be sent yet. {email.relay.reason}</Callout>
       )}
       <p className="notification-log-lead">
         {told
@@ -113,10 +111,7 @@ function DeliveryLog({ rows, error }) {
         hours, before it is marked failed.
       </p>
       {error && (
-        <div className="callout callout-danger">
-          <IconAlertTriangle size={14} className="callout-icon" />
-          <div>{error}</div>
-        </div>
+        <Callout tone="danger">{error}</Callout>
       )}
       {rows.length === 0 && !error ? (
         <p className="notification-log-empty">Nothing has been sent yet.</p>
@@ -327,10 +322,7 @@ export function NotificationsPanel({ children, showToast, readOnly = false }) {
 
       {(webhookError || emailError) && (
         <div className="card-body">
-          <div className="callout callout-danger">
-            <IconAlertTriangle size={14} className="callout-icon" />
-            <div>{webhookError || emailError}</div>
-          </div>
+          <Callout tone="danger">{webhookError || emailError}</Callout>
         </div>
       )}
 

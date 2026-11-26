@@ -341,7 +341,7 @@ describe('a device’s and a gateway’s fields', () => {
     saysWhy(group, 'A Sparkplug group cannot be empty.')
   })
 
-  it('Approve Discovered Device says why it was held, under the id it published', () => {
+  it('Approve & Onboard says why it was held, under the id it published', () => {
     const item = { asset_id: 'd1', asset_name: 'CNC_9', entity_type: 'DEVICE', reported_identity: 'cnc9', quarantine_reason: 'The id is not one Aber issues.' }
     const { rerender } = render(<ApproveQuarantineModal item={item} cells={[]} gateways={[]} onApprove={vi.fn()} onMerge={vi.fn()} onCancel={vi.fn()} />)
     const reason = screen.getByRole('alert')

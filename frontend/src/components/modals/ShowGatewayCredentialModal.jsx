@@ -1,9 +1,10 @@
 import React, { useCallback, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { CopyField } from '../common/CopyField'
 import { Modal } from '../common/Modal'
-import { IconEye, IconShieldAlert } from '../common/Icons'
+import { IconEye } from '../common/Icons'
 import { NodeRedCredentialSteps } from './GatewayCredentialModal'
 import { EdgeNodeSettings } from './EdgeNodeSettings'
 import { gatewayUrl } from '../../routes'
@@ -33,10 +34,13 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
 
   return (
     <Modal
-      title={<>Broker Credential for “{gateway.gateway_name}”</>}
+      title="Show Broker Credential"
+      subject={gateway.gateway_name}
+      icon={<IconEye size={18} />}
       size="lg"
       busy={busy}
       onClose={onClose}
+      lead="Shows the broker password last issued to this gateway."
       error={error}
       dismiss={credential ? 'Done' : 'Cancel'}
       footer={credential ? null : (
@@ -46,16 +50,10 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
       )}
     >
       {!credential ? (
-        <div className="callout callout-info">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            <strong>Show this gateway’s broker password?</strong>
-            <div>
-              It is the password last issued to this gateway. Showing it is recorded in the Audit
-              Trail under your name. Nothing about the gateway changes.
-            </div>
-          </div>
-        </div>
+        <Callout tone="info">
+          Showing it is recorded in the Audit Trail under your name. Nothing about the gateway
+          changes.
+        </Callout>
       ) : gateway.deployment === 'third_party' ? (
         <EdgeNodeSettings gateway={gateway} credential={credential} />
       ) : (

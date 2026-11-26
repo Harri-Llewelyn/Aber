@@ -117,9 +117,11 @@ export function DeviceExportModal({ device, initialFormat = 'json', bundleDisabl
 
   return (
     <Modal
-      title={`Export ${name}`}
+      title="Export Device"
+      subject={name}
       icon={<IconDownload size={18} />}
       size="md"
+      lead="Downloads this device as a file, in the format you choose."
       // The download and its toast would land after the dialog had gone.
       busy={pending}
       onClose={onClose}

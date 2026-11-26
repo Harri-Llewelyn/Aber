@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
+import { Callout } from '../common/Callout'
 import CopyableId from '../common/CopyableId'
 import { BrokerSubscriberModal } from '../modals/BrokerSubscriberModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -13,7 +14,7 @@ import { ServicePrincipalDescribeModal } from '../modals/ServicePrincipalDescrib
 import { PeopleSection } from './PeopleSection'
 import { AppsSection } from './AppsSection'
 import {
-  IconArchive, IconBot, IconDownload, IconLock, IconPencil, IconPlus, IconRadio, IconShieldAlert,
+  IconArchive, IconBot, IconDownload, IconLock, IconPencil, IconPlus, IconRadio,
   IconShieldCheck, IconTrash,
 } from '../common/Icons'
 import { Badge, ArchivedBadge } from '../common/Badge'
@@ -522,31 +523,22 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                 for every row, and this says why once rather than on each. When it WAS read, the
                 column is the statement and no callout is needed. */}
             {inventoryError && inventorySessionEnded && (
-              <div className="callout callout-warning">
-                <IconLock size={14} className="callout-icon" />
-                <div>
-                  <strong>The broker was not read.</strong> Your session has ended, so the Broker
-                  column reads <em>Not read</em> for every row. Sign in again to read it.
-                </div>
-              </div>
+              <Callout tone="warning">
+                <strong>The broker was not read.</strong> Your session has ended, so the Broker
+                column reads <em>Not read</em> for every row. Sign in again to read it.
+              </Callout>
             )}
             {inventoryError && !inventorySessionEnded && (
-              <div className="callout callout-warning">
-                <IconShieldAlert size={14} className="callout-icon" />
-                <div>
-                  <strong>The broker was not read.</strong> The Broker column reads <em>Not read</em>{' '}
-                  for every row. {inventoryError} Reading it requires an Administrator and a
-                  reachable credential service; the Credential column, from the database, is
-                  unaffected.
-                </div>
-              </div>
+              <Callout tone="warning">
+                <strong>The broker was not read.</strong> The Broker column reads <em>Not read</em>{' '}
+                for every row. {inventoryError} Reading it requires an Administrator and a
+                reachable credential service; the Credential column, from the database, is
+                unaffected.
+              </Callout>
             )}
 
             {loadError && (
-              <div className="callout callout-danger">
-                <IconShieldAlert size={14} className="callout-icon" />
-                <div>{loadError}</div>
-              </div>
+              <Callout tone="danger">{loadError}</Callout>
             )}
           </div>
           )}
@@ -703,10 +695,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
 
           {principalError && (
             <div className="card-body">
-              <div className="callout callout-danger">
-                <IconShieldAlert size={14} className="callout-icon" />
-                <div>{principalError}</div>
-              </div>
+              <Callout tone="danger">{principalError}</Callout>
             </div>
           )}
           {!principalError && (principalsLoading ? <LoadingState label="machine identities" /> :
@@ -988,13 +977,10 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
           {section === 'roles' && (<>
           {!inventoryLoading && !inventory && (
             <div className="card-body">
-              <div className="callout callout-warning">
-                <IconShieldAlert size={14} className="callout-icon" />
-                <div>
-                  <strong>The broker was not read,</strong> so the rules cannot be shown. Each role
-                  and its purpose are declared in mosquitto/dynsec-roles.json.
-                </div>
-              </div>
+              <Callout tone="warning">
+                <strong>The broker was not read,</strong> so the rules cannot be shown. Each role
+                and its purpose are declared in mosquitto/dynsec-roles.json.
+              </Callout>
             </div>
           )}
           <div className="table-wrap">
@@ -1196,7 +1182,9 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
 
       {deletingSubscriber && (
         <ConfirmModal
-          title={`Delete the Read-Only Account “${deletingSubscriber.textname || deletingSubscriber.username}”`}
+          title="Delete Account"
+          subject={deletingSubscriber.textname || deletingSubscriber.username}
+          icon={<IconTrash size={18} />}
           message={(
             <>
               The broker deletes <span className="mono">{deletingSubscriber.username}</span> at once.

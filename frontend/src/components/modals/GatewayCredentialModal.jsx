@@ -2,10 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api'
 import { playbackWorkerDeployed } from '../../config'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { CopyBlock, CopyField } from '../common/CopyField'
 import { Modal } from '../common/Modal'
 import { typedNameMatches } from '../../utils/gatewayType'
-import { IconCheck, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
+import { IconCheck, IconLock, IconRefreshCw } from '../common/Icons'
 import { EdgeNodeSettings } from './EdgeNodeSettings'
 import { gatewayUrl } from '../../routes'
 
@@ -112,10 +113,13 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
 
   return (
     <Modal
-      title={<>Broker Credential for “{gateway.gateway_name}”</>}
+      title="Generate Broker Credential"
+      subject={gateway.gateway_name}
+      icon={<IconLock size={18} />}
       size="lg"
       busy={busy}
       onClose={onClose}
+      lead="Issues a broker credential for this gateway."
       error={step !== 'reveal'
         ? error
         : auditMissing
@@ -126,40 +130,36 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
     >
       {step === 'confirm' && (
         <>
-          <div className="callout callout-warning">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>
-              <strong>Issue a broker credential for this gateway?</strong>
-              {isPlayback ? (
-                <div>
-                  The broker holds <strong>one password per gateway</strong>, so this{' '}
-                  <strong>replaces the one the playback worker uses</strong>. A playback running now
-                  is <strong>cut off at once</strong> and fails, counting what it published. The
-                  new password reaches the worker within about a minute; start the next playback
-                  after that.
-                </div>
-              ) : (
-                <div>
-                  The broker holds <strong>one password per gateway</strong>, so this{' '}
-                  <strong>replaces any credential this gateway already has</strong> — including one
-                  {isThirdParty ? ' its edge node' : ' a running Node-RED'} is using. That connection
-                  is <strong>dropped immediately</strong>: the gateway goes stale on the dashboard
-                  within 90 seconds and cannot reconnect until the new password reaches it.
-                </div>
-              )}
-              {gateway.is_shadow ? (
-                <div>
-                  The password is shown <strong>once</strong> and cannot be recovered: the broker
-                  stores only a hash.
-                </div>
-              ) : (
-                <div>
-                  An Administrator can show the password again later from the gateway’s drawer,
-                  and each showing is recorded in the Audit Trail.
-                </div>
-              )}
-            </div>
-          </div>
+          <Callout tone="warning">
+            {isPlayback ? (
+              <div>
+                The broker holds <strong>one password per gateway</strong>, so this{' '}
+                <strong>replaces the one the playback worker uses</strong>. A playback running now
+                is <strong>cut off at once</strong> and fails, counting what it published. The
+                new password reaches the worker within about a minute; start the next playback
+                after that.
+              </div>
+            ) : (
+              <div>
+                The broker holds <strong>one password per gateway</strong>, so this{' '}
+                <strong>replaces any credential this gateway already has</strong> — including one
+                {isThirdParty ? ' its edge node' : ' a running Node-RED'} is using. That connection
+                is <strong>dropped immediately</strong>: the gateway goes stale on the dashboard
+                within 90 seconds and cannot reconnect until the new password reaches it.
+              </div>
+            )}
+            {gateway.is_shadow ? (
+              <div>
+                The password is shown <strong>once</strong> and cannot be recovered: the broker
+                stores only a hash.
+              </div>
+            ) : (
+              <div>
+                An Administrator can show the password again later from the gateway’s drawer,
+                and each showing is recorded in the Audit Trail.
+              </div>
+            )}
+          </Callout>
 
           <div className="form-group">
             <label className="form-label" htmlFor="gw-cred-confirm">
@@ -187,28 +187,16 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
       {step === 'reveal' && credential && (
         <>
           {credential.credential_kept ? (
-            <div className="callout callout-info">
-              <IconShieldAlert size={14} className="callout-icon" />
-              <div>
-                <strong>{isThirdParty ? 'Copy these into the edge node now.' : 'Copy this into Node-RED now.'}</strong>
-                <div>
-                  An Administrator can show it again from the gateway’s drawer (
-                  <strong>Show Broker Credential</strong>), and each showing is recorded in the
-                  Audit Trail.
-                </div>
-              </div>
-            </div>
+            <Callout tone="info" title={isThirdParty ? 'Copy these into the edge node now.' : 'Copy this into Node-RED now.'}>
+              An Administrator can show it again from the gateway’s drawer (
+              <strong>Show Broker Credential</strong>), and each showing is recorded in the
+              Audit Trail.
+            </Callout>
           ) : (
-            <div className="callout callout-warning">
-              <IconShieldAlert size={14} className="callout-icon" />
-              <div>
-                <strong>Copy this now — it is not shown again.</strong>
-                <div>
-                  Closing this dialog discards the password. Nothing in the stack can produce it
-                  again; issuing a replacement is the only way back, and that invalidates this one.
-                </div>
-              </div>
-            </div>
+            <Callout tone="warning" title="Copy this now — it is not shown again.">
+              Closing this dialog discards the password. Nothing in the stack can produce it
+              again; issuing a replacement is the only way back, and that invalidates this one.
+            </Callout>
           )}
 
           {isThirdParty ? (

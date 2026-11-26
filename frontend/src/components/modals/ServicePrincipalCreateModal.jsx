@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
+import { IconPlus } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { GRANTABLE_PERMISSIONS, permissionReach } from '../../utils/serviceIdentities'
@@ -72,6 +73,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
   return (
     <Modal
       title="New Machine Identity"
+      icon={<IconPlus size={18} />}
       size="md"
       busy={busy}
       onClose={onClose}

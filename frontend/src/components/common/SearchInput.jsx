@@ -1,5 +1,6 @@
 import React, { useContext, useLayoutEffect, useRef, useState } from 'react'
 import { IconSearch, IconX } from './Icons'
+import { OverflowText } from './OverflowText'
 import { SingleKeyShortcutsContext, dialogIsOpen, isShown } from '../../shortcuts'
 
 /**
@@ -8,6 +9,10 @@ import { SingleKeyShortcutsContext, dialogIsOpen, isShown } from '../../shortcut
  * event. `ariaLabel` is required because the icon is not a label; keep the page's own placeholder
  * text. `width` is `sm` (150px), `md` (190px) or `lg` (the default), the same classes the filter
  * selects use; `lg` is 280px on a search box, against 220px on a select.
+ *
+ * The placeholder is drawn over the field by OverflowText while the box is empty, so one too long
+ * for the box is cut with an ellipsis and slides on hover, or on focus. The field keeps its native
+ * `placeholder`, transparent (App.css), which is still what a screen reader is given.
  *
  * In a page's toolbar it is what `/` focuses (focusPageSearch), and it shows a `/` hint at its
  * right-hand end while it is empty and unfocused. The hint is drawn by App.css only there. There it
@@ -26,9 +31,11 @@ export function SearchInput({ value, onChange, placeholder, ariaLabel, width = '
   const fieldRef = useRef(null)
   const [inToolbar, setInToolbar] = useState(false)
   useLayoutEffect(() => { setInToolbar(!!fieldRef.current?.matches(PAGE_SEARCH_SELECTOR)) }, [])
+  // The box: the pointer anywhere on it, or the field's focus, slides a cut placeholder.
+  const boxRef = useRef(null)
 
   return (
-    <div className={`search-input control-${width}`}>
+    <div ref={boxRef} className={`search-input control-${width}`}>
       <IconSearch size={14} className="search-input-icon" />
       <input
         ref={fieldRef}
@@ -48,6 +55,11 @@ export function SearchInput({ value, onChange, placeholder, ariaLabel, width = '
           }
         }}
       />
+      {!value && placeholder && (
+        <span className="search-input-placeholder" aria-hidden="true">
+          <OverflowText host={boxRef}>{placeholder}</OverflowText>
+        </span>
+      )}
       {/* After the field: App.css hides it with `:focus ~`. The clear button takes the slot. */}
       {!value && singleKey && <kbd className="search-input-kbd" aria-hidden="true">/</kbd>}
       {value && (

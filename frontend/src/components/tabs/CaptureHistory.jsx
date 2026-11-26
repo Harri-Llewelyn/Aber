@@ -2,13 +2,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
 import { useDisplayNames } from '../../hooks/useDisplayNames'
 import { Badge } from '../common/Badge'
+import { Callout } from '../common/Callout'
 import { ColumnHeader } from '../common/SortHeader'
 import { EmptyState } from '../common/EmptyState'
 import { ListFoot } from '../common/ListFoot'
 import { LoadingState } from '../common/LoadingState'
 import { PersonName } from '../common/PersonName'
 import { Tooltip } from '../common/Tooltip'
-import { IconInfo, IconPlay, IconRecord, IconShieldAlert } from '../common/Icons'
+import { IconPlay, IconRecord } from '../common/Icons'
 import { formatBytes, formatDateTime, formatDuration, plural } from '../../utils/format'
 
 /** Rows the Captures and Playbacks tabs first show, and how many Show more adds. */
@@ -153,10 +154,7 @@ function JobList({ kind, refreshKey, subjectName, search }) {
     <>
       {error && (
         <div className="card-body">
-          <div className="callout callout-danger" role="status">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>Could not read the {what}: {error}</div>
-          </div>
+          <Callout tone="danger" role="status">Could not read the {what}: {error}</Callout>
         </div>
       )}
       {!loaded ? (
@@ -234,21 +232,20 @@ function OneJob({ kind, jobId, refreshKey, subjectName, onShowAll }) {
   const noun = nounOf(kind)
   return (
     <>
-      <div className="callout callout-info capture-job-line" role="status">
-        <IconInfo size={14} className="callout-icon" />
-        <div>
-          <strong>Showing one {noun}.</strong> The rest of the finished {noun}s are not listed.
-        </div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onShowAll}>
-          Show all {noun}s
-        </button>
-      </div>
+      <Callout
+        tone="info"
+        role="status"
+        action={(
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onShowAll}>
+            Show all {noun}s
+          </button>
+        )}
+      >
+        <strong>Showing one {noun}.</strong> The rest of the finished {noun}s are not listed.
+      </Callout>
       {error && (
         <div className="card-body">
-          <div className="callout callout-danger" role="status">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>Could not read the {noun}: {error}</div>
-          </div>
+          <Callout tone="danger" role="status">Could not read the {noun}: {error}</Callout>
         </div>
       )}
       {!loaded ? (

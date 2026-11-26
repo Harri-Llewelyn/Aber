@@ -208,7 +208,7 @@ describe('Forking — the change description prompt', () => {
 
     fireEvent.click(panelFor('Robot_Arm_Schema').getByText(/Create Version v2/))
 
-    expect(screen.getByRole('dialog', { name: 'Create Version v2' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: /^Create Version v2 — / })).toBeTruthy()
     expect(screen.getByLabelText(/Change Description/)).toBeTruthy()
     // The number is computed by fork_schema() from the parent; a field would imply otherwise.
     expect(screen.queryByLabelText(/^Version/)).toBeNull()
@@ -225,7 +225,7 @@ describe('Forking — the change description prompt', () => {
     })
 
     schemaRows = [V1, DRAFT_V2]
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Create Version v2' })).getByRole('button', { name: 'Create Version v2' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: /^Create Version v2 — / })).getByRole('button', { name: 'Create Version v2' }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/v1/schemas/v1-uuid/versions',
@@ -242,7 +242,7 @@ describe('Forking — the change description prompt', () => {
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
     fireEvent.click(panelFor('Robot_Arm_Schema').getByText(/Create Version v2/))
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Create Version v2' })).getByRole('button', { name: 'Create Version v2' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: /^Create Version v2 — / })).getByRole('button', { name: 'Create Version v2' }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/v1/schemas/v1-uuid/versions', { change_description: '' }

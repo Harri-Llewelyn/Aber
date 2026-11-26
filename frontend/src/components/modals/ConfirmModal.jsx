@@ -13,9 +13,11 @@ import { TypedGate, useTypedGate } from '../common/TypedGate'
  * as it was worded, and the dialog stays open for Cancel or another try. So `onConfirm` closes the
  * dialog only once the act has succeeded, and lets a failure throw rather than toasting it.
  *
- * @param {React.ReactNode} [title] Names the act ("Delete backup"), not "Confirm".
+ * @param {string} [title] Names the act in Title Case ("Delete Backup"), not "Confirm".
  *
- * @param {React.ReactNode} [icon] A sized icon element shown before the title.
+ * @param {React.ReactNode} [subject] The record the act is on, which `Modal` shows after the title.
+ *
+ * @param {React.ReactNode} icon A sized icon element shown before the title: the act's, as `Modal`'s.
  *
  * @param {'sm'|'default'|'md'} [size] A step of Modal's width scale, for what `children` hold: sm
  * 400px for a question with no field (the default here), default 480px for stacked form fields, md
@@ -53,6 +55,7 @@ import { TypedGate, useTypedGate } from '../common/TypedGate'
  */
 export function ConfirmModal({
   title = 'Confirm action',
+  subject = null,
   icon = null,
   size = 'sm',
   message,
@@ -81,6 +84,7 @@ export function ConfirmModal({
   return (
     <Modal
       title={title}
+      subject={subject}
       icon={icon}
       size={size}
       lead={message}

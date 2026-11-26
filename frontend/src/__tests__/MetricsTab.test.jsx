@@ -268,7 +268,7 @@ describe('Metric Catalog — collapsible groups', () => {
 
     // The header names the group and says how many it holds; its tooltip says what its names begin with.
     const header = screen.getByRole('button', { name: 'Controller, 2 metrics', expanded: false })
-    expect(within(header).getByText('Controller')).toHaveClass('table-group-label')
+    expect(within(header).getByText('Controller').closest('.overflow-text')).toHaveClass('table-group-label')
     expect(header.querySelector('.group-heading-count [aria-hidden]')).toHaveTextContent('· 2')
     expect(tooltipOf(header)).toBe('Metrics named "Controller/…"')
   })
