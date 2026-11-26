@@ -4,7 +4,7 @@ import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { ApplyResults } from '../common/ApplyResults'
 import { DropZone } from '../common/DropZone'
-import { IconZap } from '../common/Icons'
+import { IconUpload, IconZap } from '../common/Icons'
 import { RequiredMark } from '../common/RequiredMark'
 import { describeApply, useApplyPreview } from '../../hooks/useApplyPreview'
 import { useFormCheck } from '../../hooks/useFormCheck'
@@ -72,8 +72,9 @@ export function ApplyAutomationsModal({ text = null, verb = 'Apply', showToast, 
 
   return (
     <Modal
-      title={uploads && !source ? 'Upload Automations' : `${verb} ${source ? source : 'Automations'}`}
-      icon={<IconZap size={18} />}
+      title={uploads && !source ? 'Upload Automations' : `${verb} Automations`}
+      subject={source}
+      icon={uploads && !source ? <IconUpload size={18} /> : <IconZap size={18} />}
       size="lg"
       lead={verb === 'Save'
         ? 'Saves what the editor holds, all of it or none. An automation saved under a new id is a new one: the old one stays as it is.'

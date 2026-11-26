@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Callout } from '../common/Callout'
 import CopyableId from '../common/CopyableId'
 import { ActionButton } from '../common/ActionButton'
 import { FieldError } from '../common/FieldError'
@@ -76,11 +77,17 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
 
   return (
     <Modal
-      title={<>Approve Discovered {isGateway ? 'Gateway' : 'Device'} <span className="mono">[{item.asset_name}]</span></>}
+      title="Approve & Onboard"
+      subject={item.asset_name}
       icon={<IconShieldAlert size={18} />}
       size="md"
       busy={busy}
       onClose={onCancel}
+      lead={isGateway
+        ? 'Admits a gateway nobody has registered, under the name and in the place chosen here.'
+        : isHeldAgain(item)
+          ? 'Admits again a registered device that Quarantine held, under the name and in the place chosen here.'
+          : 'Admits a device nobody has registered, under the name and in the place chosen here.'}
       problem={check.problem}
       error={error}
       dismiss="Cancel"
@@ -99,26 +106,22 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
       </div>
 
       {!isGateway && suggestion && (
-        <div className="callout callout-warning">
-          <IconAlertTriangle size={16} className="callout-icon" />
-          <div>
-            <strong>This looks like it might be <span className="mono">{suggestion.candidateName}</span></strong>
-            <div className="form-hint">
-              A provisioned device awaiting its first birth ({suggestion.evidence}). If this is the
-              same machine publishing under another ID, accepting the match keeps that device's
-              existing configuration and deletes this quarantined duplicate, rather than approving it
-              as a brand new device. It asks first.
-            </div>
-            <ActionButton
-              className="btn btn-primary btn-sm"
-              disabled={busy}
-              onClick={() => setAcceptingId(suggestion.candidateId)}
-              title="Merge this quarantined device into the suggested provisioned device"
-            >
-              Accept Match
-            </ActionButton>
+        <Callout tone="warning" title={<>This looks like it might be <span className="mono">{suggestion.candidateName}</span></>}>
+          <div className="form-hint">
+            A provisioned device awaiting its first birth ({suggestion.evidence}). If this is the
+            same machine publishing under another ID, accepting the match keeps that device's
+            existing configuration and deletes this quarantined duplicate, rather than approving it
+            as a brand new device. It asks first.
           </div>
-        </div>
+          <ActionButton
+            className="btn btn-primary btn-sm"
+            disabled={busy}
+            onClick={() => setAcceptingId(suggestion.candidateId)}
+            title="Merge this quarantined device into the suggested provisioned device"
+          >
+            Accept Match
+          </ActionButton>
+        </Callout>
       )}
 
       {/* Inside this dialog, so it opens over it and Escape closes it first. What it says carries over
@@ -126,6 +129,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
       {accepting && (
         <ConfirmModal
           title="Accept Match"
+          subject={item.asset_name}
           icon={<IconShieldAlert size={18} />}
           message={
             `Merge the quarantined device '${item.asset_name}'` +

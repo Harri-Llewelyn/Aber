@@ -14,6 +14,7 @@ import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ConfirmModal } from './ConfirmModal'
+import { OverflowText } from '../common/OverflowText'
 import { Tooltip } from '../common/Tooltip'
 import {
   IconBookOpen,
@@ -174,7 +175,8 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
 
   return (
     <Modal
-      title={<>Attached Links — <strong>{entityName}</strong></>}
+      title="Attached Links"
+      subject={entityName}
       icon={<IconBookOpen size={18} />}
       size="lg"
       busy={savingLink}
@@ -262,8 +264,8 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
                        </Badge>
                        {getDomainBadgeIcon(d.url)}
                      </div>
-                     <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                       {d.url}
+                     <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                       <OverflowText>{d.url}</OverflowText>
                      </div>
                    </div>
 
@@ -298,6 +300,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
         {confirmDelete && (
           <ConfirmModal
             title="Remove Link"
+            subject={confirmDelete.display_name}
             icon={<IconTrash size={18} />}
             message={`Are you sure you want to remove the link '${confirmDelete.display_name}'?`}
             confirmLabel="Remove Link"

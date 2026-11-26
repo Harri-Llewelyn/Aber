@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
 import { AppApprovalsTable } from '../common/AppApprovalsTable'
 import { Badge } from '../common/Badge'
+import { Callout } from '../common/Callout'
 import { EmptyState } from '../common/EmptyState'
 import { IconShieldAlert } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
@@ -75,10 +76,7 @@ export function AllowedAppsSection({ isPerson = true, showToast }) {
         <EmptyState message="A machine identity allows no apps. It holds a token of its own." />
       ) : error ? (
         <div className="card-body">
-          <div className="callout callout-danger" role="status">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>{error}</div>
-          </div>
+          <Callout tone="danger" role="status">{error}</Callout>
         </div>
       ) : approvals === undefined ? (
         <LoadingState label="apps" />
@@ -94,7 +92,8 @@ export function AllowedAppsSection({ isPerson = true, showToast }) {
 
       {confirming && (
         <ConfirmModal
-          title={`Revoke ${appLabel(confirming.client_name)}`}
+          title="Revoke Approval"
+          subject={appLabel(confirming.client_name)}
           icon={<IconShieldAlert size={18} />}
           message={revokeQuestion(confirming.client_name)}
           confirmLabel="Revoke Approval"

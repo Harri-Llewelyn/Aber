@@ -110,7 +110,7 @@ describe('attached links', () => {
     await show()
     api.delete.mockRejectedValue(new Error('The link could not be removed.'))
     fireEvent.click(screen.getByRole('button', { name: /Remove/i }))
-    const confirm = screen.getByRole('dialog', { name: 'Remove Link' })
+    const confirm = screen.getByRole('dialog', { name: /^Remove Link — / })
     await act(async () => { fireEvent.click(within(confirm).getByRole('button', { name: 'Remove Link' })) })
 
     expect(within(confirm).getByRole('alert')).toHaveTextContent('The link could not be removed.')

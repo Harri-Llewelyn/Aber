@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
 import { useSetting } from '../../hooks/useSettings'
+import { Callout } from '../common/Callout'
 import { ToolbarPopover } from '../common/FiltersPopover'
 import { SearchInput } from '../common/SearchInput'
 import { SegmentedControl } from '../common/SegmentedControl'
@@ -459,7 +460,7 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
         ) : reading?.problem ? (
           <EmptyState icon={<IconChartLine size={36} />} message={reading.problem} />
         ) : reading?.error ? (
-          <div className="callout callout-danger">{`The readings could not be read: ${reading.error}`}</div>
+          <Callout tone="danger">{`The readings could not be read: ${reading.error}`}</Callout>
         ) : !reading?.byCell && !reading?.needsNumber ? (
           <LoadingState label="readings" />
         ) : (
@@ -558,7 +559,7 @@ function HeatBody({ heat, rows, cells, win }) {
   if (heat.needsNumber) return <NeedsNumber metric={metric} cells={cells} win={win} />
   if (heat.derived) return <p className="cell-note">{`${metric} is a derived metric, computed over a stretch of time, so it has no mean at each hour of the day. It is charted above.`}</p>
   if (heat.problem) return <p className="cell-note">{heat.problem}</p>
-  if (heat.error) return <div className="callout callout-danger">{`The hours of the day could not be read: ${heat.error}`}</div>
+  if (heat.error) return <Callout tone="danger">{`The hours of the day could not be read: ${heat.error}`}</Callout>
   if (heat.grid.low === null) {
     return <p className="cell-note">{`No machine in these cells has a value for ${metric} in this window.`}</p>
   }

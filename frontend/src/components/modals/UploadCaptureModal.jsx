@@ -3,12 +3,13 @@ import { captureManifest, captureFileProblem } from '../../api'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { DropZone } from '../common/DropZone'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { TypedGate, useTypedGate } from '../common/TypedGate'
-import { IconPlay, IconShieldAlert, IconUpload } from '../common/Icons'
+import { IconPlay, IconUpload } from '../common/Icons'
 import { CAPTURE_FILE, CAPTURE_FILE_LIMIT } from '../../utils/captureFile'
 import { plural } from '../../utils/format'
 import { deviceIdKey } from '../../utils/sparkplugId'
@@ -159,27 +160,21 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
       </div>
 
       {unknownDevices.length > 0 && (
-        <div className="callout callout-danger">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            This file records {plural(unknownDevices.length, 'device')} this site does not have:{' '}
-            <span className="mono">{unknownDevices.join(', ')}</span>. It cannot be played back
-            here. A playback stands each recorded device in with a replay lane of the same device on
-            this site, so a capture from another site has nothing to stand in for. Nothing has been
-            stored.
-          </div>
-        </div>
+        <Callout tone="danger">
+          This file records {plural(unknownDevices.length, 'device')} this site does not have:{' '}
+          <span className="mono">{unknownDevices.join(', ')}</span>. It cannot be played back
+          here. A playback stands each recorded device in with a replay lane of the same device on
+          this site, so a capture from another site has nothing to stand in for. Nothing has been
+          stored.
+        </Callout>
       )}
 
       {/* A birthless file stores; playback refuses it (plan_playback()). */}
       {parsed && manifest && !manifest.birth_captured && (
-        <div className="callout callout-warning">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            This capture contains no <code>NBIRTH</code>, so a playback refuses it: a replay opens
-            with the edge node&apos;s birth certificate. It can still be stored.
-          </div>
-        </div>
+        <Callout tone="warning">
+          This capture contains no <code>NBIRTH</code>, so a playback refuses it: a replay opens
+          with the edge node&apos;s birth certificate. It can still be stored.
+        </Callout>
       )}
 
       {parsed && unknownDevices.length === 0 && (
@@ -221,14 +216,11 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
       {/* The same decision StartCaptureModal guards: an upload destroys a stored capture exactly as
           a re-record does. */}
       {subject?.capture && (
-        <div className="callout callout-warning">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            This replaces the capture of <strong>{subject.name}</strong>
-            {subject.capture.note ? <> — <strong>{subject.capture.note}</strong></> : null}.
-            That recording is destroyed and cannot be recovered.
-          </div>
-        </div>
+        <Callout tone="warning">
+          This replaces the capture of <strong>{subject.name}</strong>
+          {subject.capture.note ? <> — <strong>{subject.capture.note}</strong></> : null}.
+          That recording is destroyed and cannot be recovered.
+        </Callout>
       )}
 
       <TypedGate gate={gate} disabled={pending} />

@@ -223,7 +223,7 @@ describe('GatewayBundleModal — footer actions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Re-issue Bundle/i }))
 
-    expect(screen.getByText(/Issue a new bundle for this gateway/i)).toBeTruthy()
+    expect(screen.getByText(/Issues a new bundle for this gateway/i)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Issue & Download/i }).disabled).toBe(true)
     expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(1)
   })
@@ -506,7 +506,7 @@ describe('GatewayBundleModal — the install command', () => {
     renderModal({ installer: { available: true, reason: null } })
     await waitFor(() => expect(screen.getByText(COMMAND)).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: /download the bundle instead/i }))
-    expect(screen.getByText(/issue a new bundle for this gateway\?/i)).toBeInTheDocument()
+    expect(screen.getByText(/issues a new bundle for this gateway\./i)).toBeInTheDocument()
     expect(api.downloadGatewayBundle).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText(/type .* to confirm/i), { target: { value: GATEWAY.gateway_name } })
     fireEvent.click(screen.getByText(/issue & download/i))

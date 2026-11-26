@@ -74,7 +74,7 @@ describe('The Site Map lanes', () => {
       fireEvent.click(lane)
       const panel = await waitFor(() => {
         const open = document.querySelector('.context-panel-open')
-        expect(within(open).getByText(title, { selector: '.context-panel-title' })).toBeTruthy()
+        expect(within(open).getByText(title, { selector: '.context-panel-title *' })).toBeTruthy()
         return open
       })
       const icon = panel.querySelector('.context-panel-icon svg')

@@ -125,7 +125,7 @@ describe('ServiceTokenInventoryModal', () => {
     expect(within(rowFor('doomed')).queryByRole('button', { name: /Revoke/i })).toBeNull()
     // The confirmation closes; the list it was opened over stays.
     expect(screen.queryByRole('dialog', { name: 'Revoke Token' })).toBeNull()
-    expect(screen.getByRole('dialog', { name: /Tokens for/ })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: /^Tokens — / })).toBeInTheDocument()
   })
 
   /** Per-row, not a dialog banner: several tokens can be revoked in one visit. */
@@ -173,7 +173,7 @@ describe('ServiceTokenInventoryModal', () => {
       fireEvent.click(within(screen.getByRole('dialog', { name: 'Revoke Token' })).getByRole('button', { name: 'Cancel' }))
 
       expect(screen.queryByRole('dialog', { name: 'Revoke Token' })).toBeNull()
-      expect(screen.getByRole('dialog', { name: /Tokens for/ })).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: /^Tokens — / })).toBeInTheDocument()
       expect(api.revokeServiceToken).not.toHaveBeenCalled()
       expect(within(rowFor('kept')).getByText('ACTIVE')).toBeTruthy()
     })

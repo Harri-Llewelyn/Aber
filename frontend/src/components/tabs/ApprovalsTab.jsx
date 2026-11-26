@@ -303,6 +303,7 @@ function RejectDialog({ onCancel, onConfirm, busy }) {
       icon={<IconX size={18} />}
       busy={busy}
       onClose={onCancel}
+      lead="Rejects the proposed change, with the reason its proposer reads."
       problem={check.problem}
       error={error}
       dismiss="Cancel"

@@ -118,7 +118,7 @@ describe('Revoke', () => {
     await loaded()
     fireEvent.click(within(rowOf('Grafana')).getByRole('button', { name: 'Revoke: Grafana' }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('Revoke Grafana')).toBeInTheDocument()
+    expect(within(dialog).getByRole('heading')).toHaveTextContent('Revoke Approval — Grafana')
     expect(within(dialog).getByText(revokeQuestion('Aber Grafana'))).toBeInTheDocument()
     expect(revokeQuestion('Aber Grafana')).toMatch(/^Grafana can no longer sign in as you\. Your sessions in Grafana end now/)
     expect(within(dialog).getByRole('button', { name: 'Revoke Approval' })).toBeInTheDocument()

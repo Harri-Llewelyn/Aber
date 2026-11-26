@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { HISTORY_CHANGE_SERIES, api } from '../../api'
 import { useSetting } from '../../hooks/useSettings'
+import { Callout } from '../common/Callout'
 import { ToolbarPopover } from '../common/FiltersPopover'
 import { ReplayLanesCheck } from '../common/ReplayLanesCheck'
 import { SearchInput } from '../common/SearchInput'
@@ -438,7 +439,7 @@ export function HistoryDevice({
       {reading?.problem ? (
         <EmptyState icon={<IconChartLine size={36} />} message={reading.problem} />
       ) : reading?.error ? (
-        <div className="callout callout-danger">{`The readings could not be read: ${reading.error}`}</div>
+        <Callout tone="danger">{`The readings could not be read: ${reading.error}`}</Callout>
       ) : !reading?.byMetric ? (
         <LoadingState label="readings" />
       ) : metrics.length === 0 ? (

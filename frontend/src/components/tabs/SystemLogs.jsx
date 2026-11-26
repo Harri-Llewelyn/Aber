@@ -3,13 +3,14 @@ import { api } from '../../api'
 import { usePolling } from '../../hooks/usePolling'
 import { useUrlState } from '../../hooks/useUrlState'
 import { useTimeWindow } from '../../hooks/useTimeWindow'
+import { Callout } from '../common/Callout'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { Tooltip } from '../common/Tooltip'
 import { copyText } from '../../utils/copyText'
-import { IconAlertTriangle, IconCheck, IconCopy, IconFileText } from '../common/Icons'
+import { IconCheck, IconCopy, IconFileText } from '../common/Icons'
 import { RefreshButton } from '../common/RefreshButton'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import {
@@ -235,10 +236,7 @@ export function SystemLogs({ showToast }) {
       {note && <p className="log-note" role="status">{note}</p>}
 
       {error && (
-        <div className="callout callout-danger">
-          <IconAlertTriangle size={18} className="callout-icon" />
-          <div>{`The logs could not be read: ${error}`}</div>
-        </div>
+        <Callout tone="danger">{`The logs could not be read: ${error}`}</Callout>
       )}
 
       {answer?.observability === false ? (

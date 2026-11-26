@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ALERT_HISTORY_LIMIT, api } from '../../api'
+import { Callout } from '../common/Callout'
 import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import { FilterDropdown } from '../common/FilterChecklist'
@@ -261,7 +262,7 @@ export function HistoryAlerts({ devices, win, setWin, every, setEvery, userRole,
       {reading?.problem ? (
         <EmptyState icon={<IconAlertTriangle size={36} />} message={reading.problem} />
       ) : reading?.error ? (
-        <div className="callout callout-danger">{`The alerts could not be read: ${reading.error}`}</div>
+        <Callout tone="danger">{`The alerts could not be read: ${reading.error}`}</Callout>
       ) : !reading?.rows ? (
         <LoadingState label="alerts" />
       ) : rows.length === 0 ? (

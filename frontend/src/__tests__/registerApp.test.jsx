@@ -178,7 +178,7 @@ describe('the Register App dialog', () => {
     type(/^Addresses/, ' https://reports.example.org/cb \n\nhttp://10.1.2.3:3000/cb')
     fireEvent.click(within(dialog).getByRole('button', { name: /Register App/ }))
 
-    const done = await screen.findByRole('dialog', { name: 'Shift Reports Is Registered' })
+    const done = await screen.findByRole('dialog', { name: 'App Registered — Shift Reports' })
     expect(api.registerApp).toHaveBeenCalledWith('Shift Reports', ['https://reports.example.org/cb', 'http://10.1.2.3:3000/cb'], 'confidential')
     expect(within(done).getByText(/Copy the client secret now/)).toBeInTheDocument()
     expect(within(done).getByLabelText('Client Secret')).toHaveTextContent(SECRET)
@@ -206,7 +206,7 @@ describe('the Register App dialog', () => {
     type(/^Addresses/, 'http://localhost:5173/cb')
     fireEvent.click(within(dialog).getByRole('button', { name: /Register App/ }))
 
-    const done = await screen.findByRole('dialog', { name: 'Plant Viewer Is Registered' })
+    const done = await screen.findByRole('dialog', { name: 'App Registered — Plant Viewer' })
     expect(api.registerApp).toHaveBeenCalledWith('Plant Viewer', ['http://localhost:5173/cb'], 'public')
     expect(within(done).getByText(/It is a public app, so it has no secret/)).toBeInTheDocument()
     expect(within(done).queryByLabelText('Client secret')).not.toBeInTheDocument()

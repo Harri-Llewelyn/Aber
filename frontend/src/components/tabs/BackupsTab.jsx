@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
+import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { usePolling } from '../../hooks/usePolling'
 import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { Callout } from '../common/Callout'
 import { FilterDropdown } from '../common/FilterChecklist'
 import { backupUrl, trailUrl } from '../../routes'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
@@ -16,12 +18,13 @@ import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { BackupDestinationModal } from '../modals/BackupDestinationModal'
 import { CardHeading } from '../common/CardHeading'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { IconAlertTriangle, IconDatabase, IconHardDrive, IconHistory, IconShieldAlert, IconX } from '../common/Icons'
+import { IconAlertTriangle, IconDatabase, IconHardDrive, IconHistory, IconX } from '../common/Icons'
 import { SummaryCard, SummaryCards } from '../common/SummaryCard'
 import { cronIntervalSeconds } from '../../utils/cronInterval'
 import { formatBytes, formatClockTime, formatDateTime, formatDuration, formatRelative, NO_VALUE, plural } from '../../utils/format'
 import { nextHistorianBackup } from '../../utils/historianBackupSchedule'
 import { readFlag, readSetting } from '../../config'
+import { OverflowText } from '../common/OverflowText'
 import { Tooltip } from '../common/Tooltip'
 import { ColumnHeader } from '../common/SortHeader'
 import { PERMISSION_UUIDS } from '../../constants'
@@ -91,6 +94,9 @@ const STATUS_ALIASES = Object.freeze({ all: ANY_STATUS })
 /** The statuses a choice asks the database for. */
 const statusesFor = (chosen) => STATUS_OPTIONS
   .filter(o => chosen.length === 0 || chosen.includes(o.value)).map(o => o.status)
+/** One answer of the list: the filter and page size it was asked for. */
+const listKey = (chosen, limit) => `${statusesFor(chosen).join(',')}/${limit}`
+const NO_RUNS = Object.freeze([])
 /** What the list says when a choice matches no run. */
 const emptyFor = (chosen) => (chosen.length === 1
   ? STATUS_OPTIONS.find(o => o.value === chosen[0])?.empty
@@ -123,6 +129,10 @@ export function BackupsTab({ showToast, hasPermission }) {
   const [editingDestination, setEditingDestination] = useState(false)
   // A run's id, or a database's PHYSICAL key, in the address as `?run=`.
   const [selectedId, setSelectedId] = useUrlState('run')
+  // Which answer the list holds, by listKey and call, and the run `?run=` names when the list does
+  // not hold it, read on its own: { id, run, error }, run null when no finished run has the id.
+  const [listed, setListed] = useState(null)
+  const [alone, setAlone] = useState(null)
   // Each database's own backup by PHYSICAL key: undefined while its physical backup is off or not
   // yet read, null when it cannot be read.
   const [physical, setPhysical] = useState({})
@@ -150,6 +160,7 @@ export function BackupsTab({ showToast, hasPermission }) {
     // A response for an earlier filter or page size that lands after a later one is dropped.
     if (call !== lastCall.current) return
     setRuns(page.runs)
+    setListed({ key: listKey(filter, limit), call })
     setTotal(page.total)
     setActiveJob(active)
     setSummary(sum)
@@ -228,7 +239,29 @@ export function BackupsTab({ showToast, hasPermission }) {
   // No job row at all is a stack that has never run the backup service: the empty state, no warning.
   const neverRun = !summary?.firstRecordedAt
   const retentionDays = configuredRetentionDays()
-  const selected = runs.find(r => r.id === selectedId) || null
+  // A run the address names that the list does not hold is read on its own, once the list for the
+  // filter has answered without it, and again after each answer: a pinned backup's run can be older
+  // than every loaded page, and a filter can leave it out. The last read shows until the next lands.
+  const listedRun = runs.find(r => r.id === selectedId) || null
+  const readAlone = !!selectedId && !listedRun && !PHYSICAL.some(db => db.key === selectedId)
+    && listed?.key === listKey(filter, limit)
+  useEffect(() => {
+    if (!readAlone) return undefined
+    let live = true
+    const id = selectedId
+    Promise.resolve().then(() => api.backupRun(id)).then(
+      run => { if (live) setAlone({ id, run: run || null, error: null }) },
+      err => { if (live) setAlone({ id, run: null, error: err?.message || 'The read failed.' }) })
+    return () => { live = false }
+  }, [readAlone, selectedId, listed])
+  const aloneRead = !listedRun && alone?.id === selectedId ? alone : null
+  const selected = listedRun || aloneRead?.run || null
+  // Arriving on a run the status filter in the address leaves out clears the filter for it, as the
+  // Backup runs card does. Once for each arrival: a filter chosen with the drawer open stays.
+  const arrivedRuns = useMemo(() => (selected ? [selected] : NO_RUNS), [selected])
+  useArrivalSelection(selectedId, arrivedRuns, (run, id) => run.id === id, (run) => {
+    if (filter.length > 0 && !statusesFor(filter).includes(run.status)) onFilter(ANY_STATUS)
+  })
   const toggleRun = (id) => setSelectedId(current => current === id ? null : id)
 
   // The Backup runs card opens the newest run that completed or failed. A filter that hides it is
@@ -282,10 +315,7 @@ export function BackupsTab({ showToast, hasPermission }) {
           {/* Above the cards, which it says cannot be trusted while it shows. */}
           {error && (
             <div className="card-body backup-banner">
-              <div className="callout callout-danger">
-                <IconShieldAlert size={14} className="callout-icon" />
-                <div>{error}</div>
-              </div>
+              <Callout tone="danger">{error}</Callout>
             </div>
           )}
 
@@ -366,6 +396,7 @@ export function BackupsTab({ showToast, hasPermission }) {
 
       <RunPanel
         run={selected}
+        absent={aloneRead && !aloneRead.run ? aloneRead : null}
         offsiteBase={offsiteBase(offsite)}
         retentionDays={retentionDays}
         inFloor={!!selected?.backup && floorIds.has(selected.backup.id)}
@@ -762,23 +793,11 @@ function RunningCard({ job, onCancel, cancelPending, historianOn }) {
   const stale = pending && waitedMs > 2 * 60 * 1000
 
   return (
-    <div className={stale ? 'callout callout-warning' : 'callout callout-info'}>
-      <IconHardDrive size={14} className="callout-icon" />
-      <div style={{ flex: 1 }}>
-        <div>
-          <strong>{pending ? 'Queued' : 'Running'}</strong>
-          <span style={{ color: 'var(--text-muted)' }}> · {job.origin === 'requested' ? 'on request' : 'scheduled'}</span>
-          {job.note && <span style={{ color: 'var(--text-muted)' }}> · {job.note}</span>}
-        </div>
-        <div style={{ color: stale ? 'var(--warning-text)' : 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
-          {stale
-            ? 'No backup service has claimed this. Nothing will take it until the service is running; cancel it or start the service.'
-            : pending
-              ? 'Waiting for the backup service to claim it.'
-              : `Started ${formatDateTime(job.started_at)}. Being written: ${componentSentence(historianOn)}.`}
-        </div>
-      </div>
-      {pending && (
+    <Callout
+      tone={stale ? 'warning' : 'info'}
+      // A running job's strip: its icon names the job, as Capture's strips do.
+      icon={IconHardDrive}
+      action={pending && (
         <ActionButton
           className="btn btn-ghost"
           pending={cancelPending}
@@ -790,7 +809,20 @@ function RunningCard({ job, onCancel, cancelPending, historianOn }) {
           Cancel
         </ActionButton>
       )}
-    </div>
+    >
+      <div>
+        <strong>{pending ? 'Queued' : 'Running'}</strong>
+        <span style={{ color: 'var(--text-muted)' }}> · {job.origin === 'requested' ? 'on request' : 'scheduled'}</span>
+        {job.note && <span style={{ color: 'var(--text-muted)' }}> · {job.note}</span>}
+      </div>
+      <div style={{ color: stale ? 'var(--warning-text)' : 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
+        {stale
+          ? 'No backup service has claimed this. Nothing will take it until the service is running; cancel it or start the service.'
+          : pending
+            ? 'Waiting for the backup service to claim it.'
+            : `Started ${formatDateTime(job.started_at)}. Being written: ${componentSentence(historianOn)}.`}
+      </div>
+    </Callout>
   )
 }
 
@@ -842,9 +874,9 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
         <Badge tone={badge.tone} size="sm">{badge.label}</Badge>
         {/* Cut to one line; the tooltip, and the run's panel, give the whole of it. */}
         {outcome && (
-          <Tooltip text={outcome}>
-            <div className={`cell-meta truncate backup-run-outcome${run.status === 'FAILED' ? ' backup-run-failed' : ''}`}>
-              {outcome}
+          <Tooltip text={outcome} describe={false}>
+            <div className={`cell-meta backup-run-outcome${run.status === 'FAILED' ? ' backup-run-failed' : ''}`}>
+              <OverflowText>{outcome}</OverflowText>
             </div>
           </Tooltip>
         )}
@@ -854,7 +886,7 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
       {b ? (
         <>
           <td className="backup-run-short">{formatBytes(b.size_bytes)}</td>
-          <td><Tooltip text={componentSummary(b.components)}><div className="truncate backup-run-holds">{componentSummary(b.components)}</div></Tooltip></td>
+          <td><Tooltip text={componentSummary(b.components)} describe={false}><div className="backup-run-holds"><OverflowText>{componentSummary(b.components)}</OverflowText></div></Tooltip></td>
           <td className="backup-run-short"><RetentionCell backup={b} kept={keptBecause(b, { inFloor, retentionDays })} retentionDays={retentionDays} /></td>
           <td className="backup-run-short"><OffsiteCell backup={b} base={base} /></td>
         </>
@@ -889,15 +921,23 @@ function retentionText(backup, kept, retentionDays) {
 
 /**
  * One run's details: the whole of a failure at the top, the queued, started and finished times, and the files
- * a backup holds. Release is its one action, on a pinned backup.
+ * a backup holds. Release is its one action, on a pinned backup. `absent` is a run the address names
+ * that no finished run has, or that could not be read: the drawer opens to say so.
  */
-function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, onRelease, onClose, showToast, canReadTrail }) {
+function RunPanel({ run, absent, offsiteBase: base, retentionDays, inFloor, releasing, onRelease, onClose, showToast, canReadTrail }) {
   const b = run?.backup
   const badge = run ? (STATUS_BADGES[run.status] || { tone: 'neutral', label: run.status }) : null
   const outcome = run ? runOutcome(run) : null
+  const absentHere = run ? null : absent
 
   const failed = run?.status === 'FAILED'
   const warnings = [
+    absentHere?.error && { id: 'unread', tone: 'danger', text: `Could not read this run: ${absentHere.error}` },
+    absentHere && !absentHere.error && {
+      id: 'absent',
+      tone: 'warning',
+      text: 'No finished backup run has this id. One still queued or running is shown above the list, and is listed when it ends.'
+    },
     failed && { id: 'failed', tone: 'danger', text: <><strong>This run failed.</strong> {outcome}</> },
     b && offsiteFailed(b, base) && {
       id: 'offsite',
@@ -943,9 +983,9 @@ function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, o
 
   return (
     <ContextPanel
-      open={!!run}
+      open={!!run || !!absentHere}
       type="Backup run"
-      title={run ? formatDateTime(runWhen(run)) : ''}
+      title={run ? formatDateTime(runWhen(run)) : (absentHere && !absentHere.error ? 'No such run' : 'Backup run')}
       icon={<IconHardDrive size={16} />}
       subtitle={badge && <Badge tone={badge.tone} size="sm">{badge.label}</Badge>}
       warnings={warnings}

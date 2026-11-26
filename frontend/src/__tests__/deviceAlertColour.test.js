@@ -14,7 +14,7 @@ import {
   deviceStatusChipClass,
   deviceStatusDotColor
 } from '../utils/deviceStatus'
-import { alertIndex, alertForDevice, alertState } from '../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../utils/alertSubjects'
 
 const device = (over = {}) => ({
   asset_id: '22000000-0000-4000-8000-000000000001',

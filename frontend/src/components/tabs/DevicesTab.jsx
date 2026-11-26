@@ -1,8 +1,8 @@
-import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
-import { reasonLabel } from '../../utils/alertAcknowledgement'
-import { acknowledgerName } from '../../utils/alertHistory'
+import { alertIndex, alertForDevice, statusSortRank } from '../../utils/alertSubjects'
+import { AlertBadge } from '../common/AlertBadge'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
+import { OverflowText } from '../common/OverflowText'
 import { approvalsForUrl, areaUrl, automationsForEntityUrl, cellUrl, deviceHistoryUrl, deviceUrl, gatewayUrl, schemaRejectionsUrl, schemaUrl, trailUrl } from '../../routes'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
@@ -91,8 +91,6 @@ import {
   IconCube,
   IconAlertTriangle,
   IconPlay,
-  IconAlertCircle,
-  IconCheck,
   IconDownload,
   IconRadio,
   IconLayoutDashboard,
@@ -107,12 +105,6 @@ import {
 } from '../../utils/listFilters'
 import { DEVICES_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
-import { severityRank } from '../../utils/tableSort'
-
-// The status sort's bands: a firing alert, then an acknowledged one, then the lifecycle badge. Each
-// band holds the severity ranks, which run 0 to 8.
-const STATUS_RANK_ACKNOWLEDGED = 10
-const STATUS_RANK_LIFECYCLE = 20
 
 // Sentinel values for the cell filter's two derived lanes. Prefixed so they can never collide
 // with a cell UUID, and kept out of `cells` because neither lane is a row in that table.
@@ -149,7 +141,7 @@ const QUARANTINE_SORT = {
 
 export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, userRole = null, activeAlerts = [], unmappedMetricsTo }) {
   /**
-   * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
+   * Which devices have an alert firing on them, via utils/alertSubjects.js so the Site Map, Cells and
    * Gateways resolve alerts the same way. A suppressed alert colours nothing, so only the drawer's
    * banner, which says it is suppressed, is handed one.
    */
@@ -698,22 +690,16 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   ])
 
   // Each column sorts on what its cell shows. Status puts a firing alert first, the worst severity
-  // first, then an acknowledged one, then the lifecycle badge; a suppressed alert is no alert. An
-  // archived device has no lifecycle state (archived is its own axis, utils/deviceStatus.js), so it
-  // goes last either way, as does a device with no modelled group or no cell resolved.
+  // first, then an acknowledged one, then the lifecycle badge (statusSortRank(), as Gateways sorts);
+  // a suppressed alert is no alert. An archived device has no lifecycle state (archived is its own
+  // axis, utils/deviceStatus.js), so it goes last either way, as does a device with no modelled group
+  // or no cell resolved.
   const rosterSortColumns = useMemo(() => ({
     name: { type: 'text', value: a => a.asset_name },
     uuid: { type: 'text', value: a => a.asset_id },
     status: {
       type: 'rank',
-      value: a => {
-        if (a.is_archived) return null
-        const alert = alertFor(a)
-        const lifecycle = severityRank(deviceStatusBadge(a).tone)
-        if (!alert) return STATUS_RANK_LIFECYCLE + lifecycle
-        const severity = severityRank(alert.severity === 'critical' ? 'danger' : 'warning')
-        return (alertState(alert) === 'acknowledged' ? STATUS_RANK_ACKNOWLEDGED : 0) + severity
-      }
+      value: a => (a.is_archived ? null : statusSortRank(alertFor(a), deviceStatusBadge(a).tone))
     },
     group: {
       type: 'text',
@@ -1201,32 +1187,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                                   >
                                     {badge.label}
                                   </Badge>
-                                  {/* The alert sits beside the lifecycle state, not instead of it:
-                                      an overheating machine is still ONLINE. Acknowledged, it is
-                                      the hollow badge with a tick: still firing, but somebody has it. */}
-                                  {alert && alertState(alert) === 'acknowledged' && (
-                                    <Badge
-                                      tone="danger"
-                                      size="sm"
-                                      className="badge-acknowledged"
-                                      icon={<IconCheck size={11} />}
-                                      title={`${alert.alert_name} — acknowledged by ${acknowledgerName(alert)}: ${reasonLabel(alert.acknowledgement_reason)}`}
-                                    >
-                                      ACKNOWLEDGED
-                                    </Badge>
-                                  )}
-                                  {alert && alertState(alert) === 'alert' && (
-                                    <Badge
-                                      tone={alert.severity === 'critical' ? 'danger' : 'warning'}
-                                      size="sm"
-                                      icon={alert.severity === 'critical'
-                                        ? <IconAlertCircle size={11} />
-                                        : <IconAlertTriangle size={11} />}
-                                      title={`${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}`}
-                                    >
-                                      {alert.severity === 'critical' ? 'ALARM' : 'WARNING'}
-                                    </Badge>
-                                  )}
+                                  {/* The alert sits beside the lifecycle state, not instead of it,
+                                      as on the Gateways page. */}
+                                  <AlertBadge alert={alert} />
                                   {/* The findings follow the state and the alert: they are facts about
                                       the device's data, not about the connection. */}
                                   {findingBadges}
@@ -1315,6 +1278,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       {showForm && (
         <Modal
           title={editing ? 'Edit Device Configuration' : 'Register New Device'}
+          subject={editing?.asset_name}
+          icon={editing ? <IconPencil size={18} /> : <IconPlus size={18} />}
+          lead={proposeMode ? 'Files this as a proposal, for an approver to decide.' : editing ? 'Saves the changes to this device’s configuration.' : 'Adds a device, ready for its first birth.'}
           size="md"
           busy={saving}
           onClose={closeForm}
@@ -1610,7 +1576,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           onCancel={() => setRejectTarget(null)}
         />
       )}
-      {archiveTarget && <ArchiveModal entityId={archiveTarget.asset_id} displayName={archiveTarget.asset_name} onArchive={archiveDevice} onCancel={() => setArchiveTarget(null)} />}
+      {archiveTarget && <ArchiveModal type="device" entityId={archiveTarget.asset_id} displayName={archiveTarget.asset_name} onArchive={archiveDevice} onCancel={() => setArchiveTarget(null)} />}
       {restoreTarget && (
         <RestoreEntityModal
           type="device" name={restoreTarget.asset_name}
@@ -1729,13 +1695,12 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 className="chip chip-link"
                 to={gatewayUrl(selectedDevice.active_gateway_id)}
                 onNavigate={() => onSelectGateway?.(selectedDevice.active_gateway_id)}
-                title="Open this gateway on the Gateways page"
+                title={`Open ${selectedGateway?.gateway_name || selectedDevice.gateway_name || selectedDevice.active_gateway_id} on the Gateways page`}
               >
                 <IconRadio size={11} />
-                <span className="chip-name">
-                  {gateways.find(g => g.gateway_id === selectedDevice.active_gateway_id)?.gateway_name
-                    || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
-                </span>
+                <OverflowText className="chip-name">
+                  {selectedGateway?.gateway_name || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
+                </OverflowText>
               </RouteLink>
             ) : null,
             help: "The edge node carrying this device's data. Reassign it in Edit Details."
@@ -1758,10 +1723,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   className="chip chip-link"
                   to={cellUrl(cell.cell_id)}
                   onNavigate={() => onSelectCell?.(cell.cell_id)}
-                  title="Open this cell on the Cells page"
+                  title={`Open ${cell.cell_name} on the Cells page`}
                 >
                   <IconLayoutDashboard size={11} />
-                  <span className="chip-name">{cell.cell_name}</span>
+                  <OverflowText className="chip-name">{cell.cell_name}</OverflowText>
                 </RouteLink>
               ) : NON_CELL_SOURCES.has(source) ? <span>{locationSourceLabel(source)}</span> : null
               if (!place) return null
@@ -1773,10 +1738,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         className="chip chip-link"
                         to={areaUrl(area.area_id)}
                         onNavigate={() => onSelectArea?.(area.area_id)}
-                        title="Open this area on the Areas page"
+                        title={`Open ${area.area_name} on the Areas page`}
                       >
                         <AreaIcon area={area} size={11} />
-                        <span className="chip-name">{area.area_name}</span>
+                        <OverflowText className="chip-name">{area.area_name}</OverflowText>
                       </RouteLink>
                       <span aria-hidden="true">›</span>
                     </>
@@ -1818,7 +1783,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                       title={`Open ${schema.schema_name} on the Schemas page`}
                     >
                       <IconClipboardList size={11} />
-                      <span className="chip-name">{schema.schema_name}</span>
+                      <OverflowText className="chip-name">{schema.schema_name}</OverflowText>
                     </RouteLink>
                   ))}
                 </div>

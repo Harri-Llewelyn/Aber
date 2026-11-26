@@ -42,6 +42,7 @@ export function AcknowledgeAlertModal({ alert, onConfirm, onCancel }) {
   return (
     <Modal
       title="Acknowledge Alert"
+      subject={alert.alert_name}
       icon={<IconCheck size={18} />}
       busy={pending}
       onClose={onCancel}
@@ -116,6 +117,7 @@ export function WithdrawAcknowledgementModal({ alert, onConfirm, onCancel }) {
   return (
     <ConfirmModal
       title="Withdraw Acknowledgement"
+      subject={alert.alert_name}
       icon={<IconX size={18} />}
       message={<>
         <strong>{alert.alert_name}</strong> counts in the top bar again. Anyone who may acknowledge

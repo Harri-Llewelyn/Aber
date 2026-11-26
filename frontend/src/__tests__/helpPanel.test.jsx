@@ -54,7 +54,7 @@ describe('the help corpus reaches the bundle', () => {
 describe('the help drawer', () => {
   it('is titled for the page it was opened on', () => {
     render(<HelpPanel open tabId="gateways" onClose={() => {}} />)
-    expect(screen.getByText('Gateways', { selector: '.context-panel-title' })).toBeInTheDocument()
+    expect(screen.getByText('Gateways', { selector: '.context-panel-title *' })).toBeInTheDocument()
     // Something from gateways.md rather than from any other file, so the test fails if the panel
     // renders the wrong page's help -- which is the one bug a contextual panel can have.
     expect(screen.getAllByText(/AWAITING_BIRTH/).length).toBeGreaterThan(0)
@@ -63,7 +63,7 @@ describe('the help drawer', () => {
   it('follows the page rather than holding the one it opened on', () => {
     const { rerender } = render(<HelpPanel open tabId="gateways" onClose={() => {}} />)
     rerender(<HelpPanel open tabId="settings" onClose={() => {}} />)
-    expect(screen.getByText('Settings', { selector: '.context-panel-title' })).toBeInTheDocument()
+    expect(screen.getByText('Settings', { selector: '.context-panel-title *' })).toBeInTheDocument()
     expect(screen.queryByText(/AWAITING_BIRTH/)).toBeNull()
   })
 
@@ -97,10 +97,10 @@ describe('the help drawer', () => {
   it('opens again on the page’s help after it closed somewhere else', () => {
     const { rerender } = render(<HelpPanel open tabId="cells" onClose={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /Contents/ }))
-    expect(screen.getByText('Contents', { selector: '.context-panel-title' })).toBeInTheDocument()
+    expect(screen.getByText('Contents', { selector: '.context-panel-title *' })).toBeInTheDocument()
     rerender(<HelpPanel open={false} tabId="cells" onClose={() => {}} />)
     rerender(<HelpPanel open tabId="cells" onClose={() => {}} />)
-    expect(screen.getByText('Cells', { selector: '.context-panel-title' })).toBeInTheDocument()
+    expect(screen.getByText('Cells', { selector: '.context-panel-title *' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Back/ })).toBeDisabled()
   })
 })

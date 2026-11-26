@@ -264,7 +264,7 @@ describe('Uncatalogued tab: Catalogue', () => {
     expect(groupSelect().value).toBe('')
     expect(nameInput().value).toBe('vibration')
     expect(datatypeSelect().value).toBe('')
-    expect(screen.getByText(/so how it is encoded is not recorded/, { selector: '.modal span' })).toBeTruthy()
+    expect(screen.getByText(/so how it is encoded is not recorded/, { selector: '.modal .callout-body' })).toBeTruthy()
   })
 
   it('posts the declared name exactly, as a local extension, and reads the list again', async () => {

@@ -144,9 +144,10 @@ Only what acts looks clickable. `.mono` is a typeface and takes the text colour;
 means a real link (the System page's open chip, a `.count-link`). An id that copies is a
 `CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A value a
 dialog hands over is a `CopyField` ([A value to copy](#a-value-to-copy)). A long
-id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`). The copy and the aria
-label always carry the full value. The tooltip carries it whenever the chip is cut, measured as the
-tooltip opens, and otherwise says "Click to copy this {label}". A read-only or disabled `.form-control` takes the page background and muted
+id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`). A cut value slides on
+hover or focus (`OverflowText`); with `truncate="start"` the cut part slides towards the end it keeps.
+The copy and the aria label always carry the full value. The tooltip carries it whenever the chip is
+cut, measured as the pointer or focus arrives, and otherwise says "Click to copy this {label}". A read-only or disabled `.form-control` takes the page background and muted
 text, and `.btn-warning` is the amber button for a risky action that is not destructive.
 
 ### The rail opens when the pointer rests on it
@@ -360,16 +361,27 @@ slides back when they leave. A label's focus is its checkbox's. An option highli
 elsewhere, as in the top bar's search, passes `active`, which slides it as focus does.
 
 - It never moves by itself, and under `prefers-reduced-motion` it does not move at all, so the
-  control's tooltip must carry the whole text, or the text must wrap there (a list picker's rows).
-- It measures as it activates (`scrollWidth` against `clientWidth`), as `CopyableId` does, so a
-  drawer opening needs no listener. `onMeasure(cut)` hears each measurement.
-- A section heading's `detail` (`GroupHeading`) is its button's tooltip while it is cut, and only
-  then, through `onMeasure`. The tooltip does not describe the button (`describe={false}`): the
-  heading's sr-only words already give a screen reader the whole value.
+  control's tooltip must carry the whole text, or the text must wrap there (a list picker's rows,
+  and the rail's tabs, which carry no tooltips).
+- A tap slides nothing. The mouse events and the focus a tap raises are ignored, and a tooltip
+  carries the whole text there too.
+- The control is the nearest button, link, label or element a keyboard reaches. A dialog or a
+  panel that takes the focus by script (`tabindex="-1"`) is not one, so a line with no control of
+  its own reacts to the pointer on itself. `host`, a ref, names the control where the line sits
+  beside it: `SearchInput`'s placeholder over its field, and a plan's pin inside a card that takes
+  the focus.
+- It measures as it activates (`scrollWidth` against `clientWidth`), so a drawer opening needs no
+  listener. `onMeasure(cut)` hears each measurement.
+- Where a tooltip does not already say the whole text, it says it while the text is cut, through
+  `onMeasure`: a group's name and `detail` (`GroupHeading`), a list filter's chosen values, a copy
+  chip's value, an area card's name and a plan pin's label. Where the words are the control's
+  name, the tooltip does not describe it again (`describe={false}`).
+- `SearchInput` draws its placeholder through it, over the empty field. The field keeps its native
+  `placeholder`, transparent, for a screen reader.
 - The whole text is always in the DOM, so a screen reader hears all of it.
 
-The Audit Trail's lane names use it first. The dashboard's other cut lines move onto it with
-[#1219](https://github.com/Harri-Llewelyn/Aber/issues/1219).
+Every line the dashboard cuts is one. Drift check 614 refuses `text-overflow: ellipsis` outside
+OverflowText's own rule, an inline `textOverflow`, and a chip's name (`.chip-name`) on anything else.
 
 ### A unit is a symbol where it is read, and a code where it is exchanged
 
@@ -416,6 +428,37 @@ one column on a phone, by the window rather than the card, so a drawer opening b
 does not move a card from under the pointer. The tints are measured in `themeContrast.test.js`; a
 badge in a card sits on `.summary-card-badge`, the card's own ground, because a badge's ink has
 too little headroom over its own tint to survive a second one.
+
+### A dialog's header names its act
+
+`Modal` draws one header for every dialog: the act's icon, the title, the record after a dash, and
+a lead under them. `dialogFooters.test.js` and drift check 612 read every dialog's.
+
+- **The title is the act, in Title Case:** Edit Area, Archive Device, Upload Capture, never
+  "Confirm". It names the act as the button that opens it does. A viewer names what it shows: Area
+  Plan, Digital Nameplate.
+- **The record goes in `subject`.** `Modal` and `ConfirmModal` draw it after the title, in `mono`:
+  "Edit Area — Assembly", "Archive Device — CNC Mill 01". No dialog writes the dash, quotes or
+  brackets itself. A long name wraps in the title and is never cut. A form that makes a record has
+  none yet, so New Area has no subject.
+- **Every dialog has an icon, sized 18, and it follows the act.** The table below says which. An act
+  not in it keeps the icon it has. One with none takes the icon of the button that opens it, such as
+  Set Up Gateway's download arrow, or else its page's. When a long name wraps the title, the icon
+  keeps its size beside the first line, which is as tall as the close button and level with it.
+- **Every form has a lead:** one sentence saying what the dialog will do. It is the dialog's
+  accessible description, read after the title. A sentence that said it elsewhere, in a callout's
+  first line, a hint or a paragraph at the bottom, is the lead instead. A confirmation's message is
+  its lead. A viewer, and a step that shows a result, may have none.
+
+| Act | Icon |
+| :--- | :--- |
+| Edit | `IconPencil` |
+| Archive | `IconArchive` |
+| Remove, Delete, Permanently Delete | `IconTrash` |
+| Restore | `IconRefreshCw` |
+| New, Add, Register | `IconPlus` |
+| Upload | `IconUpload` |
+| Export | `IconDownload` |
 
 ### A dialog keeps its buttons in view
 
@@ -1062,7 +1105,8 @@ The event drawer moves along a lane and between lanes, like a cursor in a grid:
 
 - **← and →, or ◀ Previous and Next ▶,** step through the open lane's events. A lane is a kind and
   an id (`laneKeyOf`), so a device, its nameplate and its schemas are three lanes and "Event 3 of 7"
-  counts the one on screen. The order is `byTimeThenId`, the badge's order: oldest first, and the
+  counts the one on screen. A metric's further semantic ids are the one exception: their rows carry
+  the metric's id and are drawn in its lane (0299), each said in words (`eventWords`). The order is `byTimeThenId`, the badge's order: oldest first, and the
   rows of one transaction, which share a time, in the order they were written.
 - **↑ and ↓, or Previous Entity and Next Entity,** move to the lane drawn above or below, across
   section headings, and open its event nearest in time to the one open (`nearestInTime`; the
@@ -2998,6 +3042,13 @@ in "building management system".
   listed first, picked in the order under [The drawer is `ContextPanel`](#the-drawer-is-contextpanel).
 - **Tables.** Every header row, group band and section band is one opaque colour, `--bg-base`
   ([Table and Row Conventions](#table-and-row-conventions)).
+- **A callout is a `Callout`.** `common/Callout.jsx` draws every one: in a dialog, a card or a
+  drawer, and above a page's first card as its banner (`page`). The tone picks the colours and the
+  icon, at one size (14px): info `IconInfo`, warning `IconAlertTriangle`, danger `IconShieldAlert`,
+  success `IconCheck`. A `title` is the strong first line, and an `action` (Stop, Cancel, a dismiss)
+  stands at the end. A caller passes `icon` only with a reason, said beside it: the strip of a
+  running recording, playback or backup names its job. Drift check 611 refuses a callout written by
+  hand.
 - **Callouts in a dialog.** A callout in a dialog's body leaves the gap it has above itself (12px)
   before a table, a list or a form, so a banner never sits flush on what it qualifies. One rule in
   `App.css` does it for every dialog. A replay lane that is offline gets an info callout, not the
@@ -3006,6 +3057,12 @@ in "building management system".
 - **Colour is never the only signal.** Tabs, sidebar flags, warning buttons and the Audit Trail
   markers each carry an icon, a shape or a number as well (WCAG 2.2 SC 1.4.1).
 - **The sidebar** colours an icon only when the viewer can act on what it flags, and shows how many.
+- **Cut text.** A line too long for its place ends in an ellipsis. On hover or keyboard focus it
+  slides to show the rest, and back when they leave. It never moves on its own or for a tap, and
+  only text that is really cut moves. Every such line is a `common/OverflowText`, a search box's
+  placeholder included, and its rule is the only one in `App.css` with the ellipsis (drift check 614).
+  Under reduced motion nothing moves, so the tooltip carries the whole text while it is cut, or the
+  line wraps ([Cut text slides on hover or focus](#cut-text-slides-on-hover-or-focus)).
 - **Archived things are hidden by default**, in every list and on the Site Map. A list opens on
   Active, archived rows are one filter away, and Entities' Archived tab lists them all.
 - **Sizes** use binary units labelled KiB and MiB. There is one relative-time style and one absolute
@@ -3103,8 +3160,10 @@ that describes a component keeps the detail, and *Not* names what to use instead
 
 | Component | What it is for | Not |
 | :--- | :--- | :--- |
+| `AlertBadge` | A row's alert, beside its status: ALARM, WARNING or ACKNOWLEDGED | The drawer's: `ContextPanel`'s `alert` |
 | `AlertPill` | The top bar's alert counter, and the list behind it | |
 | `Badge` | A status or category chip; `ArchivedBadge` is ARCHIVED | A gateway's status: `StatusBadge`. A derived metric: `DerivedTag` |
+| `Callout` | What the reader must not miss, tinted, with its tone's icon; `page` is a banner | A dialog's failure: `Modal`'s `error` |
 | `ConnectionStrip` | The row that says the page has stopped updating | |
 | `DerivedTag` | Marks a derived metric wherever one is named | |
 | `NotificationHistory` | The top bar's bell, and the list behind it | |
@@ -3601,12 +3660,12 @@ passes `{ record: false }`, as an alert's toast does.
   about (`alertSubjectUrl()`). The dialogs are drawn inside the counter's wrapper, so a click in one
   is not a click outside the list. Another person's acknowledgement arrives as an `UPDATE` on
   `platform_alerts`, which the counter's subscription already carries. The pages draw the *Alert
-  acknowledged* state from `alertIndex()` (`utils/deviceAlerts.js`), where an unacknowledged alert
+  acknowledged* state from `alertIndex()` (`utils/alertSubjects.js`), where an unacknowledged alert
   outranks any acknowledged one. The acknowledger is named by display name with their email as its
   tooltip, else by email (`PersonName`, `acknowledgerName()` in `utils/alertHistory.js`), the same on
   every surface. `usePlatformAlerts` reads the names once for the whole list and gives each
-  acknowledged alert its `acknowledged_by_name`, so the counter, the banner and the Devices table
-  read the same.
+  acknowledged alert its `acknowledged_by_name`, so the counter, the banner and the Devices and
+  Gateways tables read the same.
 - **A suppressed alert is not counted and colours nothing** (0240). `platform_alerts_active` says
   whether a suppression window covers each alert as it is read, with the window's reason and end.
   `countedAlerts()` (`utils/alertSuppression.js`) leaves acknowledged and suppressed alerts out of
@@ -3803,7 +3862,8 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
   - **A column sorts by what it means, not by its text** (`utils/tableSort.js`): `text` in natural
     order ("Line 9" before "Line 10"), `number`, `time` by instant, and `rank`, a number the column
     works out. A status ranks by its badge's colour, `severityRank(tone)`, so ascending puts red and
-    amber first; a status with a fixed order of its own (Cold Storage's export sequence) uses
+    amber first. Where a row's alert sits beside its status (Devices, Gateways, `AlertBadge`), a
+    firing alert ranks first, then an acknowledged one, then the status (`statusSortRank()`); a status with a fixed order of its own (Cold Storage's export sequence) uses
     `rankIn(order, value)`. A column sorts on the value its cell shows, so a count column counts
     what the cell counts.
   - **An empty cell goes last** in either direction: Never, no gateway, a dash that stands for no

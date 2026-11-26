@@ -6,25 +6,31 @@ export const SLIDE_PX_PER_SECOND = 60
 const SLIDE_MIN_MS = 300
 /** How long the text takes to slide back once the pointer or focus has gone. */
 const RETURN_MS = 250
+/**
+ * The control a line names: the nearest of these around it. A dialog or a panel that takes the
+ * focus by script (`tabindex="-1"`) is not one, or every line in it would slide together.
+ */
+const HOST = 'button, a, label, [tabindex]:not([tabindex="-1"])'
 
 /**
  * One line of text that may not fit: cut with an ellipsis at rest. While the pointer is on it, or
  * on the control it sits in, or that control has keyboard focus, text that is really cut slides
  * until its end is in view and holds there; it slides back when they leave. It never moves by
- * itself, and under reduced motion it does not move at all, so the control's tooltip must carry
- * the whole text, or a style let it wrap there. The whole text is always in the DOM, so a screen
- * reader hears all of it.
+ * itself, a touch never moves it, and under reduced motion it does not move at all, so the
+ * control's tooltip must carry the whole text, or a style let it wrap there. The whole text is
+ * always in the DOM, so a screen reader hears all of it.
  *
- * The control is the nearest button, link, label or focusable element around it; without one, the
- * text reacts to the pointer alone. A label's focus is its checkbox's. Measured as it activates
- * (`scrollWidth` against `clientWidth`), so a drawer opening or the window narrowing needs no
- * listener. `onMeasure(cut)` hears each measurement, so the control can give its tooltip only to
- * text that is really cut. `active` slides it as focus does, for an option a person highlighted
- * while the focus is elsewhere, as in a combobox's list.
+ * The control is the nearest button, link, label or focusable element around it (HOST); without
+ * one, the text reacts to the pointer alone. A label's focus is its checkbox's. `host`, a ref, names
+ * the control instead where the line sits beside it, as a search box's placeholder sits over its
+ * field. Measured as it activates (`scrollWidth` against `clientWidth`), so a drawer opening or the
+ * window narrowing needs no listener. `onMeasure(cut)` hears each measurement, so the control can
+ * give its tooltip only to text that is really cut. `active` slides it as focus does, for an option
+ * a person highlighted while the focus is elsewhere, as in a combobox's list.
  *
  *   <button type="button" onClick={open}><OverflowText className="trail-lane-name">{name}</OverflowText></button>
  */
-export function OverflowText({ children, className = '', onMeasure, active }) {
+export function OverflowText({ children, className = '', onMeasure, active, host: hostRef }) {
   const outer = useRef(null)
   // The latest callback, read when the effect's listeners measure.
   const measured = useRef(onMeasure)
@@ -36,9 +42,11 @@ export function OverflowText({ children, className = '', onMeasure, active }) {
   useEffect(() => {
     const el = outer.current
     if (!el) return undefined
-    const host = el.parentElement?.closest('button, a, label, [tabindex]') || el
+    const host = hostRef?.current || el.parentElement?.closest(HOST) || el
     let hovered = false
     let focused = false
+    // Whether the pointer on the control is a finger: a tap's hover and focus slide nothing.
+    let touch = false
     let settle = null
 
     const still = () => window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
@@ -61,27 +69,40 @@ export function OverflowText({ children, className = '', onMeasure, active }) {
 
     refresh.current = update
     // Keyboard focus only: a click's focus would hold the text slid after the pointer has gone.
-    const keyboardFocus = (e) => {
-      try { return e.target.matches(':focus-visible') } catch { return true }
+    const keyboardFocus = (target) => {
+      try { return target.matches(':focus-visible') } catch { return true }
     }
-    const onEnter = () => { hovered = true; update() }
+    // A tap raises a pointer event first, then the mouse's enter and the focus; the click after them
+    // ends it, so a keyboard's focus later still slides.
+    const onPointer = (e) => { touch = e.pointerType === 'touch' }
+    const onClick = () => { touch = false }
+    const onEnter = () => { hovered = !touch; update() }
     const onLeave = () => { hovered = false; update() }
-    const onFocus = (e) => { focused = keyboardFocus(e); update() }
+    const onFocus = (e) => { focused = !touch && keyboardFocus(e.target); update() }
     const onBlur = () => { focused = false; update() }
 
+    host.addEventListener('pointerenter', onPointer)
+    host.addEventListener('pointerdown', onPointer)
+    host.addEventListener('click', onClick)
     host.addEventListener('mouseenter', onEnter)
     host.addEventListener('mouseleave', onLeave)
     host.addEventListener('focusin', onFocus)
     host.addEventListener('focusout', onBlur)
+    // Drawn while its control already has the focus, as a placeholder is once its field is emptied.
+    const at = document.activeElement
+    if (at && at !== document.body && host.contains(at) && keyboardFocus(at)) { focused = true; update() }
     return () => {
       refresh.current = null
       clearTimeout(settle)
+      host.removeEventListener('pointerenter', onPointer)
+      host.removeEventListener('pointerdown', onPointer)
+      host.removeEventListener('click', onClick)
       host.removeEventListener('mouseenter', onEnter)
       host.removeEventListener('mouseleave', onLeave)
       host.removeEventListener('focusin', onFocus)
       host.removeEventListener('focusout', onBlur)
     }
-  }, [])
+  }, [hostRef])
 
   useEffect(() => {
     if (!active) return undefined

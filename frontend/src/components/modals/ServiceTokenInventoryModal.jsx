@@ -2,10 +2,11 @@ import React, { useCallback, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
+import { Callout } from '../common/Callout'
 import { FieldError } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { ConfirmModal } from './ConfirmModal'
-import { IconShieldAlert } from '../common/Icons'
+import { IconLock, IconShieldAlert } from '../common/Icons'
 import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { useLocalSortableRows } from '../../hooks/useTableSort'
@@ -103,7 +104,9 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
 
   return (
     <Modal
-      title={`Tokens for “${principalName}”`}
+      title="Tokens"
+      subject={principalName}
+      icon={<IconLock size={18} />}
       size="wide"
       onClose={close}
       lead={<>
@@ -112,14 +115,11 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
       </>}
       dismiss="Close"
     >
-      <div className="callout callout-warning">
-        <IconShieldAlert size={14} className="callout-icon" />
-        <div>
-          Revoking stops a token at <strong>{REVOCATION_REACHES}</strong>. {SIGNATURE_ONLY}
-          {' '}verify the signature themselves and keep accepting it until it expires. Revocation
-          {' '}<strong>cannot be undone</strong>.
-        </div>
-      </div>
+      <Callout tone="warning">
+        Revoking stops a token at <strong>{REVOCATION_REACHES}</strong>. {SIGNATURE_ONLY}
+        {' '}verify the signature themselves and keep accepting it until it expires. Revocation
+        {' '}<strong>cannot be undone</strong>.
+      </Callout>
 
       {rows.length === 0 ? (
         <p className="cell-meta">

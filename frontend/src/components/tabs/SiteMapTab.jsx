@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
 import { RouteLink } from '../common/RouteLink'
+import { OverflowText } from '../common/OverflowText'
 import { areaUrl, cellUrl, deviceUrl, gatewayUrl, tabUrl } from '../../routes'
-import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../../utils/alertSubjects'
 import { api } from '../../api'
 import { REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
@@ -66,6 +67,28 @@ import {
 const COLUMNS_FOR = (n) => Math.min(3, Math.max(1, n))
 const PIN_SIZE = { 1: 40, 2: 36, 3: 28 }
 const PIN_ICON = { 1: 20, 2: 16, 3: 12 }
+
+/**
+ * An area card's name: the button that opens its panel, with `tip`, the area's state, as its tooltip.
+ * Cut, the name slides on hover or focus, and while it is cut the tooltip leads with it, since
+ * reduced motion stops the slide.
+ */
+function AreaCardName({ name, tip, selected, onToggle }) {
+  const [cut, setCut] = useState(false)
+  return (
+    <Tooltip text={cut ? `${name}. ${tip}` : tip}>
+      <button
+        type="button"
+        className="zone-name area-card-name"
+        /* Stopped, or the card behind it toggles the panel straight back shut. */
+        onClick={e => { e.stopPropagation(); onToggle() }}
+        aria-pressed={selected}
+      >
+        <OverflowText onMeasure={setCut}>{name}</OverflowText>
+      </button>
+    </Tooltip>
+  )
+}
 
 /**
  * The Site Map, one card: the ISA-95 ladder and the legend, the three lanes that belong to no
@@ -246,7 +269,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         title={`${a.asset_name} [${a.asset_id}] — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — Click to view on Devices page`}
       >
         <IconCpu size={11} />
-        <span className="chip-name">{a.asset_name}</span>
+        <OverflowText className="chip-name">{a.asset_name}</OverflowText>
         {status === DEVICE_STATUS.QUARANTINED && (
           <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>QUAR</span>
         )}
@@ -296,7 +319,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             : gwStatus === 'PENDING_ENROLLMENT' ? 'badge-pending'
               : gwStatus === 'AWAITING_BIRTH' ? 'badge-provisioned'
                 : 'badge-danger'}`} />
-        <span className="chip-name mono">{g.gateway_name}</span>
+        <OverflowText className="chip-name mono">{g.gateway_name}</OverflowText>
         {g.deployment === 'host' && <span className="chip-flag" style={{ color: 'var(--accent-text)' }} role="img" aria-label="Runs on this host"><IconZap size={9} /></span>}
       </RouteLink>
     )
@@ -318,7 +341,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px var(--danger)' }
             : { background: state.pin === 'alert' ? 'var(--danger)' : state.status === 'normal' ? 'var(--success)' : state.status === 'attention' ? 'var(--warning)' : 'var(--text-dim)' }} />
           <Icon size={11} />
-          <span className="chip-name">{c.cell_name}</span>
+          <OverflowText className="chip-name">{c.cell_name}</OverflowText>
           {unplaced && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>NOT PLACED</span>}
         </button>
       </Tooltip>
@@ -328,7 +351,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   /** A gateway in the cell and area panels: a chip that opens it on the Gateways page. */
   const panelGatewayChip = (g, areaWide = false) => (
     <RouteLink key={g.gateway_id} className="chip chip-link chip-gw" to={gatewayUrl(g.gateway_id)} onNavigate={() => onSelectGateway?.(g.gateway_id)} title={`Open ${g.gateway_name} on the Gateways page${areaWide ? ' — it serves the whole area' : ''}`}>
-      <IconRadio size={11} /><span className="chip-name">{g.gateway_name}</span>
+      <IconRadio size={11} /><OverflowText className="chip-name">{g.gateway_name}</OverflowText>
       {areaWide && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>AREA-WIDE</span>}
     </RouteLink>
   )
@@ -341,7 +364,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} onNavigate={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}` : deviceStatusTitle(status)}${areaWide ? ' — it serves the whole area' : ''}`}>
         <span className="badge-dot" style={deviceDotStyle(d, alert)} />
         <IconCpu size={11} />
-        <span className="chip-name">{d.asset_name}</span>
+        <OverflowText className="chip-name">{d.asset_name}</OverflowText>
         {alert && (
           <span className="chip-flag" style={{ color: 'var(--danger-text)' }}>
             {alertState(alert) === 'acknowledged' ? 'ACKNOWLEDGED' : alert.severity === 'critical' ? 'ALARM' : 'WARNING'}
@@ -467,17 +490,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             ? <IconArchive size={12} style={{ color: 'var(--warning-text)', flexShrink: 0 }} aria-hidden="true" />
             : <span className={`tile-dot tile-dot-${state.pin}`} aria-hidden="true" />}
           <AreaGlyph size={14} style={{ flexShrink: 0 }} />
-          <Tooltip text={`${archived ? 'Archived' : STATUS_WORD[state.pin]}. Click for its assets and its plan.`}>
-            <button
-              type="button"
-              className="zone-name area-card-name"
-              /* Stopped, or the card behind it toggles the panel straight back shut. */
-              onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
-              aria-pressed={selectedAreaId === ar.area_id}
-            >
-              {ar.area_name}
-            </button>
-          </Tooltip>
+          <AreaCardName
+            name={ar.area_name}
+            tip={`${archived ? 'Archived' : STATUS_WORD[state.pin]}. Click for its assets and its plan.`}
+            selected={selectedAreaId === ar.area_id}
+            onToggle={() => toggleArea(ar.area_id)}
+          />
           {archived && <ArchivedBadge size="sm" title="Archived: its cells are still filed here and its topics are unchanged" />}
           {/* The area's description, only when it has one. */}
           {ar.description && (
@@ -815,7 +833,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                           {/* No dot on an empty lane: grey next to zero says nothing. */}
                           {holds && <span className={`tile-dot tile-dot-${status}`} aria-hidden="true" />}
                           <LaneIcon size={13} style={{ flexShrink: 0 }} />
-                          <span className="site-lane-name">{lane.title}</span>
+                          <OverflowText className="site-lane-name">{lane.title}</OverflowText>
                           <span className="site-lane-counts mono">
                             {plural(laneGateways.length, 'Gateway')} · {plural(laneAssets.length, 'Device')}
                           </span>

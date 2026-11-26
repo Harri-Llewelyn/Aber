@@ -427,17 +427,14 @@ html, body, #root {
   overflow: hidden;
 }
 
-/* Truncates rather than wrapping or pushing: the bar is a fixed 52px, so a second line would be
-   clipped mid-glyph. The element carries a `title` in App.jsx, so the full name stays reachable. */
+/* Cut rather than wrapping or pushing: the bar is a fixed 52px, so a second line would be clipped
+   mid-glyph. Both lines are OverflowTexts, and the button's tooltip names the brand. */
 .brand-name {
   font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: 0.4px;
   line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .brand-sub {
@@ -446,9 +443,6 @@ html, body, #root {
   letter-spacing: 0.9px;
   text-transform: uppercase;
   line-height: 1.3;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* The mirror of .topbar-brand -- same weight, opposite alignment. `justify-content: flex-end`
@@ -521,8 +515,8 @@ html, body, #root {
 .user-menu-button-open { color: var(--text-primary); background: var(--bg-glass); }
 .user-menu-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* Truncates: the menu's head is where the address is shown in full. */
-.user-menu-email { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Cut (an OverflowText): the button's tooltip and the menu's head show the address in full. */
+.user-menu-email { min-width: 0; }
 
 /* A fixed square, not padding: a circle sized by its padding goes oval when the glyph's metrics
    change, and this one is 28px at every viewport. Round is what marks it as the identity control. */
@@ -932,7 +926,11 @@ a.sidebar-item { text-decoration: none; }
   text-decoration: none;
   white-space: nowrap;
 }
-.sidebar-tab-label { overflow: hidden; text-overflow: ellipsis; }
+/* An OverflowText. The rail's tabs carry no tooltips, so under reduced motion, which stops the slide,
+   a label too long for the rail wraps instead. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-tab .sidebar-tab-label { white-space: normal; }
+}
 .sidebar-tab:hover { color: var(--text-primary); }
 .sidebar-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .sidebar-tab.sidebar-tab-warning:not(.active) { color: var(--warning-text); }
@@ -1082,9 +1080,6 @@ a.sidebar-item { text-decoration: none; }
 .global-search-result-label {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* A record: its name, over the id it was found by where the text was one. Each is cut and slides by itself
@@ -1493,7 +1488,7 @@ a.tab-strip-tab { text-decoration: none; }
 /* A list filter in the toolbar keeps the width of the select it replaced, so the row keeps its shape:
    the words are cut at the edge, the chevron sits at the right. */
 .filter-dropdown { justify-content: space-between; min-width: 0; }
-.filter-dropdown-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-dropdown-words { min-width: 0; }
 
 /* SearchInput: a form control with a leading icon and a clear button inside its right edge. The
    native search cancel is hidden, since the clear button replaces it. */
@@ -1509,6 +1504,20 @@ a.tab-strip-tab { text-decoration: none; }
 }
 .search-input .search-input-field { padding-left: 30px; padding-right: 28px; }
 .search-input .search-input-field::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+/* The placeholder SearchInput draws over its empty field, inside the field's border and padding,
+   so a cut one slides (OverflowText). The native one stays, transparent, for a screen reader. */
+.search-input .search-input-field::placeholder { color: transparent; }
+.search-input-placeholder {
+  position: absolute;
+  left: 31px;
+  right: 29px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  line-height: normal;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.filter-checklist .search-input-placeholder { font-size: 13px; }
 .search-input-clear {
   position: absolute;
   right: 6px;
@@ -1764,7 +1773,8 @@ tbody tr {
 tbody tr:hover { background: var(--bg-glass); }
 
 /* Callout: a bordered, tinted banner for a caveat the reader must not miss, inside the card it
-   qualifies. A shape as well as a colour, so it survives a reader who cannot distinguish the hue. */
+   qualifies. A shape as well as a colour, so it survives a reader who cannot distinguish the hue.
+   common/Callout.jsx draws every one: its tone's icon, then one body, then any action. */
 .callout {
   display: flex;
   gap: 10px;
@@ -1780,6 +1790,8 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .callout-icon { flex-shrink: 0; margin-top: 1px; }
+/* The text takes the row, so an action (Stop, Cancel, a dismiss) stands at the callout's end. */
+.callout-body { flex: 1; min-width: 0; }
 
 /* The tint is deliberately SUBTLE: this is a standing property of the page, not an error that has
    just happened, and a full-strength danger banner that is always present is one a reader learns
@@ -1789,7 +1801,9 @@ tbody tr:hover { background: var(--bg-glass); }
   background: color-mix(in srgb, var(--warning) 7%, transparent);
 }
 
-.callout-warning .callout-icon { color: var(--warning); }
+/* --warning-text, not --warning: --warning is below the 3:1 an icon needs on this tint in the light
+   theme (2.95:1, and 2.68:1 on a page banner). The two are one colour in the dark theme. */
+.callout-warning .callout-icon { color: var(--warning-text); }
 
 /* An error or a refusal that stands on the page: the same subtle tint as the warning, in the danger
    hue. The text is --danger-text because --danger is below AA on the tint in the light theme. */
@@ -1808,6 +1822,16 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .callout-info .callout-icon { color: var(--accent-text); }
+
+/* A result that went well, such as a payload with no findings. */
+.callout-success {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--success-text);
+}
+
+.callout-success .callout-icon { color: var(--success); }
+
 .callout strong { color: var(--text-primary); }
 /* A link inside a callout or an empty state (a HelpLink into the panel, a RepoLink out to GitHub):
    accent text with no resting underline, as every link is, underlined on hover and focus. */
@@ -1832,9 +1856,8 @@ tbody tr:hover { background: var(--bg-glass); }
    it leaves above itself, 12px. Another callout after it already has that gap as its own top margin. */
 .modal-body > .callout:has(+ :not(.callout)) { margin-bottom: 12px; }
 
-/* The page banner: a callout above a page's first card, as `callout callout-warning callout-page`
-   with an icon element first and ONE body element (a div or span) after it. Full width, wraps, and
-   the icon centres against the text. AFTER `.callout`, not before: equal specificity, so the later
+/* The page banner: a callout above a page's first card, `<Callout page>`. Full width, wraps, and the
+   icon centres against the text. AFTER `.callout`, not before: equal specificity, so the later
    rule wins the margin, and `.callout`'s inset and missing bottom gap are wrong out on the page.
    The warning form is the stronger tint here: a finding on arrival, not a standing property. */
 .callout-page {
@@ -1900,12 +1923,8 @@ tbody tr.table-group-foot:hover { background: none; }
    the accent name, and its chevron and icon kept whole. A page sizes it to the row it sits in. */
 .group-heading-chevron,
 .group-heading-icon { display: inline-flex; flex-shrink: 0; }
-.group-heading-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* The name is an OverflowText. */
+.group-heading-label { min-width: 0; }
 /* A heading with a row to itself wraps its name, such as an imported file's, rather than cut it. */
 .table-group-row .group-heading-label,
 .vocab-section-head .group-heading-label { white-space: normal; overflow-wrap: anywhere; }
@@ -2085,16 +2104,10 @@ tbody tr.table-group-foot:hover { background: none; }
   color: var(--text-muted);
 }
 
-/* One line, cut off with an ellipsis. Needs a width from its container to cut against. */
-.truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* OverflowText: one line cut with an ellipsis that slides to show its end on hover or keyboard
    focus. The script sets --overflow-shift (how far, negative) and --overflow-ms (how long), and
-   keeps the line clipped rather than ellipsised until the text is back at its start. */
+   keeps the line clipped rather than ellipsised until the text is back at its start. The only rule
+   with the ellipsis: every cut line is an OverflowText (drift check 614). */
 .overflow-text {
   --overflow-shift: 0px;
   --overflow-ms: 250ms;
@@ -2186,7 +2199,8 @@ td.row-actions, th.row-actions {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   column-gap: 8px;
 }
-.system-lost > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Each holds an OverflowText. */
+.system-lost > span { min-width: 0; }
 
 /* Refresh and its interval as one control (common/RefreshButton.jsx): one filled shape, as a
    .btn-primary .btn-sm is, holding two plain halves with a hairline between them. Hover lights the
@@ -2335,20 +2349,19 @@ td.row-actions, th.row-actions {
 .copyable-id:focus-visible,
 .endpoint-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* The value is an OverflowText, cut with its ellipsis. */
 .copyable-id-value {
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* `truncate="start"`: the value is split in two spans. The head gives way with an ellipsis, the tail
-   (the end of the value) never shrinks, so the part that tells two values apart stays visible. */
+/* `truncate="start"`: the value is split in two spans. The head (an OverflowText) gives way with an
+   ellipsis, the tail (the end of the value) never shrinks, so the part that tells two values apart
+   stays visible. */
 .copyable-id-value-start { display: flex; }
 .copyable-id-head {
   flex: 0 1 auto;
   min-width: 1.2ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .copyable-id-tail { flex: none; }
 
@@ -2859,17 +2872,26 @@ main:focus { outline: none; }
 .modal-header-row .modal-title {
   flex: 1 1 12ch;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin: 0;
   min-width: 0;
-  /* As tall as the close button, so a one-line title sits level with it. */
+  /* Each line as tall as the close button, so the first sits level with it however many follow. */
   min-height: 28px;
+  line-height: 28px;
   /* A title is wrapped, never cut: the end of a file name is the part that tells two apart. */
   overflow-wrap: anywhere;
 }
 
 .modal-header-row .modal-title > span { min-width: 0; }
+/* The act's icon keeps its 18px when the title wraps, and stands beside the first line, centred on
+   it: (28px line − 18px icon) / 2. Drift check 612 holds the icon's size to this. */
+.modal-header-row .modal-title > svg { flex-shrink: 0; margin-top: 5px; }
+/* The record a dialog acts on, after the act and a dash (Modal's `subject`). Its monospace is a step
+   under the title's size, since a monospace face reads larger, and it wraps with the title. */
+.modal-title .modal-subject { font-size: 0.9em; }
+/* A schema's version badge, after its name, keeps the badge's own face. */
+.modal-subject .badge { font-family: var(--font-display); }
 
 /* Controls keep their size and stay at the row's top. `max-width` lets a wide set (the legend)
    narrow to the row, wrapping inside itself. */
@@ -3294,12 +3316,10 @@ main:focus { outline: none; }
   height: 16px;
 }
 
+/* Each line holds an OverflowText, which cuts it to one line. */
 .summary-card-title {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -3323,9 +3343,6 @@ main:focus { outline: none; }
 .summary-card-state {
   display: block;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .summary-card-value {
@@ -3679,7 +3696,7 @@ a.summary-card { text-decoration: none; }
   transition: var(--transition);
 }
 
-.site-lane-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site-lane-name { flex: 1 1 auto; min-width: 0; }
 
 /* In the lane's own text colour: --text-primary on a full lane, --text-muted on an empty one.
    Inherited, over the colour .mono gives the counts. */
@@ -3858,9 +3875,6 @@ a.summary-card { text-decoration: none; }
   color: inherit;
   text-align: left;
   cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .area-card-name:hover { color: var(--accent); }
@@ -4051,10 +4065,7 @@ span.area-plan-pin { cursor: inherit; }
   border-radius: 4px;
   background: var(--bg-card);
   border: 1px solid var(--pin-colour);
-  white-space: nowrap;
   max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   /* Slides sideways just far enough to end inside the frame, the disc staying on its place:
      --pin-x is the place's fraction across, 100cqw the drawing's width, 50% half the label's. */
   translate: clamp(
@@ -4187,11 +4198,6 @@ span.area-plan-pin { cursor: inherit; }
 
 .area-plan-panel-meta { font-size: 11px; color: var(--text-muted); }
 
-.zone-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* Health rollup dot: one per lane and area card, the worst state of the devices resolving to it.
    Never colour alone: the dot carries a `title` naming the state. */
@@ -5119,12 +5125,9 @@ a.chip { text-decoration: none; }
   min-width: 0;
 }
 
-/* The name gets the whole chip; ids live on the chip's `title`. The ellipsis rules stay for a name
-   long enough to overrun a tile. */
+/* The name gets the whole chip; ids live on the chip's tooltip. A name long enough to overrun a tile
+   is an OverflowText, cut and slid on hover or focus of the chip. */
 .chip-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -5251,15 +5254,13 @@ a.chip { text-decoration: none; }
   color: var(--accent);
 }
 
+/* Holds the title as an OverflowText, so a cut one slides on hover. */
 .context-panel-title {
   min-width: 0;
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1.25;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .context-panel-subtitle {
@@ -5790,14 +5791,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .help-result:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .help-result-title { font-weight: 600; }
 .help-result-page { font-weight: 400; color: var(--text-muted); }
+/* An OverflowText: a cut snippet slides on the result's hover or focus. */
 .help-result-snippet {
-  display: block;
   margin-top: 2px;
-  overflow: hidden;
   font-size: 11.5px;
   color: var(--text-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Below 800px there is no room for the drawer beside the list, so it slides over the page, still
@@ -6236,14 +6234,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .trail-lane-open:focus-visible .trail-lane-unnamed { color: var(--text-primary); }
 .trail-lane-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* The one element allowed to lose characters. Everything else in the label -- the icon, the
-   deleted flag -- is fixed width or must stay whole, so a long asset name is what gives. */
+/* The one element allowed to lose characters, an OverflowText. Everything else in the label -- the
+   icon, the deleted flag -- is fixed width or must stay whole, so a long asset name is what gives. */
 .trail-lane-name {
   color: var(--text-primary);
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* No name resolved anywhere -- not from a live row, not from an audit snapshot. Dimmer than a
@@ -6270,9 +6265,6 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .trail-lane-email {
   flex: 0 3 auto;
   min-width: 4em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 11px;
   color: var(--text-dim);
 }
@@ -6659,12 +6651,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   left: 4px;
   right: 4px;
   bottom: 0;
-  overflow: hidden;
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 16px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   color: var(--danger-text);
 }
 .chart-state-carried {
@@ -8516,12 +8505,6 @@ ol.gateway-steps {
 /* A metric name or pattern inside a hint keeps the hint's size; `.mono` alone would set 13px. */
 .validate-payload-hint .mono { font-size: inherit; }
 
-.callout-success {
-  border-color: var(--success);
-  background: color-mix(in srgb, var(--success) 8%, transparent);
-  color: var(--success-text);
-}
-
 /* The schema detail dialog's footer holds up to four buttons, which wrap rather than run past the
    box when one row cannot hold them. */
 .schema-detail-modal .modal-actions { flex-wrap: wrap; }
@@ -8925,8 +8908,6 @@ ol.gateway-steps {
 .capture-card-drop { border-color: var(--accent); }
 /* A failed job's message on the Captures and Playbacks tabs (CaptureHistory). */
 .capture-history-failure { min-width: 240px; font-size: 12px; color: var(--danger-text); }
-/* The line saying a tab lists one job: the sentence takes the room, and the way out stays at the end. */
-.capture-job-line > :not(.callout-icon):not(.btn) { flex: 1; min-width: 0; }
 .capture-drop-overlay {
   position: absolute;
   inset: 0;

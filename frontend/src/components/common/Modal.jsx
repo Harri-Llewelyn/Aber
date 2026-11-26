@@ -85,11 +85,12 @@ function returnFocus(dialog) {
  *
  * ```jsx
  * <Modal
- *   title="Rename Area"
- *   icon={<IconEdit size={18} />}
+ *   title="Edit Area"
+ *   subject={area.area_name}
+ *   icon={<IconPencil size={18} />}
  *   busy={saving}
  *   onClose={() => setOpen(false)}
- *   lead="The name is shown on the Site Map and in the Audit Trail."
+ *   lead="Saves the changes to this area."
  *   initialFocus={nameRef}
  *   problem={check.problem}
  *   error={saveError}
@@ -100,10 +101,15 @@ function returnFocus(dialog) {
  * </Modal>
  * ```
  *
- * @param {React.ReactNode} title What the dialog is for, naming the act ("Restore metric x"), not
- * "Confirm". A node is allowed, so a name can be set in `mono`.
+ * @param {string} title The act, in Title Case ("Edit Area", "Archive Device"), not "Confirm". The
+ * record it acts on is `subject`, never written into the title.
  *
- * @param {React.ReactNode} [icon] Shown before the title; pass a sized icon element.
+ * @param {React.ReactNode} [subject] The record's name, which the title shows after a dash, in `mono`:
+ * "Edit Area — Assembly". A long one wraps in the title and is never cut.
+ *
+ * @param {React.ReactNode} icon The act's icon, sized 18, before the title: the table in
+ * frontend/README.md's *A dialog's header names its act* says which. Every dialog has one; drift
+ * check 612 holds it.
  *
  * @param {'sm'|'default'|'md'|'lg'|'xl'|'wide'|'full'} [size] A step of the width scale in App.css,
  * named by the content that earns it: sm 400px for a question with no field, default 480px for
@@ -121,7 +127,7 @@ function returnFocus(dialog) {
  * dialog beneath. Never a no-op `onClose`: that locks one way out and leaves another.
  *
  * @param {React.ReactNode} [lead] One paragraph under the header saying what the dialog will do.
- * It is the dialog's accessible description.
+ * It is the dialog's accessible description. Every form has one; a viewer or a result may leave it out.
  *
  * @param {React.RefObject<HTMLElement>} [initialFocus] A ref to the control focus starts on, for a
  * dialog whose first field is the obvious place to start. Without it, focus starts on the dialog
@@ -162,6 +168,7 @@ function returnFocus(dialog) {
  */
 export function Modal({
   title,
+  subject = null,
   icon = null,
   size,
   onClose,
@@ -238,7 +245,10 @@ export function Modal({
         <div className="modal-header-row">
           <h2 className="modal-title" id={titleId}>
             {icon}
-            <span>{title}</span>
+            <span>
+              {title}
+              {subject && <> — <span className="mono modal-subject">{subject}</span></>}
+            </span>
           </h2>
           <div className="modal-header-controls">
             {headerActions}

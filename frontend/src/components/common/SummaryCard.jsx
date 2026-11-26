@@ -1,4 +1,5 @@
 import React from 'react'
+import { OverflowText } from './OverflowText'
 import { TooltipBubble, useTooltip } from './Tooltip'
 import { IconAlertTriangle, IconChevronRight, IconExternalLink, IconShieldAlert } from './Icons'
 
@@ -21,7 +22,8 @@ const STATE_ICONS = { warning: IconAlertTriangle, danger: IconShieldAlert }
 /**
  * One card in a SummaryCards row, drawn like the Site Map's lanes: a 4px cap in its `tone` (none,
  * 'warning' or 'danger') and a chevron when it opens something. Each line is one line high, cut
- * short with an ellipsis, so the card keeps its height whatever its state.
+ * short with an ellipsis and slid on the card's hover or focus (OverflowText), so the card keeps its
+ * height whatever its state.
  *
  * With `onOpen` it is a button, `selected` while what it opens is showing; with `href`, a link
  * that opens another application's page in a new tab, marked by its icon; with neither, a focusable
@@ -53,25 +55,31 @@ export function SummaryCard({ title, value, unit, detail, flagged = false, state
   const lines = (
     <>
       <span className="summary-card-head">
-        <span className="summary-card-title">{title}</span>
+        <span className="summary-card-title"><OverflowText>{title}</OverflowText></span>
         {badge && <span className="summary-card-badge">{badge}</span>}
         {onOpen && <span className="summary-card-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>}
         {!onOpen && href && <span className="summary-card-chevron" aria-hidden="true"><IconExternalLink size={13} /></span>}
       </span>
       <span className="summary-card-value">
-        {value}
-        {unit && <span className="summary-card-unit"> {unit}</span>}
+        <OverflowText>
+          {value}
+          {unit && <span className="summary-card-unit"> {unit}</span>}
+        </OverflowText>
       </span>
       {detail != null && (
         <span className={`summary-card-detail${flagged ? ' summary-card-flagged' : ''}`}>
-          {flagged && <IconAlertTriangle size={12} />}
-          {detail}
+          <OverflowText>
+            {flagged && <IconAlertTriangle size={12} />}
+            {detail}
+          </OverflowText>
         </span>
       )}
       {state != null && (
         <span className="summary-card-state" role="status" data-testid={testId && `${testId}-state`}>
-          {StateIcon && <StateIcon size={13} />}
-          {state}
+          <OverflowText>
+            {StateIcon && <StateIcon size={13} />}
+            {state}
+          </OverflowText>
         </span>
       )}
     </>

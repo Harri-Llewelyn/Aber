@@ -3,6 +3,7 @@ import { gatewayUrl } from '../../routes'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { ApplianceCommand, ApplianceCommandsHelp } from '../common/ApplianceCommand'
+import { Callout } from '../common/Callout'
 import { Modal } from '../common/Modal'
 import { formatCountdown, tokenTimeRemaining } from '../../utils/gatewayStatus'
 import { setupRevokesCredential } from '../../utils/credentialState'
@@ -10,7 +11,7 @@ import { typedNameMatches } from '../../utils/gatewayType'
 import { CLEAR_BUNDLE_ENROLMENT, CLEAR_INSTALLED_ENROLMENT, startBundle } from '../../utils/applianceCommands'
 import { Tooltip } from '../common/Tooltip'
 import {
-  IconCopy, IconDownload, IconRefreshCw, IconShieldAlert
+  IconCopy, IconDownload, IconRefreshCw
 } from '../common/Icons'
 
 /** What an issue leaves: the enrolment has ended, and nothing has enrolled with the new token yet. */
@@ -221,31 +222,30 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
 
   return (
     <Modal
-      title={<>Set Up “{gateway.gateway_name}”</>}
+      title="Set Up Gateway"
+      subject={gateway.gateway_name}
+      icon={<IconDownload size={18} />}
       size="lg"
       busy={busy}
       onClose={backOut}
+      lead={step === 'confirm'
+        ? `Issues a new ${mode === 'command' ? 'install command' : 'bundle'} for this gateway.`
+        : 'Issues a single-use token for this gateway’s appliance: an install command to paste, or a bundle to download.'}
       error={error?.message}
       dismiss={dismiss}
       footer={footer}
     >
       {step === 'confirm' && (
         <>
-          <div className="callout callout-warning">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>
-              <strong>Issue a new {mode === 'command' ? 'install command' : 'bundle'} for this gateway?</strong>
-              <div>
-                Only one token works at a time. Issuing this <strong>invalidates any bundle or
-                command already issued</strong> for this gateway — an appliance started with the old one
-                is refused at enrolment, with an error that cannot say why.
-                {revokesCredential && (
-                  <> This gateway has already enrolled, so this also revokes the broker credential
-                    its appliance is holding.</>
-                )}
-              </div>
-            </div>
-          </div>
+          <Callout tone="warning">
+            Only one token works at a time. Issuing this <strong>invalidates any bundle or
+            command already issued</strong> for this gateway — an appliance started with the old one
+            is refused at enrolment, with an error that cannot say why.
+            {revokesCredential && (
+              <> This gateway has already enrolled, so this also revokes the broker credential
+                its appliance is holding.</>
+            )}
+          </Callout>
 
           <div className="form-group">
             {/* The name goes in the label, not in a placeholder, which looks like text already
@@ -288,27 +288,19 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
           {bundle && (
             <>
               {/* Amber while the clock runs, red once the token is dead. */}
-              <div className={`callout ${expired ? 'callout-danger' : 'callout-warning'}`}>
-                <IconShieldAlert size={14} className="callout-icon" />
+              <Callout
+                tone={expired ? 'danger' : 'warning'}
+                title={expired ? `This ${isCommand ? 'command' : 'bundle'} has expired.` : `Valid for ${formatCountdown(remaining)}`}
+              >
                 {expired ? (
-                  <div>
-                    <strong>This {isCommand ? 'command' : 'bundle'} has expired.</strong>
-                    <div>
-                      An appliance using it will be refused. Re-issue below — that invalidates the
-                      expired one too{isCommand ? '.' : ', so delete the old folder rather than keeping both.'}
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <strong>Valid for {formatCountdown(remaining)}</strong>
-                    <div>
-                      {isCommand
-                        ? 'Paste it before the timer runs out. This is now the only command or bundle that works for this gateway — any earlier one has stopped working.'
-                        : 'Start the appliance before the timer runs out. This is now the only bundle that works for this gateway — any earlier download has stopped working.'}
-                    </div>
-                  </div>
-                )}
-              </div>
+                  <>
+                    An appliance using it will be refused. Re-issue below — that invalidates the
+                    expired one too{isCommand ? '.' : ', so delete the old folder rather than keeping both.'}
+                  </>
+                ) : isCommand
+                  ? 'Paste it before the timer runs out. This is now the only command or bundle that works for this gateway — any earlier one has stopped working.'
+                  : 'Start the appliance before the timer runs out. This is now the only bundle that works for this gateway — any earlier download has stopped working.'}
+              </Callout>
 
               {/* Open, as the command below is, and not a warning: a re-install on a fresh machine,
                   the usual one, has nothing to clear. */}

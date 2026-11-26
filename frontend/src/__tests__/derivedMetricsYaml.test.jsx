@@ -86,7 +86,7 @@ const choose = async (f) => {
 }
 // The editor is loaded when first opened, so the dialog is waited for, not assumed.
 const editorOpen = (name) => screen.findByRole('heading', { name }, { timeout: 20000 })
-const upload = async (f, name = 'Edit derived-metrics.yaml') => {
+const upload = async (f, name = 'Edit Derived Metrics — derived-metrics.yaml') => {
   await choose(f)
   await editorOpen(name)
 }
@@ -243,7 +243,7 @@ describe('Upload', () => {
     await openDerived()
     await upload(file(FILE_TEXT))
     const d = topDialog()
-    expect(d.getByRole('heading', { name: 'Edit derived-metrics.yaml' })).toBeInTheDocument()
+    expect(d.getByRole('heading', { name: 'Edit Derived Metrics — derived-metrics.yaml' })).toBeInTheDocument()
     expect(editorText()).toBe(FILE_TEXT)
     expect(api.applyDerivedMetrics).not.toHaveBeenCalled()
     expect(document.querySelector('.modal-lead')).toHaveTextContent('only a description can change')
@@ -259,7 +259,7 @@ describe('Upload', () => {
     expect(api.applyDerivedMetrics.mock.calls[0][0].map(m => m.name)).toEqual(['Controller/PARTS_PER_SHIFT', 'Controller/UPTIME'])
     expect(dialogs()).toHaveLength(2)
     const d = topDialog()
-    expect(d.getByRole('heading', { name: /Apply derived-metrics\.yaml/ })).toBeInTheDocument()
+    expect(d.getByRole('heading', { name: /Apply Derived Metrics — derived-metrics\.yaml/ })).toBeInTheDocument()
     expect(d.getByText('1 new, 1 unchanged')).toBeInTheDocument()
     expect(d.getByText('rate of Controller/PART_COUNT, per hour, in COUNT/HOUR')).toBeInTheDocument()
     expect(d.getByText('already here: share of time Controller/EXECUTION is ACTIVE, in % of the time')).toBeInTheDocument()

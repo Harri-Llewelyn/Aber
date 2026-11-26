@@ -73,6 +73,7 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
       fill
       busy={submitting}
       onClose={onCancel}
+      lead="Makes a schema of metrics from the catalog, as version 1 and in force."
       problem={check.problem}
       error={error}
       dismiss="Cancel"

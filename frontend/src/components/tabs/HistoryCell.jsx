@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { HISTORY_CHANGE_SERIES, api } from '../../api'
 import { useSetting } from '../../hooks/useSettings'
+import { Callout } from '../common/Callout'
 import { ToolbarPopover } from '../common/FiltersPopover'
 import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
@@ -421,7 +422,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
         ) : reading?.problem ? (
           <EmptyState icon={<IconChartLine size={36} />} message={reading.problem} />
         ) : reading?.error ? (
-          <div className="callout callout-danger">{`The readings could not be read: ${reading.error}`}</div>
+          <Callout tone="danger">{`The readings could not be read: ${reading.error}`}</Callout>
         ) : !reading?.byAsset ? (
           <LoadingState label="readings" />
         ) : (
@@ -496,7 +497,7 @@ function HeatBody({ heat, rows }) {
   if (heat.needsNumber) return <p className="cell-note">{`The heatmap needs a number. ${metric} is text or a flag, so it is charted above by its changes, not averaged.`}</p>
   if (heat.derived) return <p className="cell-note">{`${metric} is a derived metric, computed over a stretch of time, so it has no mean at each hour of the day. It is charted above.`}</p>
   if (heat.problem) return <p className="cell-note">{heat.problem}</p>
-  if (heat.error) return <div className="callout callout-danger">{`The hours of the day could not be read: ${heat.error}`}</div>
+  if (heat.error) return <Callout tone="danger">{`The hours of the day could not be read: ${heat.error}`}</Callout>
   if (heat.grid.low === null) {
     return <p className="cell-note">{`No machine has a value for ${metric} in this window.`}</p>
   }
