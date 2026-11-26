@@ -625,7 +625,7 @@ const ActiveRow = memo(function ActiveRow({ row, selected, onSelect, notify }) {
       <td><CopyableId value={row.id} label="uuid" onNotify={notify} /></td>
       <td>
         {seconds
-          ? <Tooltip text={seconds}><span className="entity-second-ids mono"><OverflowText>{seconds}</OverflowText></span></Tooltip>
+          ? <Tooltip text={seconds} describe={false}><span className="entity-second-ids mono"><OverflowText>{seconds}</OverflowText></span></Tooltip>
           : <span className="cell-meta">—</span>}
       </td>
     </tr>
