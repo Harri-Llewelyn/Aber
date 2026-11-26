@@ -192,7 +192,7 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast, drawerHost = nu
   const stopSharing = (file) => share(file, false).catch(e => showToast?.(e.message, 'error'))
 
   // Every field the row has, the ones its name's tooltip holds, and each metric In use counts.
-  const using = selected ? metricsUsing(selected, concepts, catalog) : []
+  const metricsInUse = selected ? metricsUsing(selected, concepts, catalog) : []
   const drawer = (
     <ContextPanel
       open={!!selected}
@@ -221,9 +221,9 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast, drawerHost = nu
         { label: 'Concepts', value: String(selected.concept_count), help: 'How many concepts it holds. Show Concepts opens them below the table.' },
         {
           label: 'In use',
-          value: using.length === 0 ? 'None' : (
+          value: metricsInUse.length === 0 ? 'None' : (
             <div className="context-device-list">
-              {using.map(m => (
+              {metricsInUse.map(m => (
                 <RouteLink key={m.metric_uuid} className="chip chip-link" to={metricUrl(m.metric_uuid, !!m.deprecated)} title={`Open ${m.name} on the Metrics page`}>
                   <IconTag size={11} />
                   <OverflowText className="chip-name">{m.name}</OverflowText>
