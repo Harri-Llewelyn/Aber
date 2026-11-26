@@ -1062,7 +1062,8 @@ The event drawer moves along a lane and between lanes, like a cursor in a grid:
 
 - **← and →, or ◀ Previous and Next ▶,** step through the open lane's events. A lane is a kind and
   an id (`laneKeyOf`), so a device, its nameplate and its schemas are three lanes and "Event 3 of 7"
-  counts the one on screen. The order is `byTimeThenId`, the badge's order: oldest first, and the
+  counts the one on screen. A metric's further semantic ids are the one exception: their rows carry
+  the metric's id and are drawn in its lane (0299), each said in words (`eventWords`). The order is `byTimeThenId`, the badge's order: oldest first, and the
   rows of one transaction, which share a time, in the order they were written.
 - **↑ and ↓, or Previous Entity and Next Entity,** move to the lane drawn above or below, across
   section headings, and open its event nearest in time to the one open (`nearestInTime`; the
