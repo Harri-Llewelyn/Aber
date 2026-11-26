@@ -1356,15 +1356,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             {editing?.shadow_of || proposeMode ? (
               // A replay lane stays on the Playback gateway for everyone, and a proposal cannot move a
               // device, so either reads its gateway. The form still holds the id, so a save writes it
-              // unchanged.
+              // unchanged. Named as the drawer names it: the name, else the id; none bound is Not set.
               <StaticField
                 label="Serving Gateway"
-                value={(() => {
-                  const serving = gateways.find(g => g.gateway_id === form.active_gateway_id)
-                  return serving
-                    ? <>{serving.gateway_name} (<span className="mono">{serving.gateway_id}</span>)</>
-                    : form.active_gateway_id
-                })()}
+                value={form.active_gateway_id
+                  ? gateways.find(g => g.gateway_id === form.active_gateway_id)?.gateway_name
+                    || (editing?.active_gateway_id === form.active_gateway_id && editing?.gateway_name)
+                    || form.active_gateway_id
+                  : null}
                 reason={editing?.shadow_of
                   ? 'This is a replay lane. It stays on the Playback gateway, and the database refuses a move.'
                   : withheldFields.active_gateway_id}

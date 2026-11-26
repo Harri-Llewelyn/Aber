@@ -177,7 +177,8 @@ describe('proposing a change from a device', () => {
     clickAction('Propose a Change')
     await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
 
-    expect(fixedField('Serving Gateway')).toHaveTextContent(/Line_A_Gateway \(gw-1\)/)
+    // By its name alone, as the device drawer names it.
+    expect(fixedField('Serving Gateway').querySelector('.form-static')).toHaveTextContent(/^Line_A_Gateway$/)
     expect(fixedField('Serving Gateway')).toHaveTextContent(/data path/i)
     expect(fixedField('Schemas')).toHaveTextContent(/judged against/i)
     expect(fixedField('Schema Conformance')).toHaveTextContent(/Audit — record the violation, keep the reading/)
@@ -187,6 +188,22 @@ describe('proposing a change from a device', () => {
     expect(document.querySelector('#device-gateway')).toBeNull()
     expect(document.querySelector('#device-conformance')).toBeNull()
     expect(within(document.querySelector('.modal')).queryByRole('group', { name: /^Schemas/ })).toBeNull()
+  })
+
+  it('says what the drawer says of a gateway it cannot name: its id', async () => {
+    await show(asOperator, [device({ active_gateway_id: 'gw-gone', gateway_name: null })])
+    openPanel()
+    clickAction('Propose a Change')
+    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    expect(fixedField('Serving Gateway').querySelector('.form-static')).toHaveTextContent(/^gw-gone$/)
+  })
+
+  it('says Not set, as the drawer does, where no gateway is bound', async () => {
+    await show(asOperator, [device({ active_gateway_id: null })])
+    openPanel()
+    clickAction('Propose a Change')
+    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    expect(fixedField('Serving Gateway').querySelector('.form-static')).toHaveTextContent(/^Not set$/)
   })
 
   it('opens each reason with what a proposal cannot do, and keeps what it can change a control', async () => {

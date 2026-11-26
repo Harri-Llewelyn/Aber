@@ -164,8 +164,8 @@ describe("the device form's gateway picker", () => {
     const name = modal.getByText('Serving Gateway')
     expect(name.tagName).not.toBe('LABEL')
     const field = name.closest('.form-group')
-    expect(field.querySelector('.form-static')).toHaveTextContent(`Playback (${PLAYBACK})`)
-    expect(field.querySelector('.form-static .mono')).toHaveTextContent(PLAYBACK)
+    // By its name alone, as the device drawer names it.
+    expect(field.querySelector('.form-static')).toHaveTextContent(/^Playback$/)
     expect(field.querySelector('select, input')).toBeNull()
     expect(field.querySelector('.form-hint')).toHaveTextContent('This is a replay lane. It stays on the Playback gateway, and the database refuses a move.')
   })
