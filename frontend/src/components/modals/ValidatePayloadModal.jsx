@@ -102,6 +102,7 @@ export function ValidatePayloadModal({ schemas, initialSchemaUuid, onClose }) {
       title="Validate Payload"
       icon={<IconCheck size={18} />}
       size="md"
+      lead="Checks a payload against a schema version as ingestion would, and stores nothing."
       onClose={onClose}
       dismiss="Close"
       footer={

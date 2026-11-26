@@ -25,6 +25,7 @@ export function SchemaForkModal({ schema, deviceCount = 0, archivedCount = 0, re
   return (
     <ConfirmModal
       title={`Create Version v${next}`}
+      subject={schema?.schema_name}
       size="default"
       icon={<IconGitBranch size={18} />}
       message={<>

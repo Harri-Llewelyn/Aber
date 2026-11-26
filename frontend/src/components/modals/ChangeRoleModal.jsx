@@ -43,7 +43,8 @@ export function ChangeRoleModal({ person, onClose, onChanged, showToast }) {
 
   return (
     <Modal
-      title={`Change the Role for ${personLabel(person)}`}
+      title="Change the Role"
+      subject={personLabel(person)}
       icon={<IconShieldCheck size={18} />}
       busy={busy}
       onClose={onClose}

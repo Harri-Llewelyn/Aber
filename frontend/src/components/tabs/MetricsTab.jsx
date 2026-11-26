@@ -1542,6 +1542,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           size="xl"
           busy={adding}
           onClose={closeAddMetric}
+          lead="Adds a metric to this site's catalog, named from the parts below."
           problem={addCheck.problem}
           error={addError}
           dismiss="Cancel"

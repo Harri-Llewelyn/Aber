@@ -321,7 +321,8 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
 
       {confirming?.act === 'revoke' && (
         <ConfirmModal
-          title={`Revoke ${personOf(confirming.person)}'s Approval of ${appLabel(confirming.app.client_name)}`}
+          title="Revoke Approval"
+          subject={appLabel(confirming.app.client_name)}
           icon={<IconShieldAlert size={18} />}
           message={revokeQuestion(confirming.app.client_name, personOf(confirming.person))}
           confirmLabel="Revoke Approval"
@@ -333,7 +334,8 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
 
       {confirming?.act === 'remove' && (
         <ConfirmModal
-          title={`Remove ${appLabel(confirming.app.client_name)}`}
+          title="Remove App"
+          subject={appLabel(confirming.app.client_name)}
           icon={<IconTrash size={18} />}
           message={removeQuestion(confirming.app)}
           confirmLabel="Remove App"

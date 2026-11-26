@@ -1182,7 +1182,9 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
 
       {deletingSubscriber && (
         <ConfirmModal
-          title={`Delete the Read-Only Account “${deletingSubscriber.textname || deletingSubscriber.username}”`}
+          title="Delete Account"
+          subject={deletingSubscriber.textname || deletingSubscriber.username}
+          icon={<IconTrash size={18} />}
           message={(
             <>
               The broker deletes <span className="mono">{deletingSubscriber.username}</span> at once.

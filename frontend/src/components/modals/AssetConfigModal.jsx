@@ -111,7 +111,8 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
     /* Wide: a five-column table, and a narrower one clips the middle of a Sparkplug path, the part
        that distinguishes `Axes/X/...` from `Axes/Y/...`. */
     <Modal
-      title={`Device Configuration Parameters — ${asset.asset_name || asset.asset_id}`}
+      title="Device Configuration Parameters"
+      subject={asset.asset_name || asset.asset_id}
       icon={<IconFileText size={18} />}
       size="wide"
       onClose={onClose}

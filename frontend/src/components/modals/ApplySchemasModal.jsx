@@ -5,7 +5,7 @@ import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { ApplyResults } from '../common/ApplyResults'
 import { DropZone } from '../common/DropZone'
-import { IconClipboardList } from '../common/Icons'
+import { IconClipboardList, IconUpload } from '../common/Icons'
 import { RequiredMark } from '../common/RequiredMark'
 import { describeApply, useApplyPreview } from '../../hooks/useApplyPreview'
 import { useFormCheck } from '../../hooks/useFormCheck'
@@ -67,8 +67,9 @@ export function ApplySchemasModal({ showToast, onApplied, onClose }) {
 
   return (
     <Modal
-      title={source ? `Apply ${source}` : 'Upload Schemas'}
-      icon={<IconClipboardList size={18} />}
+      title={source ? 'Apply Schemas' : 'Upload Schemas'}
+      subject={source}
+      icon={source ? <IconClipboardList size={18} /> : <IconUpload size={18} />}
       size="lg"
       lead="Applies the whole file, all of it or none. A schema that exists is never edited: a changed one becomes a new draft version to publish when you are ready. It deletes nothing."
       problem={problem ?? check.problem}

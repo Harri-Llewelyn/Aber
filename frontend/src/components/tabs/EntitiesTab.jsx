@@ -540,6 +540,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, unmappedMetric
       {confirmPurge && (
         <ConfirmModal
           title={`Permanently Delete ${confirmPurge.entity_type[0].toUpperCase()}${confirmPurge.entity_type.slice(1)}`}
+          subject={confirmPurge.name}
           icon={<IconTrash size={18} />}
           message={
             `Permanently delete the ${confirmPurge.entity_type} '${confirmPurge.name}'? ` +

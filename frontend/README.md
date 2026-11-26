@@ -417,6 +417,36 @@ does not move a card from under the pointer. The tints are measured in `themeCon
 badge in a card sits on `.summary-card-badge`, the card's own ground, because a badge's ink has
 too little headroom over its own tint to survive a second one.
 
+### A dialog's header names its act
+
+`Modal` draws one header for every dialog: the act's icon, the title, the record after a dash, and
+a lead under them. `dialogFooters.test.js` and drift check 612 read every dialog's.
+
+- **The title is the act, in Title Case:** Edit Area, Archive Device, Upload Capture, never
+  "Confirm". It names the act as the button that opens it does. A viewer names what it shows: Area
+  Plan, Digital Nameplate.
+- **The record goes in `subject`.** `Modal` and `ConfirmModal` draw it after the title, in `mono`:
+  "Edit Area — Assembly", "Archive Device — CNC Mill 01". No dialog writes the dash, quotes or
+  brackets itself. A long name wraps in the title and is never cut. A form that makes a record has
+  none yet, so New Area has no subject.
+- **Every dialog has an icon, sized 18, and it follows the act.** The table below says which. An act
+  not in it keeps the icon it has. One with none takes the icon of the button that opens it, such as
+  Set Up Gateway's download arrow, or else its page's.
+- **Every form has a lead:** one sentence saying what the dialog will do. It is the dialog's
+  accessible description, read after the title. A sentence that said it elsewhere, in a callout's
+  first line, a hint or a paragraph at the bottom, is the lead instead. A confirmation's message is
+  its lead. A viewer, and a step that shows a result, may have none.
+
+| Act | Icon |
+| :--- | :--- |
+| Edit | `IconPencil` |
+| Archive | `IconArchive` |
+| Remove, Delete, Permanently Delete | `IconTrash` |
+| Restore | `IconRefreshCw` |
+| New, Add, Register | `IconPlus` |
+| Upload | `IconUpload` |
+| Export | `IconDownload` |
+
 ### A dialog keeps its buttons in view
 
 `Modal` is a flex column capped at the window height. The header row, the error slot and the footer

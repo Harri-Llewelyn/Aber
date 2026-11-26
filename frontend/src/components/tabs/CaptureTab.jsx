@@ -917,6 +917,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       {deleteFor && (
         <ConfirmModal
           title="Delete Capture"
+          subject={deleteFor.subject.name}
           icon={<IconTrash size={18} />}
           message={`Delete the capture of ${deleteFor.subject.name}, recorded ${formatDateTime(deleteFor.capture.recorded_at)}${deleteFor.capture.note ? ` — ${deleteFor.capture.note}` : ''}? The file is removed from storage and cannot be recovered.`}
           requireTyped={deleteFor.subject.name}

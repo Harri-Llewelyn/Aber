@@ -128,6 +128,7 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
       size="xl"
       busy={adding}
       onClose={onCancel}
+      lead="Adds a metric whose value Aber computes from other metrics' readings, for a schema to name."
       problem={check.problem}
       error={error}
       dismiss="Cancel"

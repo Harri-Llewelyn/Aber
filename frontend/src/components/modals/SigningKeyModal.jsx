@@ -50,6 +50,7 @@ export function SigningKeyModal({ issuedAt, onIssued, onClose, showToast }) {
       size="lg"
       busy={busy}
       onClose={onClose}
+      lead={rotating ? `Rotates the signing key issued ${formatDateTime(issuedAt)}.` : 'Issues the webhook’s signing key.'}
       error={confirming ? error : null}
       dismiss={confirming ? 'Cancel' : 'Done'}
       footer={confirming ? (
@@ -64,7 +65,7 @@ export function SigningKeyModal({ issuedAt, onIssued, onClose, showToast }) {
       ) : null}
     >
       {confirming && (
-        <Callout tone="warning" title={rotating ? `Rotate the signing key issued ${formatDateTime(issuedAt)}?` : 'Issue the webhook’s signing key?'}>
+        <Callout tone="warning">
           {rotating && (
             <div>
               The old key stops signing at once. A receiver that still checks it refuses every

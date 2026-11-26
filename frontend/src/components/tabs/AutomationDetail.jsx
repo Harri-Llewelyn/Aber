@@ -338,6 +338,7 @@ export function AutomationDetail({ automationKey, showToast, canWrite, hasPermis
       {deleting && (
         <ConfirmModal
           title="Delete Automation"
+          subject={alias}
           icon={<IconTrash size={18} />}
           message={<>Delete <strong>{alias}</strong>? Its open alerts resolve and it stops watching every device it names. The Audit Trail keeps the record of it. This cannot be undone.</>}
           requireTyped={alias}

@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Callout } from '../common/Callout'
+import { IconLock } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { identityUrl } from '../../routes'
 import { SIGNATURE_ONLY } from '../../utils/revocationScope'
@@ -47,9 +48,14 @@ export function ServicePrincipalRevocationModal({
 
   return (
     <Modal
-      title={`${reinstating ? 'Reinstate' : 'Withdraw'} “${principalName}”`}
+      title={reinstating ? 'Reinstate Identity' : 'Withdraw Identity'}
+      subject={principalName}
+      icon={<IconLock size={18} />}
       busy={busy}
       onClose={onClose}
+      lead={reinstating
+        ? 'This identity may hold tokens again, and the API will stop refusing them.'
+        : 'The API will refuse every token naming this identity, including ones this stack has no record of, and any issued afterwards.'}
       error={error}
       dismiss="Cancel"
       footer={
@@ -68,9 +74,6 @@ export function ServicePrincipalRevocationModal({
     >
       {reinstating ? (
         <div className="form-group">
-          <p className="cell-meta">
-            This identity may hold tokens again, and the API will stop refusing them.
-          </p>
           <Callout tone="warning">
             <strong>Its previous tokens stay revoked.</strong> Reinstating restores the identity,
             not the credentials that were live when it was withdrawn — those cannot be
@@ -85,10 +88,7 @@ export function ServicePrincipalRevocationModal({
       ) : (
         <>
           <Callout tone="warning">
-            <strong>Withdraw this identity?</strong> The API will refuse{' '}
-            <strong>every token naming it</strong> — including ones this stack has no record
-            of, and any issued afterwards. That is what makes this different from revoking
-            tokens one at a time.
+            That is what makes withdrawing different from revoking tokens one at a time.
             {activeTokens > 0 && (
               <div>
                 {activeTokens === 1

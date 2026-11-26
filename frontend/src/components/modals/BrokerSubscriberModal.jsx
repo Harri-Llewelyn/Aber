@@ -4,6 +4,7 @@ import { ActionButton } from '../common/ActionButton'
 import { Callout } from '../common/Callout'
 import { CopyField } from '../common/CopyField'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
+import { IconPlus } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { useDirectoryBroker } from './EdgeNodeSettings'
@@ -67,7 +68,9 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
 
   return (
     <Modal
-      title={account ? <>Read-Only Account “{account.name}”</> : 'New Read-Only Broker Account'}
+      title={account ? 'Read-Only Account' : 'New Read-Only Broker Account'}
+      subject={account?.name}
+      icon={<IconPlus size={18} />}
       size="lg"
       busy={busy}
       onClose={onClose}

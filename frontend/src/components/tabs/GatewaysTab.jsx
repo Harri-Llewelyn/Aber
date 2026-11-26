@@ -903,6 +903,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       {showForm && (
         <Modal
           title={editing ? 'Edit Gateway' : 'Register Gateway'}
+          subject={editing?.gateway_name}
+          icon={editing ? <IconPencil size={18} /> : <IconPlus size={18} />}
+          lead={proposeMode ? 'Files this as a proposal, for an approver to decide.' : editing ? 'Saves the changes to this gateway.' : 'Adds a gateway, the edge node its devices publish through.'}
           size="md"
           busy={saving}
           onClose={closeForm}
@@ -1086,6 +1089,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       {showForm && confirmTypeChange && typeChange && (
         <ConfirmModal
           title="Change Gateway Type"
+          subject={editing.gateway_name}
           icon={<IconShieldAlert size={18} />}
           message={<>
             Saving <strong>{editing.gateway_name}</strong> as {gatewayTypeLabel(formType)} ends{' '}
@@ -1106,7 +1110,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
 
       {archiveTarget && (
         <ArchiveModal
-          entityId={archiveTarget.gateway_id} displayName={archiveTarget.gateway_name}
+          type="gateway" entityId={archiveTarget.gateway_id} displayName={archiveTarget.gateway_name}
           onArchive={archiveGateway} onCancel={() => setArchiveTarget(null)}
         />
       )}

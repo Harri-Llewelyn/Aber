@@ -207,7 +207,8 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
 
   return (
     <Modal
-      title={`Play Back Capture${capture.note ? ` — ${capture.note}` : ''}`}
+      title="Play Back Capture"
+      subject={capture.note}
       icon={<IconPlay size={18} />}
       size="wide"
       busy={pending}

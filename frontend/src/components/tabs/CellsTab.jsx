@@ -509,6 +509,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
       {showForm && (
         <Modal
           title={editing ? 'Edit Cell' : 'New Cell'}
+          subject={editing?.cell_name}
+          icon={editing ? <IconPencil size={18} /> : <IconPlus size={18} />}
+          lead={proposeMode ? 'Files this as a proposal, for an approver to decide.' : editing ? 'Saves the changes to this cell.' : 'Adds a cell, where gateways and devices are placed.'}
           size="md"
           busy={saving}
           onClose={closeForm}
@@ -618,7 +621,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
 
       {archiveTarget && (
         <ArchiveModal
-          entityId={archiveTarget.cell_id} displayName={archiveTarget.cell_name}
+          type="cell" entityId={archiveTarget.cell_id} displayName={archiveTarget.cell_name}
           onArchive={archiveCell} onCancel={() => setArchiveTarget(null)}
         />
       )}

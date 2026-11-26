@@ -6,7 +6,7 @@ import { Callout } from '../common/Callout'
 import { FieldError } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { ConfirmModal } from './ConfirmModal'
-import { IconShieldAlert } from '../common/Icons'
+import { IconLock, IconShieldAlert } from '../common/Icons'
 import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { useLocalSortableRows } from '../../hooks/useTableSort'
@@ -104,7 +104,9 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
 
   return (
     <Modal
-      title={`Tokens for “${principalName}”`}
+      title="Tokens"
+      subject={principalName}
+      icon={<IconLock size={18} />}
       size="wide"
       onClose={close}
       lead={<>

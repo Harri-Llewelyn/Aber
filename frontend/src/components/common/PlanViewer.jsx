@@ -280,7 +280,8 @@ export function ExpandedPlanModal({ area, onClose, headerActions = null, childre
   const AreaGlyph = areaIconComponent(area.icon)
   return (
     <Modal
-      title={area.area_name}
+      title="Area Plan"
+      subject={area.area_name}
       icon={<AreaGlyph size={18} />}
       size="full"
       fill

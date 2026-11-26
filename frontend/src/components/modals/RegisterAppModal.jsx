@@ -6,7 +6,7 @@ import { CopyField } from '../common/CopyField'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
-import { IconGlobe, IconPlus } from '../common/Icons'
+import { IconPlus } from '../common/Icons'
 import { appUrl } from '../../routes'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import {
@@ -64,8 +64,9 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
     const issuer = authUrl.replace(/\/+$/, '')
     return (
       <Modal
-        title={`${registered.name} Is Registered`}
-        icon={<IconGlobe size={18} />}
+        title="App Registered"
+        subject={registered.name}
+        icon={<IconPlus size={18} />}
         size="lg"
         onClose={onClose}
         dismiss="Done"
@@ -110,7 +111,7 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
   return (
     <Modal
       title="Register an App"
-      icon={<IconGlobe size={18} />}
+      icon={<IconPlus size={18} />}
       size="lg"
       busy={busy}
       onClose={onClose}

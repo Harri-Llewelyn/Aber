@@ -119,10 +119,13 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
 
   return (
     <Modal
-      title={`Token for “${principalName}”`}
+      title="Issue Token"
+      subject={principalName}
+      icon={<IconLock size={18} />}
       size="lg"
       busy={busy}
       onClose={onClose}
+      lead="Issues a long-lived token for this identity."
       error={confirming ? error : null}
       dismiss={confirming ? 'Cancel' : 'Done'}
       footer={confirming ? (
@@ -139,7 +142,7 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
     >
       {confirming && (
         <>
-          <Callout tone="warning" title="Issue a long-lived token for this identity?">
+          <Callout tone="warning">
             {/* The one fact that differs from the broker credential modal, said first: minting
                 to rotate would leave two live credentials. */}
             <div>

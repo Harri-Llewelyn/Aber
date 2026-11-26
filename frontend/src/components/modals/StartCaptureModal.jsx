@@ -48,10 +48,15 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
 
   return (
     <Modal
-      title={`${existing ? 'Replace Capture' : 'Record Capture'} — ${subject.name}`}
+      title={existing ? 'Replace Capture' : 'Record Capture'}
+      subject={subject.name}
       icon={<IconRecord size={18} />}
       busy={pending}
       onClose={onCancel}
+      // The subject is stated in full: a gateway's capture and a device's record different things.
+      lead={subject.kind === 'gateway'
+        ? <>Records everything published by <strong>{subject.name}</strong> and every device beneath it.</>
+        : <>Records only <strong>{subject.name}</strong>, plus its gateway&apos;s birth certificate.</>}
       error={error}
       dismiss="Cancel"
       footer={
@@ -117,14 +122,6 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
         </p>
       </div>
 
-      {/* The subject is stated in full: a gateway's capture and a device's record different things. */}
-      <p className="form-hint">
-        Recording{' '}
-        {subject.kind === 'gateway'
-          ? <>everything published by <strong>{subject.name}</strong> and every device beneath it</>
-          : <>only <strong>{subject.name}</strong>, plus its gateway's birth certificate</>}
-        .
-      </p>
       {/* capture_worker._begin() asks for the rebirth on every recording; nothing turns it off. */}
       <p className="form-hint">
         Recording starts by asking the gateway to rebirth. The gateway and its devices send their

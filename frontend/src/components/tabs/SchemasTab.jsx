@@ -507,6 +507,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
       {discardTarget && (
         <ConfirmModal
           title="Discard Draft"
+          subject={discardTarget.schema_name}
           icon={<IconTrash size={18} />}
           message={
             <>

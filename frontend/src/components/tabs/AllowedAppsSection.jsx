@@ -92,7 +92,8 @@ export function AllowedAppsSection({ isPerson = true, showToast }) {
 
       {confirming && (
         <ConfirmModal
-          title={`Revoke ${appLabel(confirming.client_name)}`}
+          title="Revoke Approval"
+          subject={appLabel(confirming.client_name)}
           icon={<IconShieldAlert size={18} />}
           message={revokeQuestion(confirming.client_name)}
           confirmLabel="Revoke Approval"

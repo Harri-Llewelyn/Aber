@@ -2884,6 +2884,11 @@ main:focus { outline: none; }
 }
 
 .modal-header-row .modal-title > span { min-width: 0; }
+/* The record a dialog acts on, after the act and a dash (Modal's `subject`). Its monospace is a step
+   under the title's size, since a monospace face reads larger, and it wraps with the title. */
+.modal-title .modal-subject { font-size: 0.9em; }
+/* A schema's version badge, after its name, keeps the badge's own face. */
+.modal-subject .badge { font-family: var(--font-display); }
 
 /* Controls keep their size and stay at the row's top. `max-width` lets a wide set (the legend)
    narrow to the row, wrapping inside itself. */

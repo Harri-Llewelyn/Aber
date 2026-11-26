@@ -9,7 +9,7 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
 import {
   IconArchive, IconChevronDown, IconChevronUp, IconHistory, IconInbox, IconLock, IconLogOut, IconPencil, IconPlus,
-  IconRefreshCw, IconScan, IconShieldAlert, IconShieldCheck, IconUser,
+  IconRefreshCw, IconScan, IconShieldAlert, IconShieldCheck, IconTrash, IconUser,
 } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { PersonName } from '../common/PersonName'
@@ -622,7 +622,9 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {confirming?.act === 'remove' && (
         <ConfirmModal
-          title={`Remove Access for ${personLabel(confirming.person)}`}
+          title="Remove Access"
+          subject={personLabel(confirming.person)}
+          icon={<IconTrash size={18} />}
           message={(
             <>
               They can no longer sign in, and their role
@@ -645,7 +647,9 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {confirming?.act === 'password' && (
         <ConfirmModal
-          title={`Set a New Password for ${personLabel(confirming.person)}`}
+          title="Set a New Password"
+          subject={personLabel(confirming.person)}
+          icon={<IconLock size={18} />}
           message={(
             <>
               Aber makes a new password and shows it to you once, for you to give them. Their
@@ -663,7 +667,9 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {confirming?.act === 'sessions' && (
         <ConfirmModal
-          title={`End Every Session for ${personLabel(confirming.person)}`}
+          title="End Every Session"
+          subject={personLabel(confirming.person)}
+          icon={<IconLogOut size={18} />}
           message={(
             <>
               Every sign-in they have ends: the dashboard in each browser, and {studio && 'Studio, '}the
@@ -682,7 +688,8 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {confirming?.act === 'mfa' && (
         <ConfirmModal
-          title={`Reset MFA for ${personLabel(confirming.person)}`}
+          title="Reset MFA"
+          subject={personLabel(confirming.person)}
           icon={<IconScan size={18} />}
           message={(
             <>
@@ -702,7 +709,8 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {confirming?.act === 'session' && (
         <ConfirmModal
-          title={`End a Session for ${personLabel(confirming.person)}`}
+          title="End a Session"
+          subject={personLabel(confirming.person)}
           icon={<IconLogOut size={18} />}
           message={endSessionQuestion(confirming.session, Date.now(), nameOf(confirming.person))}
           confirmLabel="End Session"
@@ -722,7 +730,9 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {confirming?.act === 'restore' && (
         <ConfirmModal
-          title={`Restore Access for ${personLabel(confirming.person)}`}
+          title="Restore Access"
+          subject={personLabel(confirming.person)}
+          icon={<IconRefreshCw size={18} />}
           message={(confirming.person.role_on_restore || confirming.person.role)
             ? `They can sign in again, as ${personRoleLabel(confirming.person.role_on_restore || confirming.person.role)}.`
             : 'They can sign in again. They hold no role, so set one afterwards.'}

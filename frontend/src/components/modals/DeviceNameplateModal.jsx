@@ -324,7 +324,8 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
 
   return (
     <Modal
-      title={<>Digital Nameplate — <span className="mono">{asset.asset_name}</span></>}
+      title="Digital Nameplate"
+      subject={asset.asset_name}
       icon={<IconTag size={18} />}
       size="xl"
       busy={saving}

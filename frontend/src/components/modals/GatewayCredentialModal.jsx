@@ -113,10 +113,13 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
 
   return (
     <Modal
-      title={<>Broker Credential for “{gateway.gateway_name}”</>}
+      title="Generate Broker Credential"
+      subject={gateway.gateway_name}
+      icon={<IconLock size={18} />}
       size="lg"
       busy={busy}
       onClose={onClose}
+      lead="Issues a broker credential for this gateway."
       error={step !== 'reveal'
         ? error
         : auditMissing
@@ -127,7 +130,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
     >
       {step === 'confirm' && (
         <>
-          <Callout tone="warning" title="Issue a broker credential for this gateway?">
+          <Callout tone="warning">
             {isPlayback ? (
               <div>
                 The broker holds <strong>one password per gateway</strong>, so this{' '}

@@ -482,6 +482,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       {showForm && (
         <Modal
           title={editing ? 'Edit Area' : 'New Area'}
+          subject={editing?.area_name}
+          icon={editing ? <IconPencil size={18} /> : <IconPlus size={18} />}
+          lead={proposeMode ? 'Files this as a proposal, for an approver to decide.' : editing ? 'Saves the changes to this area.' : 'Adds an area of the site, for cells to be filed into.'}
           size="md"
           busy={saving}
           onClose={() => { setShowForm(false); setEditingProposal(null) }}
@@ -558,7 +561,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
       {archiveTarget && (
         <ArchiveModal
-          entityId={archiveTarget.area_id} displayName={archiveTarget.area_name}
+          type="area" entityId={archiveTarget.area_id} displayName={archiveTarget.area_name}
           onArchive={archiveArea} onCancel={() => setArchiveTarget(null)}
         />
       )}
@@ -584,6 +587,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       {filing && (
         <ConfirmModal
           title={filing.areaId ? 'Move Cell' : 'Unfile Cell'}
+          subject={filing.cell.cell_name}
+          icon={<IconFactory size={18} />}
           message={filingQuestion(filing)}
           confirmLabel={filing.areaId ? 'Move Cell' : 'Unfile Cell'}
           pendingLabel={filing.areaId ? 'Moving…' : 'Unfiling…'}

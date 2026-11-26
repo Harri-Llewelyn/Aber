@@ -1,0 +1,68 @@
+import React from 'react'
+import fs from 'node:fs'
+import path from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
+import { render, screen, within } from '@testing-library/react'
+import { Modal } from '../components/common/Modal'
+import { IconArchive, IconPencil } from '../components/common/Icons'
+import { ConfirmModal } from '../components/modals/ConfirmModal'
+import { ArchiveModal } from '../components/modals/ArchiveModal'
+import { RestoreEntityModal } from '../components/modals/RestoreEntityModal'
+import { declaration } from '../test/themeColours'
+
+/**
+ * A dialog's header: the act's icon, the act, then the record after a dash, in mono. frontend/README.md,
+ * "A dialog's header names its act". Drift check 612 reads every dialog's from source.
+ */
+
+const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
+
+const heading = () => screen.getByRole('heading', { level: 2 })
+
+describe("a dialog's header", () => {
+  it('draws the record after the act and a dash, in mono, and is named by both', () => {
+    render(<Modal title="Edit Area" subject="Assembly" icon={<IconPencil size={18} />} onClose={vi.fn()} />)
+    expect(heading()).toHaveTextContent('Edit Area — Assembly')
+    const subject = heading().querySelector('.modal-subject')
+    expect(subject).toHaveClass('mono')
+    expect(subject).toHaveTextContent(/^Assembly$/)
+    expect(screen.getByRole('dialog', { name: 'Edit Area — Assembly' })).toBeInTheDocument()
+    expect(heading().firstChild.tagName.toLowerCase()).toBe('svg')
+  })
+
+  it('draws no dash without a record', () => {
+    render(<Modal title="New Area" icon={<IconPencil size={18} />} onClose={vi.fn()} />)
+    expect(heading()).toHaveTextContent(/^New Area$/)
+    expect(heading().querySelector('.modal-subject')).toBeNull()
+  })
+
+  it('is the lead that describes the dialog', () => {
+    render(<Modal title="Edit Area" subject="Assembly" icon={<IconPencil size={18} />} lead="Saves the changes to this area." onClose={vi.fn()} />)
+    expect(screen.getByRole('dialog')).toHaveAccessibleDescription('Saves the changes to this area.')
+  })
+
+  it("passes a confirm's record to the frame", () => {
+    render(<ConfirmModal title="Remove Link" subject="Drawings" icon={<IconArchive size={18} />} message="Remove it?" onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(heading()).toHaveTextContent('Remove Link — Drawings')
+  })
+
+  it('wraps a long record in the title, and never cuts it', () => {
+    expect(declaration(APP_CSS, '.modal-header-row .modal-title', 'overflow-wrap')).toBe('anywhere')
+    for (const prop of ['white-space', 'text-overflow', 'overflow']) {
+      expect(declaration(APP_CSS, '.modal-title .modal-subject', prop)).toBeNull()
+    }
+  })
+})
+
+describe('Archive and Restore name what they act on', () => {
+  it('Archive names the type and the record', () => {
+    render(<ArchiveModal type="device" entityId="d-1" displayName="CNC Mill 01" onArchive={vi.fn()} onCancel={vi.fn()} />)
+    expect(heading()).toHaveTextContent('Archive Device — CNC Mill 01')
+    expect(within(heading()).getByText('CNC Mill 01')).toHaveClass('modal-subject')
+  })
+
+  it('Restore names them the same way', () => {
+    render(<RestoreEntityModal type="device" name="CNC Mill 01" onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(heading()).toHaveTextContent('Restore Device — CNC Mill 01')
+  })
+})

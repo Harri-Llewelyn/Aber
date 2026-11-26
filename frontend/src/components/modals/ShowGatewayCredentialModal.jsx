@@ -34,10 +34,13 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
 
   return (
     <Modal
-      title={<>Broker Credential for “{gateway.gateway_name}”</>}
+      title="Show Broker Credential"
+      subject={gateway.gateway_name}
+      icon={<IconEye size={18} />}
       size="lg"
       busy={busy}
       onClose={onClose}
+      lead="Shows the broker password last issued to this gateway."
       error={error}
       dismiss={credential ? 'Done' : 'Cancel'}
       footer={credential ? null : (
@@ -47,9 +50,9 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
       )}
     >
       {!credential ? (
-        <Callout tone="info" title="Show this gateway’s broker password?">
-          It is the password last issued to this gateway. Showing it is recorded in the Audit
-          Trail under your name. Nothing about the gateway changes.
+        <Callout tone="info">
+          Showing it is recorded in the Audit Trail under your name. Nothing about the gateway
+          changes.
         </Callout>
       ) : gateway.deployment === 'third_party' ? (
         <EdgeNodeSettings gateway={gateway} credential={credential} />

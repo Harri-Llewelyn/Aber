@@ -1305,6 +1305,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       {showForm && (
         <Modal
           title={editing ? 'Edit Device Configuration' : 'Register New Device'}
+          subject={editing?.asset_name}
+          icon={editing ? <IconPencil size={18} /> : <IconPlus size={18} />}
+          lead={proposeMode ? 'Files this as a proposal, for an approver to decide.' : editing ? 'Saves the changes to this device’s configuration.' : 'Adds a device, ready for its first birth.'}
           size="md"
           busy={saving}
           onClose={closeForm}
@@ -1600,7 +1603,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           onCancel={() => setRejectTarget(null)}
         />
       )}
-      {archiveTarget && <ArchiveModal entityId={archiveTarget.asset_id} displayName={archiveTarget.asset_name} onArchive={archiveDevice} onCancel={() => setArchiveTarget(null)} />}
+      {archiveTarget && <ArchiveModal type="device" entityId={archiveTarget.asset_id} displayName={archiveTarget.asset_name} onArchive={archiveDevice} onCancel={() => setArchiveTarget(null)} />}
       {restoreTarget && (
         <RestoreEntityModal
           type="device" name={restoreTarget.asset_name}

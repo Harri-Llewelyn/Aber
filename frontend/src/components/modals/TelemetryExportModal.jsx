@@ -182,9 +182,11 @@ export function TelemetryExportModal({ devices, metricNames, catalog = null, fro
 
   return (
     <Modal
-      title={<>Export Readings — <span className="mono">{subject}</span></>}
+      title="Export Readings"
+      subject={subject}
       icon={<IconDownload size={18} />}
       size="md"
+      lead="Downloads these readings as a CSV file, at the resolution you choose."
       busy={busy}
       onClose={onClose}
       problem={problem}

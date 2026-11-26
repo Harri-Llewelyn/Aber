@@ -48,7 +48,8 @@ export function ChangeEmailModal({ person, onClose, onChanged, showToast }) {
 
   return (
     <Modal
-      title={`Change the Email Address for ${person.email}`}
+      title="Change the Email Address"
+      subject={person.email}
       icon={<IconUser size={18} />}
       busy={busy}
       onClose={onClose}

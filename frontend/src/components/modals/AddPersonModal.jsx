@@ -5,7 +5,7 @@ import { Callout } from '../common/Callout'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
-import { IconPlus, IconUser } from '../common/Icons'
+import { IconPlus } from '../common/Icons'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { EMAIL, PERSON_ROLES, personRoleLabel } from '../../utils/people'
 import { PasswordShownOnce } from './PasswordShownOnce'
@@ -58,8 +58,9 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
   if (added) {
     return (
       <Modal
-        title={`${personLabel(added)} Added`}
-        icon={<IconUser size={18} />}
+        title="Person Added"
+        subject={personLabel(added)}
+        icon={<IconPlus size={18} />}
         size="lg"
         onClose={onClose}
         dismiss="Done"
@@ -88,7 +89,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
   return (
     <Modal
       title="Add a Person"
-      icon={<IconUser size={18} />}
+      icon={<IconPlus size={18} />}
       size="lg"
       busy={busy}
       onClose={onClose}

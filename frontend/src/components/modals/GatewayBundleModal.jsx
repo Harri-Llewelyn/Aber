@@ -222,17 +222,22 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
 
   return (
     <Modal
-      title={<>Set Up “{gateway.gateway_name}”</>}
+      title="Set Up Gateway"
+      subject={gateway.gateway_name}
+      icon={<IconDownload size={18} />}
       size="lg"
       busy={busy}
       onClose={backOut}
+      lead={step === 'confirm'
+        ? `Issues a new ${mode === 'command' ? 'install command' : 'bundle'} for this gateway.`
+        : 'Issues a single-use token for this gateway’s appliance: an install command to paste, or a bundle to download.'}
       error={error?.message}
       dismiss={dismiss}
       footer={footer}
     >
       {step === 'confirm' && (
         <>
-          <Callout tone="warning" title={`Issue a new ${mode === 'command' ? 'install command' : 'bundle'} for this gateway?`}>
+          <Callout tone="warning">
             Only one token works at a time. Issuing this <strong>invalidates any bundle or
             command already issued</strong> for this gateway — an appliance started with the old one
             is refused at enrolment, with an error that cannot say why.

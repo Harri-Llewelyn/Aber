@@ -77,11 +77,13 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
 
   return (
     <Modal
-      title={<>Approve Discovered {isGateway ? 'Gateway' : 'Device'} <span className="mono">[{item.asset_name}]</span></>}
+      title={`Approve Discovered ${isGateway ? 'Gateway' : 'Device'}`}
+      subject={item.asset_name}
       icon={<IconShieldAlert size={18} />}
       size="md"
       busy={busy}
       onClose={onCancel}
+      lead={`Admits the ${isGateway ? 'gateway' : 'device'} Aber held, under the name and in the place chosen here.`}
       problem={check.problem}
       error={error}
       dismiss="Cancel"
@@ -123,6 +125,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
       {accepting && (
         <ConfirmModal
           title="Accept Match"
+          subject={item.asset_name}
           icon={<IconShieldAlert size={18} />}
           message={
             `Merge the quarantined device '${item.asset_name}'` +
