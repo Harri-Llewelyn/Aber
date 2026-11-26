@@ -789,6 +789,7 @@ encode "the browser follows this one, the container calls that one":
 | Node-RED | `NODERED_OAUTH_AUTH_URL`, `NODERED_OAUTH_CALLBACK_URL`, `NODERED_PUBLIC_URL` | `NODERED_OAUTH_TOKEN_URL`, `NODERED_USERINFO_URL` |
 | Studio | `SUPABASE_PUBLIC_URL` | `SUPABASE_URL` |
 | AAS export | `AAS_BASE_IRI`, `AAS_HISTORIAN_ENDPOINT`, `AAS_MODEL_PUBLIC_BASE` | `SUPABASE_URL` |
+| AAS API | the same three, and `SUPABASE_PUBLIC_URL` for the Registry's endpoints | `SUPABASE_URL` |
 | Swagger | `URLS` (PostgREST entry) | — |
 
 Under the "keep the names" principle the in-cluster column needs **no change at all**. The
