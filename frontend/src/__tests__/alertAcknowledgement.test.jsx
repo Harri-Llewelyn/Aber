@@ -132,7 +132,7 @@ describe('acknowledging', () => {
     render(<AlertPill alerts={[alert()]} userRole="Operator" userId={OPERATOR} showToast={showToast} {...props} />)
     fireEvent.click(pill())
     fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }))
-    return { showToast, dialog: screen.getByRole('dialog', { name: 'Acknowledge Alert' }) }
+    return { showToast, dialog: screen.getByRole('dialog', { name: /^Acknowledge Alert — / }) }
   }
 
   it('asks for a reason before it is sent, and Other for a note', () => {
@@ -168,7 +168,7 @@ describe('acknowledging', () => {
     expect(api.acknowledgeAlert).toHaveBeenCalledWith('a1', 'planned_work', 'belt change')
     expect(showToast).toHaveBeenCalledWith('Alert acknowledged: Device Offline', 'success',
       { to: deviceUrl('dev231000000000400080000') })
-    expect(screen.queryByRole('dialog', { name: 'Acknowledge Alert' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: /^Acknowledge Alert — / })).toBeNull()
   })
 
   it('shows the database\'s refusal in the dialog and toasts nothing', async () => {
@@ -193,7 +193,7 @@ describe('withdrawing', () => {
     render(<AlertPill alerts={[acknowledgedBy(OPERATOR)]} userRole="Shopfloor_Manager" userId={OTHER} showToast={showToast} />)
     fireEvent.click(pill())
     fireEvent.click(screen.getByRole('button', { name: 'Withdraw' }))
-    const dialog = screen.getByRole('dialog', { name: 'Withdraw Acknowledgement' })
+    const dialog = screen.getByRole('dialog', { name: /^Withdraw Acknowledgement — / })
     const confirm = within(dialog).getByRole('button', { name: 'Withdraw Acknowledgement' })
     expect(confirm).toHaveClass('btn-primary')
     fireEvent.click(confirm)

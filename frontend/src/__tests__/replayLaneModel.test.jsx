@@ -109,7 +109,7 @@ describe("a replay lane's drawer, when its machine has a 3D model", () => {
 
     const viewer = await within(dialog()).findByTestId('model-3d-viewer')
     expect(viewer.getAttribute('src')).toBe(`http://localhost:54321/storage/v1/object/public/asset-3d-models/${MACHINE_PATH}`)
-    expect(within(dialog()).getByRole('heading', { name: 'Assembly Device (replay)' })).toBeInTheDocument()
+    expect(within(dialog()).getByRole('heading', { name: '3D Model — Assembly Device (replay)' })).toBeInTheDocument()
     expect(within(dialog()).getByText("Assembly Device's model")).toBeInTheDocument()
     expect(within(dialog()).getByRole('button', { name: /Reset view/ })).toBeInTheDocument()
   })

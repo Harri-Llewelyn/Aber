@@ -164,7 +164,7 @@ describe('the People tab', () => {
     fireEvent.click(drawer.getByRole('button', { name: 'Remove Access' }))
 
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent('Remove Access for operator@site.test')
+    expect(dialog).toHaveTextContent('Remove Access — operator@site.test')
     expect(dialog).toHaveTextContent('can no longer sign in')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     expect(api.removePersonAccess).not.toHaveBeenCalled()
@@ -376,7 +376,7 @@ describe('display names', () => {
     const toast = renderPeople()
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Change Name' }))
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent('Change the Name for operator@site.test')
+    expect(dialog).toHaveTextContent('Change the Name — operator@site.test')
     const input = within(dialog).getByLabelText('Display Name')
     expect(input).toHaveValue('Owain Operator')
     fireEvent.change(input, { target: { value: '  Owain ap Rhys ' } })
@@ -450,7 +450,7 @@ describe('display names', () => {
     fireEvent.change(name, { target: { value: ' Nia Newcomer ' } })
     fireEvent.click(within(dialog).getByRole('button', { name: /Add Person/ }))
     await waitFor(() => expect(api.addPerson).toHaveBeenCalledWith('new@site.test', 'Operator', 'Nia Newcomer'))
-    expect(await screen.findByText('Nia Newcomer (new@site.test) Added')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Person Added — Nia Newcomer (new@site.test)' })).toBeInTheDocument()
   })
 
   it('says so when the person was added and their name was not set', async () => {
@@ -495,7 +495,7 @@ describe('setting a new password', () => {
     fireEvent.click(drawer.getByRole('button', { name: 'Set New Password' }))
 
     const confirm = await screen.findByRole('dialog')
-    expect(confirm).toHaveTextContent('Set a New Password for operator@site.test')
+    expect(confirm).toHaveTextContent('Set a New Password — operator@site.test')
     expect(confirm).toHaveTextContent('current password stops working')
     fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
     expect(api.managePeople).not.toHaveBeenCalled()
@@ -505,7 +505,7 @@ describe('setting a new password', () => {
     await waitFor(() =>
       expect(api.managePeople).toHaveBeenCalledWith({ action: 'set-password', user_id: OPERATOR }))
 
-    const reveal = await screen.findByText('New Password for operator@site.test')
+    const reveal = await screen.findByRole('heading', { name: 'New Password — operator@site.test' })
     const dialog = reveal.closest('[role="dialog"]')
     expect(dialog).toHaveTextContent('it is not shown again')
     expect(within(dialog).getByLabelText('Password')).toHaveTextContent(MINTED)
@@ -680,7 +680,7 @@ describe('ending a person\'s sessions', () => {
     fireEvent.click(drawer.getByRole('button', { name: 'End Sessions' }))
 
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent('End Every Session for operator@site.test')
+    expect(dialog).toHaveTextContent('End Every Session — operator@site.test')
     expect(dialog).toHaveTextContent('the dashboard in each browser, and Studio, the forge, Node-RED and Grafana')
     expect(dialog).toHaveTextContent('The API refuses their access at once')
     expect(dialog).toHaveTextContent('Grafana within the hour')
@@ -848,7 +848,7 @@ describe('a person\'s sessions, listed in their drawer', () => {
     renderPeople()
     const { list } = await openList('operator@site.test', 'Owain Operator')
     fireEvent.click(within(list).getByRole('button', { name: 'End the session: Chrome on Windows' }))
-    const dialog = await screen.findByRole('dialog', { name: 'End a Session for Owain Operator (operator@site.test)' })
+    const dialog = await screen.findByRole('dialog', { name: 'End a Session — Owain Operator (operator@site.test)' })
     expect(dialog).toHaveAccessibleDescription(
       'End Owain Operator\'s session in Chrome on Windows, last active 5 minutes ago? That browser has to sign in again.')
     expect(within(dialog).getByRole('button', { name: 'End Session' })).toBeInTheDocument()
@@ -974,7 +974,7 @@ describe('changing a person\'s role', () => {
     api.listPeople.mockResolvedValue(NAMED)
     renderPeople()
     const dialog = await openChangeRole()
-    expect(screen.getByRole('dialog')).toHaveAccessibleName('Change the Role for Owain Operator (operator@site.test)')
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Change the Role — Owain Operator (operator@site.test)')
     expect(screen.getByRole('dialog')).toHaveAccessibleDescription(/Nothing changes until you select Change Role/)
 
     // The four roles, theirs chosen and focused, with its description under it as Add Person shows.

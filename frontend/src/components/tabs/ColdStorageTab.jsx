@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import { tabUrl } from '../../routes'
 import { api } from '../../api'
+import { Callout } from '../common/Callout'
 import CopyableId from '../common/CopyableId'
 import { IconDatabase, IconAlertTriangle } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
@@ -156,10 +157,7 @@ export function ColdStorageTab({ showToast, userRole }) {
             <>
               {error && (
                 <div className="card-body">
-                  <div className="callout callout-danger">
-                    <IconAlertTriangle size={14} className="callout-icon" />
-                    <div>{error}</div>
-                  </div>
+                  <Callout tone="danger">{error}</Callout>
                 </div>
               )}
 

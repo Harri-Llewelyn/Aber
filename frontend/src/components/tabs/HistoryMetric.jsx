@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useSetting } from '../../hooks/useSettings'
+import { Callout } from '../common/Callout'
 import { ToolbarPopover, FiltersPopover } from '../common/FiltersPopover'
 import { FilterList } from '../common/FilterChecklist'
 import { SearchInput } from '../common/SearchInput'
@@ -329,7 +330,7 @@ export function HistoryMetric({ metric, devices, schemas, catalog = null, metric
         ) : reading?.problem ? (
           <EmptyState icon={<IconChartLine size={36} />} message={reading.problem} />
         ) : reading?.error ? (
-          <div className="callout callout-danger">{`The readings could not be read: ${reading.error}`}</div>
+          <Callout tone="danger">{`The readings could not be read: ${reading.error}`}</Callout>
         ) : reading && !reading.loading && reading.keys.length === 0 ? (
           <EmptyState icon={<IconCpu size={36} />} message={`No device that reports ${metric} is in the area, cell or devices chosen.`} />
         ) : !reading?.byAsset ? (

@@ -208,7 +208,7 @@ describe('removing one', () => {
     await waitFor(() => expect(factorRows()).toHaveLength(1))
     fireEvent.click(screen.getByRole('button', { name: 'Remove the authenticator: Work phone' }))
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent('Remove Work phone')
+    expect(dialog).toHaveTextContent('Remove Authenticator — Work phone')
     expect(dialog).toHaveTextContent('your password alone signs you in')
     expect(within(dialog).queryByLabelText(/Code from/)).toBeNull()
 

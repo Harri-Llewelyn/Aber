@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react'
+import { Callout } from '../common/Callout'
 import { RouteLink } from '../common/RouteLink'
 import { areaUrl, cellHistoryUrl, cellUrl, deviceUrl, devicesInCellUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
@@ -323,15 +324,12 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
       <div className="page-main">
       {/* Above the card: a page-level finding, and the first thing worth knowing on arrival. */}
       {unlinkedDevices.length > 0 && (
-        <div className="callout callout-warning callout-page">
-          <IconShieldAlert size={18} className="callout-icon" />
-          <div>
-            <strong>{plural(unlinkedDevices.length, 'device')} not linked to any cell:</strong>{' '}
-            {unlinkedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unlinkedDevices.length > 5 ? ', …' : ''}.
-            Set a cell on each device from the Devices page, give its gateway a cell on the Gateways page,
-            or mark it Site-Wide or Area-Wide if it belongs to no single cell.
-          </div>
-        </div>
+        <Callout tone="warning" page>
+          <strong>{plural(unlinkedDevices.length, 'device')} not linked to any cell:</strong>{' '}
+          {unlinkedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unlinkedDevices.length > 5 ? ', …' : ''}.
+          Set a cell on each device from the Devices page, give its gateway a cell on the Gateways page,
+          or mark it Site-Wide or Area-Wide if it belongs to no single cell.
+        </Callout>
       )}
 
       {/* One card, composed as every card is: the title, then the toolbar that narrows what is
@@ -511,6 +509,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
       {showForm && (
         <Modal
           title={editing ? 'Edit Cell' : 'New Cell'}
+          subject={editing?.cell_name}
+          icon={editing ? <IconPencil size={18} /> : <IconPlus size={18} />}
+          lead={proposeMode ? 'Files this as a proposal, for an approver to decide.' : editing ? 'Saves the changes to this cell.' : 'Adds a cell, where gateways and devices are placed.'}
           size="md"
           busy={saving}
           onClose={closeForm}
@@ -620,7 +621,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
 
       {archiveTarget && (
         <ArchiveModal
-          entityId={archiveTarget.cell_id} displayName={archiveTarget.cell_name}
+          type="cell" entityId={archiveTarget.cell_id} displayName={archiveTarget.cell_name}
           onArchive={archiveCell} onCancel={() => setArchiveTarget(null)}
         />
       )}

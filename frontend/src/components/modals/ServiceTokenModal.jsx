@@ -1,9 +1,10 @@
 import React, { useCallback, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { CopyBlock, CopyField } from '../common/CopyField'
 import { Modal } from '../common/Modal'
-import { IconLock, IconShieldAlert } from '../common/Icons'
+import { IconLock } from '../common/Icons'
 import { SegmentedControl } from '../common/SegmentedControl'
 import { formatDate } from '../../utils/format'
 import { i3xBaseUrl, i3xClientSetups } from '../../utils/i3xClientSetups'
@@ -118,10 +119,13 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
 
   return (
     <Modal
-      title={`Token for “${principalName}”`}
+      title="Issue Token"
+      subject={principalName}
+      icon={<IconLock size={18} />}
       size="lg"
       busy={busy}
       onClose={onClose}
+      lead="Issues a long-lived token for this identity."
       error={confirming ? error : null}
       dismiss={confirming ? 'Cancel' : 'Done'}
       footer={confirming ? (
@@ -138,20 +142,16 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
     >
       {confirming && (
         <>
-          <div className="callout callout-warning">
-            <IconShieldAlert size={14} className="callout-icon" />
+          <Callout tone="warning">
+            {/* The one fact that differs from the broker credential modal, said first: minting
+                to rotate would leave two live credentials. */}
             <div>
-              <strong>Issue a long-lived token for this identity?</strong>
-              {/* The one fact that differs from the broker credential modal, said first: minting
-                  to rotate would leave two live credentials. */}
-              <div>
-                This <strong>adds</strong> a credential. It does <strong>not</strong> replace any
-                token this identity already holds — those keep working until they expire or are
-                revoked individually.
-              </div>
-              <div>The token is shown <strong>once</strong> and cannot be recovered.</div>
+              This <strong>adds</strong> a credential. It does <strong>not</strong> replace any
+              token this identity already holds — those keep working until they expire or are
+              revoked individually.
             </div>
-          </div>
+            <div>The token is shown <strong>once</strong> and cannot be recovered.</div>
+          </Callout>
 
           <div className="form-group">
             <label className="form-label" htmlFor="svc-token-ttl">Valid For</label>
@@ -178,17 +178,11 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
 
       {step === 'reveal' && minted && (
         <>
-          <div className="callout callout-warning">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>
-              <strong>Copy this now — it is not shown again.</strong>
-              <div>
-                Closing this dialog discards the token. Nothing in the stack keeps a copy, so
-                minting another is the only way back — and that adds a credential rather than
-                replacing this one.
-              </div>
-            </div>
-          </div>
+          <Callout tone="warning" title="Copy this now — it is not shown again.">
+            Closing this dialog discards the token. Nothing in the stack keeps a copy, so
+            minting another is the only way back — and that adds a credential rather than
+            replacing this one.
+          </Callout>
 
           <CopyField
             id="svc-token"
@@ -213,14 +207,11 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
           {/* The scope comes from the response (`revocation_scope`, set by mint-service-token), not
               from a literal here, so this cannot drift from what revocation covers. */}
           {minted.revocation_scope === 'postgrest' && (
-            <div className="callout">
-              <IconShieldAlert size={14} className="callout-icon" />
-              <div>
-                Revoking this token stops it at <strong>{REVOCATION_REACHES}</strong> from their
-                next request. {SIGNATURE_ONLY} verify the signature themselves and will keep
-                accepting it until {expiresOn}.
-              </div>
-            </div>
+            <Callout tone="info">
+              Revoking this token stops it at <strong>{REVOCATION_REACHES}</strong> from their
+              next request. {SIGNATURE_ONLY} verify the signature themselves and will keep
+              accepting it until {expiresOn}.
+            </Callout>
           )}
 
           {/* Built from the minted token in this component's state, so the setups go with it. */}

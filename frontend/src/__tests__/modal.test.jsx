@@ -303,7 +303,7 @@ describe('a confirm-shaped modal keeps its exported props', () => {
         replacement={null} onConfirm={onConfirm} onCancel={vi.fn()}
       />
     )
-    expect(screen.getByRole('dialog', { name: /Restore Metric spindle_temp/ })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: /Restore Metric — spindle_temp/ })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Restore Metric' }))
     expect(onConfirm).toHaveBeenCalledTimes(1)

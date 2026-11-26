@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { settingUrl } from '../../routes'
 import { api } from '../../api'
-import { IconSettings, IconX, IconAlertTriangle } from '../common/Icons'
+import { Callout } from '../common/Callout'
+import { IconSettings, IconX } from '../common/Icons'
 import CopyableId from '../common/CopyableId'
 import { CardHeading } from '../common/CardHeading'
 import { EmptyState } from '../common/EmptyState'
@@ -358,10 +359,7 @@ export function SettingsTab({ showToast, readOnly = false }) {
 
           {loadError && (
             <div className="card-body">
-              <div className="callout callout-danger">
-                <IconAlertTriangle size={14} className="callout-icon" />
-                <div>{loadError}</div>
-              </div>
+              <Callout tone="danger">{loadError}</Callout>
             </div>
           )}
 

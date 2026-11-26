@@ -72,8 +72,8 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe.each(SUBJECTS)('replacing a stored $what', (subject) => {
-  const question = () => screen.findByRole('dialog', { name: subject.title })
-  const asked = () => screen.queryByRole('dialog', { name: subject.title })
+  const question = () => screen.findByRole('dialog', { name: (name) => name.startsWith(`${subject.title} — `) })
+  const asked = () => screen.queryByRole('dialog', { name: (name) => name.startsWith(`${subject.title} — `) })
 
   it('asks first, naming the record and the new file, and uploads nothing until it is answered', async () => {
     subject.show()
@@ -162,7 +162,7 @@ describe('replacing a stored area plan', () => {
     const props = { cells: [], canManage: true, showToast: vi.fn(), onChanged: vi.fn() }
     const { rerender } = render(<AreaPlanPanel area={area()} {...props} />)
     await choose(screen.getByTestId('area-plan-input'), svg())
-    await screen.findByRole('dialog', { name: 'Replace Area Plan' })
+    await screen.findByRole('dialog', { name: /^Replace Area Plan — / })
     rerender(<AreaPlanPanel area={area({ area_id: 'a0000000-0000-4000-8000-000000000002', area_name: 'Paint Shop' })} {...props} />)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(api.uploadAreaPlan).not.toHaveBeenCalled()
@@ -175,7 +175,7 @@ describe('attaching the first file', () => {
     showModel({ device: device(null) })
     await choose(screen.getByTestId('model-3d-input'), model())
     expect(api.uploadDeviceModel).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole('dialog', { name: 'Replace 3D Model' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: /^Replace 3D Model — / })).toBeNull()
   })
 
   it('asks nothing for an area with no plan', async () => {
@@ -203,7 +203,7 @@ describe('the two alike', () => {
   it('say before a removal that the file is deleted, and that it can be downloaded first, and ask for nothing typed', () => {
     const { unmount } = showModel()
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
-    const removeModel = screen.getByRole('dialog', { name: 'Remove 3D Model' })
+    const removeModel = screen.getByRole('dialog', { name: /^Remove 3D Model — / })
     expect(removeModel).toHaveAccessibleDescription(
       'Remove the 3D model from CNC_01? The device keeps its other details. The stored file is deleted. Download it first to keep a copy.')
     expect(within(removeModel).queryByRole('textbox')).toBeNull()
@@ -211,7 +211,7 @@ describe('the two alike', () => {
 
     showPlan()
     fireEvent.click(screen.getByRole('button', { name: 'Remove Plan' }))
-    const removePlan = screen.getByRole('dialog', { name: 'Remove Area Plan' })
+    const removePlan = screen.getByRole('dialog', { name: /^Remove Area Plan — / })
     expect(removePlan).toHaveAccessibleDescription(
       'Remove the plan from Assembly Hall? Cells keep their places on the default outline. The stored file is deleted. Download it first to keep a copy.')
     expect(within(removePlan).queryByRole('textbox')).toBeNull()

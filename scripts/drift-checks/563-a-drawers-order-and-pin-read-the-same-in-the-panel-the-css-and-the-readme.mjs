@@ -70,14 +70,14 @@ export default function check() {
       }
       seen += 1;
       lines.slice(i, end).forEach((l, j) => {
-        if (/className="[^"]*\bcallout\b/.test(l)) offences.push(`${file}:${i + j + 1} draws a callout in a drawer: hand it to ContextPanel's warnings`);
+        if (/className="[^"]*\bcallout\b|<Callout\b/.test(l)) offences.push(`${file}:${i + j + 1} draws a callout in a drawer: hand it to ContextPanel's warnings`);
       });
     });
   }
   if (seen < 16) offences.push(`read only ${seen} drawers`);
   for (const name of ['SuppressionWindows', 'GatewayRepositoryPanel', 'AreaPlanPanel', 'ApplianceCommand']) {
     const file = `frontend/src/components/common/${name}.jsx`;
-    if (/className="[^"]*\bcallout\b/.test(read(file))) offences.push(`${file} draws a callout in a drawer's section: hand it to ContextPanel's warnings`);
+    if (/className="[^"]*\bcallout\b|<Callout\b/.test(read(file))) offences.push(`${file} draws a callout in a drawer's section: hand it to ContextPanel's warnings`);
   }
 
   if (offences.length) {

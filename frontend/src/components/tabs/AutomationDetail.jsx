@@ -5,6 +5,7 @@ import { navigate } from '../../hooks/useUrlState'
 import { usePolling } from '../../hooks/usePolling'
 import { automationUrl, automationsUrl, deviceUrl, trailUrl, triggerIdOfFingerprint } from '../../routes'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import CopyableId from '../common/CopyableId'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -180,7 +181,7 @@ export function AutomationDetail({ automationKey, showToast, canWrite, hasPermis
       </>
     )
   }
-  if (error && !base) return <div className="callout callout-danger">{`The automation could not be read: ${error}`}</div>
+  if (error && !base) return <Callout tone="danger">{`The automation could not be read: ${error}`}</Callout>
   if (!base) return <LoadingState label="automation" />
 
   return (
@@ -337,6 +338,7 @@ export function AutomationDetail({ automationKey, showToast, canWrite, hasPermis
       {deleting && (
         <ConfirmModal
           title="Delete Automation"
+          subject={alias}
           icon={<IconTrash size={18} />}
           message={<>Delete <strong>{alias}</strong>? Its open alerts resolve and it stops watching every device it names. The Audit Trail keeps the record of it. This cannot be undone.</>}
           requireTyped={alias}

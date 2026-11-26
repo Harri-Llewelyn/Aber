@@ -417,6 +417,37 @@ does not move a card from under the pointer. The tints are measured in `themeCon
 badge in a card sits on `.summary-card-badge`, the card's own ground, because a badge's ink has
 too little headroom over its own tint to survive a second one.
 
+### A dialog's header names its act
+
+`Modal` draws one header for every dialog: the act's icon, the title, the record after a dash, and
+a lead under them. `dialogFooters.test.js` and drift check 612 read every dialog's.
+
+- **The title is the act, in Title Case:** Edit Area, Archive Device, Upload Capture, never
+  "Confirm". It names the act as the button that opens it does. A viewer names what it shows: Area
+  Plan, Digital Nameplate.
+- **The record goes in `subject`.** `Modal` and `ConfirmModal` draw it after the title, in `mono`:
+  "Edit Area — Assembly", "Archive Device — CNC Mill 01". No dialog writes the dash, quotes or
+  brackets itself. A long name wraps in the title and is never cut. A form that makes a record has
+  none yet, so New Area has no subject.
+- **Every dialog has an icon, sized 18, and it follows the act.** The table below says which. An act
+  not in it keeps the icon it has. One with none takes the icon of the button that opens it, such as
+  Set Up Gateway's download arrow, or else its page's. When a long name wraps the title, the icon
+  keeps its size beside the first line, which is as tall as the close button and level with it.
+- **Every form has a lead:** one sentence saying what the dialog will do. It is the dialog's
+  accessible description, read after the title. A sentence that said it elsewhere, in a callout's
+  first line, a hint or a paragraph at the bottom, is the lead instead. A confirmation's message is
+  its lead. A viewer, and a step that shows a result, may have none.
+
+| Act | Icon |
+| :--- | :--- |
+| Edit | `IconPencil` |
+| Archive | `IconArchive` |
+| Remove, Delete, Permanently Delete | `IconTrash` |
+| Restore | `IconRefreshCw` |
+| New, Add, Register | `IconPlus` |
+| Upload | `IconUpload` |
+| Export | `IconDownload` |
+
 ### A dialog keeps its buttons in view
 
 `Modal` is a flex column capped at the window height. The header row, the error slot and the footer
@@ -2998,6 +3029,13 @@ in "building management system".
   listed first, picked in the order under [The drawer is `ContextPanel`](#the-drawer-is-contextpanel).
 - **Tables.** Every header row, group band and section band is one opaque colour, `--bg-base`
   ([Table and Row Conventions](#table-and-row-conventions)).
+- **A callout is a `Callout`.** `common/Callout.jsx` draws every one: in a dialog, a card or a
+  drawer, and above a page's first card as its banner (`page`). The tone picks the colours and the
+  icon, at one size (14px): info `IconInfo`, warning `IconAlertTriangle`, danger `IconShieldAlert`,
+  success `IconCheck`. A `title` is the strong first line, and an `action` (Stop, Cancel, a dismiss)
+  stands at the end. A caller passes `icon` only with a reason, said beside it: the strip of a
+  running recording, playback or backup names its job. Drift check 611 refuses a callout written by
+  hand.
 - **Callouts in a dialog.** A callout in a dialog's body leaves the gap it has above itself (12px)
   before a table, a list or a form, so a banner never sits flush on what it qualifies. One rule in
   `App.css` does it for every dialog. A replay lane that is offline gets an info callout, not the
@@ -3105,6 +3143,7 @@ that describes a component keeps the detail, and *Not* names what to use instead
 | :--- | :--- | :--- |
 | `AlertPill` | The top bar's alert counter, and the list behind it | |
 | `Badge` | A status or category chip; `ArchivedBadge` is ARCHIVED | A gateway's status: `StatusBadge`. A derived metric: `DerivedTag` |
+| `Callout` | What the reader must not miss, tinted, with its tone's icon; `page` is a banner | A dialog's failure: `Modal`'s `error` |
 | `ConnectionStrip` | The row that says the page has stopped updating | |
 | `DerivedTag` | Marks a derived metric wherever one is named | |
 | `NotificationHistory` | The top bar's bell, and the list behind it | |

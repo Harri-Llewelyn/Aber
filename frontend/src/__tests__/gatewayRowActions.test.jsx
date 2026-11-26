@@ -216,7 +216,7 @@ describe('gateway row actions', () => {
     const openRestore = async (overrides = {}) => {
       await show([gateway({ is_archived: true, ...overrides })])
       fireEvent.click(openPanel().getByText('Restore Gateway').closest('button'))
-      return screen.getByRole('dialog', { name: 'Restore Gateway' })
+      return screen.getByRole('dialog', { name: /^Restore Gateway — / })
     }
 
     it('names the gateway, and says its revoked broker credential does not come back', async () => {

@@ -136,7 +136,7 @@ describe('device row actions', () => {
     const openRestore = async () => {
       await show([device({ is_archived: true })])
       fireEvent.click(openPanel().getByText('Restore Device').closest('button'))
-      return screen.getByRole('dialog', { name: 'Restore Device' })
+      return screen.getByRole('dialog', { name: /^Restore Device — / })
     }
 
     it('names the device and says its replay lanes come back with it', async () => {
@@ -153,7 +153,7 @@ describe('device row actions', () => {
 
       fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
 
-      expect(screen.queryByRole('dialog', { name: 'Restore Device' })).toBeNull()
+      expect(screen.queryByRole('dialog', { name: /^Restore Device — / })).toBeNull()
       expect(api.post).not.toHaveBeenCalled()
     })
 
@@ -163,7 +163,7 @@ describe('device row actions', () => {
 
       fireEvent.click(within(dialog).getByRole('button', { name: 'Restore Device' }))
 
-      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Restore Device' })).toBeNull())
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Restore Device — / })).toBeNull())
       expect(api.post).toHaveBeenCalledTimes(1)
       expect(api.post).toHaveBeenCalledWith('/api/v1/devices/aaaaaaaa-0000-4000-8000-000000000001/restore', {})
     })
@@ -223,7 +223,7 @@ describe('device 3D model action', () => {
     fireEvent.click(add)
 
     expect(dialog().querySelector('.modal')).toHaveClass('modal-full')
-    expect(within(dialog()).getByRole('heading', { name: 'CNC_01' })).toBeInTheDocument()
+    expect(within(dialog()).getByRole('heading', { name: '3D Model — CNC_01' })).toBeInTheDocument()
     expect(within(dialog()).getByText(/Drop a 3D model here/i)).toBeInTheDocument()
     expect(within(dialog()).getByTestId('model-3d-input')).toBeInTheDocument()
   })
@@ -325,7 +325,7 @@ describe('device 3D model action', () => {
     expect(within(dialog()).getByRole('button', { name: /Replace/ })).toBeInTheDocument()
     fireEvent.click(within(dialog()).getByRole('button', { name: /Remove/ }))
 
-    const confirm = screen.getByRole('dialog', { name: 'Remove 3D Model' })
+    const confirm = screen.getByRole('dialog', { name: /^Remove 3D Model — / })
     expect(within(confirm).getByRole('button', { name: 'Remove Model' })).toHaveClass('btn-danger')
   })
 

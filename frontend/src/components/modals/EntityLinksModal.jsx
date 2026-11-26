@@ -174,7 +174,8 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
 
   return (
     <Modal
-      title={<>Attached Links — <strong>{entityName}</strong></>}
+      title="Attached Links"
+      subject={entityName}
       icon={<IconBookOpen size={18} />}
       size="lg"
       busy={savingLink}
@@ -298,6 +299,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
         {confirmDelete && (
           <ConfirmModal
             title="Remove Link"
+            subject={confirmDelete.display_name}
             icon={<IconTrash size={18} />}
             message={`Are you sure you want to remove the link '${confirmDelete.display_name}'?`}
             confirmLabel="Remove Link"

@@ -104,7 +104,7 @@ describe('the Quarantine tab', () => {
     render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
     fireEvent.click(tabLink('Quarantine'))
     fireEvent.click(await screen.findByRole('button', { name: /Approve & Onboard/ }))
-    return screen.findByRole('dialog', { name: /Approve Discovered Device/ })
+    return screen.findByRole('dialog', { name: /^Approve & Onboard — / })
   }
 
   it('offers a device that was registered before no match, and still offers its approval', async () => {
@@ -123,7 +123,7 @@ describe('the Quarantine tab', () => {
     const dialog = await open()
     expect(screen.getByText('Possible match: CNC_02')).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Accept Match' }))
-    const question = screen.getByRole('dialog', { name: 'Accept Match' })
+    const question = screen.getByRole('dialog', { name: /^Accept Match — / })
     fireEvent.click(within(question).getByRole('button', { name: 'Accept Match' }))
     expect(await within(question).findByRole('alert')).toHaveTextContent(refusal)
     expect(question).toBeInTheDocument()

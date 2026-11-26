@@ -63,7 +63,8 @@ export function ApplyDerivedMetricsModal({ text, source = null, showToast, onChe
 
   return (
     <Modal
-      title={`Apply ${source ? source : 'Derived Metrics'}`}
+      title="Apply Derived Metrics"
+      subject={source}
       icon={<IconTag size={18} />}
       size="lg"
       lead="Applies the whole file, all of it or none. A definition is fixed once saved, so only a description can change, shown before and after. It deletes nothing."
