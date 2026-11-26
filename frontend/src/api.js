@@ -1734,6 +1734,37 @@ const apiMethods = {
   },
 
   /**
+   * One Audit Trail event by id, with its entity's events around it, for a link to an event the page
+   * has not loaded. Read through the page's own read, so each has what a loaded row has (its class, its
+   * transaction's size), under the caller's own policies, deleted entities included. `events` is the
+   * entity's newest page when that holds the event, else the event and the page older than it;
+   * `olderUnread` and `newerUnread` say the entity's history goes on past them. Null when no row has
+   * the id or the caller may not read it.
+   */
+  auditTrailEvent: async (id) => {
+    if (!/^\d{1,18}$/.test(String(id))) return null;
+    const { data, error } = await supabase
+      .from('audit_trail')
+      .select('id,entity_id,recorded_at')
+      .eq('id', id)
+      .limit(1);
+    if (error) throw new Error(error.message || 'Could not read the event');
+    const row = data?.[0];
+    if (!row) return null;
+    const lane = `/api/v1/audit-trail?limit=200&include_purged=true&entity_ids=${encodeURIComponent(row.entity_id)}`;
+    const holds = (page) => page.find(e => String(e.event_id) === String(row.id));
+    let page = await api.get(lane);
+    let newerUnread = false;
+    if (!holds(page)) {
+      // More of the entity's history is newer than the event than one page holds: the page that ends at it.
+      page = await api.get(`${lane}&before_recorded_at=${encodeURIComponent(row.recorded_at)}&before_id=${Number(row.id) + 1}`);
+      newerUnread = true;
+    }
+    const event = holds(page);
+    return event ? { event, events: [...page], olderUnread: Boolean(page.nextCursor), newerUnread } : null;
+  },
+
+  /**
    * The jtis `auth_pre_request()` is currently refusing, as a Set.
    *
    * Separate from listServiceTokens(): that is the permanent history, this reads
@@ -3693,6 +3724,10 @@ const apiMethods = {
       rows.totalMatching = typeof payload.total_matching === 'number'
         ? payload.total_matching
         : null;
+      // How many entities those rows are about, each once (0339). NULL when the payload carries none.
+      rows.matchingEntities = typeof payload.matching_entities === 'number'
+        ? payload.matching_entities
+        : null;
       // NULL IS THE ONLY END-OF-DATA SIGNAL, and it comes from the server. A full page that happens
       // to be the last one is ordinary, so "fewer rows than I asked for" is not a reliable test and
       // callers must not invent one.
@@ -3711,9 +3746,11 @@ const apiMethods = {
         .select('*, gateways(id, name, cell_id, location_scope, is_simulated, is_shadow)')
         .eq('is_quarantined', true);
       if (error) throw error;
+      // An archived device is not in the queue: its births are dropped, not held, and Entities lists it.
+      const held = (data || []).filter(d => !d.is_archived);
 
       // asset_config is keyed by sparkplug_id, which is derivable from the UUID we already have.
-      const keys = (data || []).map(d => d.sparkplug_id || deviceSparkplugId(d.id)).filter(Boolean);
+      const keys = held.map(d => d.sparkplug_id || deviceSparkplugId(d.id)).filter(Boolean);
       let metricsByKey = new Map();
       if (keys.length > 0) {
         const { data: configRows, error: configError } = await supabase
@@ -3729,7 +3766,7 @@ const apiMethods = {
         }, new Map());
       }
 
-      return (data || []).map(d => {
+      return held.map(d => {
         const sparkplugId = d.sparkplug_id || deviceSparkplugId(d.id);
         const reportedMetrics = metricsByKey.get(sparkplugId) || [];
         return {

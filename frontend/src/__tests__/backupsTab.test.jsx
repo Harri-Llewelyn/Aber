@@ -223,11 +223,11 @@ describe('the list of runs', () => {
     renderTab()
     await screen.findByTestId('run-m-0')
     const foot = document.querySelector('.list-foot')
-    expect(foot).toHaveTextContent('30 of 45')
-    expect(within(foot).getByRole('button', { name: 'Show 15 more' })).toBeInTheDocument()
+    expect(foot).toHaveTextContent('30 runs of 45 runs')
+    expect(within(foot).getByRole('button', { name: 'Show 15 More Runs' })).toBeInTheDocument()
     expect(document.querySelector('.section-count')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Show 15 more' }))
-    await waitFor(() => expect(document.querySelector('.list-foot')).toHaveTextContent('All 45 shown.'))
+    fireEvent.click(screen.getByRole('button', { name: 'Show 15 More Runs' }))
+    await waitFor(() => expect(document.querySelector('.list-foot')).toHaveTextContent('All 45 runs shown.'))
   })
 
   it('shows no count when nothing has run', async () => {
@@ -799,18 +799,18 @@ describe('the filter and the pages', () => {
     await screen.findByTestId('run-m-0')
     expect(screen.getAllByTestId(/^run-/)).toHaveLength(30)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show 15 more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show 15 More Runs' }))
     await waitFor(() => expect(screen.getAllByTestId(/^run-/)).toHaveLength(45))
     expect(api.listBackupRuns).toHaveBeenLastCalledWith({ statuses: ['COMPLETED', 'FAILED', 'CANCELLED'], limit: 60 })
     expect(screen.queryByRole('button', { name: /^Show \d+ more$/ })).toBeNull()
-    expect(screen.getByText('All 45 shown.')).toBeInTheDocument()
+    expect(screen.getByText('All 45 runs shown.')).toBeInTheDocument()
   })
 
   it('goes back to the first page when the filter changes', async () => {
     serveRuns(Array.from({ length: 45 }, (_, i) => ({ ...PRUNED, id: `m-${i}` })))
     renderTab()
     await screen.findByTestId('run-m-0')
-    fireEvent.click(screen.getByRole('button', { name: 'Show 15 more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show 15 More Runs' }))
     await waitFor(() => expect(api.listBackupRuns).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 60 })))
 
     pick('Status', 'completed')

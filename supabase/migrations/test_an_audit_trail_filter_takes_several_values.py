@@ -432,7 +432,8 @@ class OneListForm(Base):
                             "p_changed_by uuid[] DEFAULT NULL::uuid[]"):
                     self.assertIn(arg, args, f"{path.name} declares audit_trail_page without {arg}")
         self.assertEqual(sorted(found), ["0001_baseline_schema.sql",
-                                         "0168_every_schema_attached_to_a_device_counts.sql"])
+                                         "0168_every_schema_attached_to_a_device_counts.sql",
+                                         "0339_the_audit_trail_counts_the_entities_its_events_are_about.sql"])
 
     def test_the_comment_states_the_lists(self):
         self.cur.execute(

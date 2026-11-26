@@ -1,0 +1,68 @@
+{
+  "_comment": [
+    "THE CONTRACT BETWEEN THE TWO VIEWS OF ONE DEVICE: ITS AAS SHELL AND ITS i3X OBJECT.",
+    "",
+    "Both are named from the device's sparkplug_id, each in its own process and language:",
+    "",
+    "  supabase/functions/_shared/aas/shell.ts   globalAssetIdOf(), shellIdOf(), i3xElementId()",
+    "                                            -- the shell, and the elementIds its i3X LinkedSegment names",
+    "  i3x/address_space.py                      aas_global_asset_id(), aas_shell_id(), metric_element_id()",
+    "                                            -- the i3X object, whose metadata.system names its shell",
+    "",
+    "Each asserts every case below in its own runner: the Deno tests (asset_identities_test.ts)",
+    "and the i3X unit suite (test_a_device_names_its_shell_and_carries_its_nameplate.py). A client",
+    "holding a shell and an i3X object matches them by these ids, so the two must give one answer.",
+    "",
+    "`base_iri` is AAS_BASE_IRI as the chart sets it (supabaseFunctions.aas.baseIri). Its trailing",
+    "slashes become one, so a site that writes it with or without one names the same shells.",
+    "`metric` null is the device itself, whose elementId is its sparkplug_id.",
+    "",
+    "Adding a case here is the way to extend the contract: both suites read every case."
+  ],
+  "cases": [
+    {
+      "name": "the default base, a device",
+      "base_iri": "https://aber.local/ids/asset/",
+      "sparkplug_id": "dev0a1b2c3d4e5f60718293a",
+      "metric": null,
+      "expected": {
+        "globalAssetId": "https://aber.local/ids/asset/dev0a1b2c3d4e5f60718293a",
+        "shellId": "https://aber.local/ids/asset/dev0a1b2c3d4e5f60718293a/shell",
+        "elementId": "dev0a1b2c3d4e5f60718293a"
+      }
+    },
+    {
+      "name": "a metric whose name is a subtree",
+      "base_iri": "https://aber.local/ids/asset/",
+      "sparkplug_id": "dev0a1b2c3d4e5f60718293a",
+      "metric": "Controller/EXECUTION",
+      "expected": {
+        "globalAssetId": "https://aber.local/ids/asset/dev0a1b2c3d4e5f60718293a",
+        "shellId": "https://aber.local/ids/asset/dev0a1b2c3d4e5f60718293a/shell",
+        "elementId": "dev0a1b2c3d4e5f60718293a/Controller/EXECUTION"
+      }
+    },
+    {
+      "name": "a base written without its slash",
+      "base_iri": "https://plant.example.com/ids/asset",
+      "sparkplug_id": "devf00dfeed0123456789abc",
+      "metric": "PART_COUNT",
+      "expected": {
+        "globalAssetId": "https://plant.example.com/ids/asset/devf00dfeed0123456789abc",
+        "shellId": "https://plant.example.com/ids/asset/devf00dfeed0123456789abc/shell",
+        "elementId": "devf00dfeed0123456789abc/PART_COUNT"
+      }
+    },
+    {
+      "name": "a base written with several slashes",
+      "base_iri": "urn:example:plant:assets///",
+      "sparkplug_id": "devf00dfeed0123456789abc",
+      "metric": null,
+      "expected": {
+        "globalAssetId": "urn:example:plant:assets/devf00dfeed0123456789abc",
+        "shellId": "urn:example:plant:assets/devf00dfeed0123456789abc/shell",
+        "elementId": "devf00dfeed0123456789abc"
+      }
+    }
+  ]
+}

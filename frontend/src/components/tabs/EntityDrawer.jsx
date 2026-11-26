@@ -11,22 +11,12 @@ import { ArchivedBadge, Badge } from '../common/Badge'
 import { ContextPanel } from '../common/ContextPanel'
 import { gatewayRepositoryUrl } from '../common/GatewayRepositoryPanel'
 import { PersonName } from '../common/PersonName'
-import { OverflowText } from '../common/OverflowText'
+import { RecordChip } from '../common/RecordChip'
 import { RouteLink } from '../common/RouteLink'
 import { Tooltip } from '../common/Tooltip'
 import {
-  IconCpu, IconDownload, IconExternalLink, IconFactory, IconGitBranch, IconHistory, IconLayoutDashboard, IconRadio, IconRefreshCw, IconTrash,
-  IconZap,
+  IconDownload, IconExternalLink, IconGitBranch, IconHistory, IconRefreshCw, IconTrash, IconZap,
 } from '../common/Icons'
-
-/** A link to the entity this one is in or of, by name: none while the page holds no row for it. */
-function PlaceChip({ to, icon, name, page }) {
-  return (
-    <RouteLink className="chip chip-link" to={to} title={`Open ${name} on the ${page} page`}>
-      {icon}<OverflowText className="chip-name">{name}</OverflowText>
-    </RouteLink>
-  )
-}
 
 /**
  * What survives a retired entity, as links: its Audit Trail for who may read it, a gateway's repository in
@@ -134,9 +124,9 @@ export function EntityDrawer({ entity, nameOf, lastExport = null, onRestore, onE
   }, [entityPage, hasPermission, userRole])
 
   /** The chip for one place the row names, or nothing where the page does not hold that entity. */
-  const place = (label, placeKind, id, url, page, icon) => {
+  const place = (label, placeKind, id, url) => {
     const name = id ? nameOf(placeKind, id) : undefined
-    return name && { label, full: true, value: <PlaceChip to={url(id)} icon={icon} name={name} page={page} /> }
+    return name && { label, full: true, value: <RecordChip kind={placeKind} to={url(id)} name={name} /> }
   }
 
   /** A further id. The historian still keys a retired entity's readings by its Sparkplug id. */
@@ -154,10 +144,10 @@ export function EntityDrawer({ entity, nameOf, lastExport = null, onRestore, onE
     { label: 'Kind', value: kind },
     { label: 'Name', value: entity.name },
     ...secondIdFields(entity).map(furtherId),
-    place('Recorded Device', 'devices', entity.device_id, deviceUrl, 'Devices', <IconCpu size={11} />),
-    place(isCapture ? 'Recorded Gateway' : 'Serving Gateway', 'gateways', entity.gateway_id, gatewayUrl, 'Gateways', <IconRadio size={11} />),
-    place('Cell', 'cells', entity.cell_id, cellUrl, 'Cells', <IconLayoutDashboard size={11} />),
-    place('Area', 'areas', entity.area_id, areaUrl, 'Areas', <IconFactory size={11} />),
+    place('Recorded Device', 'devices', entity.device_id, deviceUrl),
+    place(isCapture ? 'Recorded Gateway' : 'Serving Gateway', 'gateways', entity.gateway_id, gatewayUrl),
+    place('Cell', 'cells', entity.cell_id, cellUrl),
+    place('Area', 'areas', entity.area_id, areaUrl),
     (archived || retired) && { label: 'Archived At', value: entity.archived_at && formatDateTime(entity.archived_at) },
     // Held, or due within a week, it is one of the warnings.
     archived && !purgeWarning(entity)

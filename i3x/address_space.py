@@ -204,12 +204,12 @@ RELATIONSHIP_TYPES = [
     (
         "HasComponent",
         "ComponentOf",
-        "The metrics a device's value is composed of. Each is an Object of its own, so one metric "
-        "can be read or subscribed to alone, and a value query with maxDepth > 1 returns them under "
-        "`components`. Only a device publishes it: the site, areas, cells and lanes organise their "
-        "children and compose nothing.",
+        "The metrics a device's value is composed of, and its Nameplate. Each is an Object of its "
+        "own, so one metric can be read or subscribed to alone, and a value query with maxDepth > 1 "
+        "returns them under `components`. Only a device publishes it: the site, areas, cells and "
+        "lanes organise their children and compose nothing.",
     ),
-    ("ComponentOf", "HasComponent", "The device whose value this metric is part of."),
+    ("ComponentOf", "HasComponent", "The device this metric, or this Nameplate, is part of."),
     (
         "ConnectsVia",
         "ProvidesConnectivityFor",
@@ -430,6 +430,109 @@ _ASHRAE_223P_PROJECTION = "http://data.ashrae.org/standard223" + PROJECTION_SUFF
 _QUDT_KIND_NAMESPACE = "http://qudt.org/vocab/quantitykind/"
 _QUDT_KIND_PROJECTION = "http://qudt.org/vocab/quantitykind" + PROJECTION_SUFFIX
 
+# A device's Digital Nameplate (IDTA 02006), the one the AAS shell carries. Its type adapts the
+# template rather than implementing it, so it is in the template's namespace with the projection
+# suffix. Its elementId is synthetic: device_nameplate's row is keyed by the device.
+NAMEPLATE_TEMPLATE_ID = "https://admin-shell.io/idta/nameplate/3/0/Nameplate"
+NS_NAMEPLATE = "https://admin-shell.io/idta/nameplate/3/0" + PROJECTION_SUFFIX
+NAMEPLATE_TYPE_ID = "i3x:type:nameplate"
+NAMEPLATE_ELEMENT_PREFIX = "i3x:nameplate:"
+
+# Each field by the template's idShort, from device_nameplate's column, in the shell's order. Mirror
+# check 180 holds the two lists to the ones buildEnvironment() exports.
+NAMEPLATE_FIELDS = (
+    ("URIOfTheProduct", "uri_of_the_product"),
+    ("ManufacturerName", "manufacturer_name"),
+    ("ManufacturerProductDesignation", "manufacturer_product_designation"),
+    ("ManufacturerProductType", "manufacturer_product_type"),
+    ("OrderCodeOfManufacturer", "order_code_of_manufacturer"),
+    ("SerialNumber", "serial_number"),
+    ("YearOfConstruction", "year_of_construction"),
+    ("DateOfManufacture", "date_of_manufacture"),
+    ("HardwareVersion", "hardware_version"),
+    ("FirmwareVersion", "firmware_version"),
+    ("SoftwareVersion", "software_version"),
+    ("CountryOfOrigin", "country_of_origin"),
+)
+NAMEPLATE_ADDRESS = "AddressInformation"
+NAMEPLATE_ADDRESS_FIELDS = (
+    ("Street", "address_street"),
+    ("Zipcode", "address_zipcode"),
+    ("CityTown", "address_city_town"),
+    ("StateCounty", "address_state_county"),
+    ("NationalCode", "address_national_code"),
+)
+NAMEPLATE_COLUMNS = tuple(column for _, column in NAMEPLATE_FIELDS + NAMEPLATE_ADDRESS_FIELDS)
+
+_NULLABLE_TEXT = {"type": ["string", "null"]}
+NAMEPLATE_TYPE = {
+    "elementId": NAMEPLATE_TYPE_ID,
+    "displayName": "Nameplate",
+    "namespaceUri": NS_NAMEPLATE,
+    "sourceTypeId": NAMEPLATE_TEMPLATE_ID,
+    "version": "1.0.0",
+    "schema": {
+        "type": "object",
+        "properties": {
+            **{name: _NULLABLE_TEXT for name, _ in NAMEPLATE_FIELDS},
+            NAMEPLATE_ADDRESS: {
+                "type": "object",
+                "properties": {name: _NULLABLE_TEXT for name, _ in NAMEPLATE_ADDRESS_FIELDS},
+            },
+        },
+    },
+}
+
+
+def nameplate_element_id(device_sid: str) -> str:
+    """The elementId of a device's Nameplate."""
+    return NAMEPLATE_ELEMENT_PREFIX + device_sid
+
+
+def _field_text(value) -> Optional[str]:
+    """A field's text, or None for none: a value of spaces is none, as the AAS shell reads it."""
+    text = None if value is None else str(value)
+    return text if text and text.strip() else None
+
+
+def has_nameplate(row: Optional[dict]) -> bool:
+    """Whether a device_nameplate row holds anything. One that holds nothing is no Nameplate, as the
+    shell leaves out a nameplate with no value."""
+    return bool(row) and any(_field_text(row.get(column)) for column in NAMEPLATE_COLUMNS)
+
+
+def nameplate_object(device_sid: str) -> dict:
+    """A device's Nameplate: a leaf component, as a metric is, whose parent is its device."""
+    return {
+        "elementId": nameplate_element_id(device_sid),
+        "displayName": "Nameplate",
+        "typeElementId": NAMEPLATE_TYPE_ID,
+        "parentId": device_sid,
+        "isComposition": False,
+        "isExtended": False,
+        "metadata": {
+            "typeNamespaceUri": NS_NAMEPLATE,
+            "sourceTypeId": NAMEPLATE_TEMPLATE_ID,
+            "relationships": {"ComponentOf": [device_sid]},
+        },
+    }
+
+
+def nameplate_value(row: dict) -> dict:
+    """
+    A Nameplate's value: every field of its type, null where the row has none. It is what somebody
+    recorded, not a reading, so it is Good whatever the device's state, at the time it was saved.
+    """
+    fields = {name: _field_text(row.get(column)) for name, column in NAMEPLATE_FIELDS}
+    fields[NAMEPLATE_ADDRESS] = {
+        name: _field_text(row.get(column)) for name, column in NAMEPLATE_ADDRESS_FIELDS
+    }
+    return {
+        "value": fields,
+        "quality": "Good",
+        "timestamp": to_rfc3339_utc(row.get("updated_at")) or to_rfc3339_utc(datetime.now(timezone.utc)),
+    }
+
 
 def metric_type_namespace(semantic_id) -> str:
     """
@@ -549,6 +652,8 @@ def _namespace_display_name(uri: str) -> str:
         return "ASHRAE 223P (i3X projection)"
     if uri == _QUDT_KIND_PROJECTION:
         return "QUDT quantity kinds (i3X projection)"
+    if uri == NS_NAMEPLATE:
+        return "IDTA Digital Nameplate 3.0 (i3X projection)"
     if uri.startswith(_OPCUA_NAMESPACE_ROOT) and uri.endswith(PROJECTION_SUFFIX):
         spec = uri[len(_OPCUA_NAMESPACE_ROOT): -len(PROJECTION_SUFFIX)].strip("/")
         return f"OPC UA {spec or 'base'} (i3X projection)"
@@ -648,13 +753,16 @@ def device_object(
     source_type_id: Optional[str] = None,
     metric_ids: Optional[List[str]] = None,
     extensions: Optional[Dict[str, dict]] = None,
+    nameplate: bool = False,
+    aas_base_iri: Optional[str] = None,
 ) -> dict:
     """
     Project a `devices` row (joined with its resolved location) onto an i3X Object.
 
     `schema_id` is its type: its one schema, or the type of its set of schemas. The object's
     `sourceTypeId` is its type's: `schema`'s when it has one, else `source_type_id`. `metric_ids`
-    are its components, and `extensions` the fragment of each metric no attached schema models.
+    are its components, with its Nameplate where `nameplate`, and `extensions` the fragment of each
+    metric no attached schema models. `aas_base_iri` names the AAS shell of the device.
     """
     element_id = device["sparkplug_id"]
     if source_type_id is None:
@@ -669,8 +777,9 @@ def device_object(
     relationships["HasParent"] = [parent]
     if gateway_sid:
         relationships["ConnectsVia"] = [gateway_sid]
-    if metric_ids:
-        relationships["HasComponent"] = sorted(metric_ids)
+    components = list(metric_ids or []) + ([nameplate_element_id(element_id)] if nameplate else [])
+    if components:
+        relationships["HasComponent"] = sorted(components)
     # The i3X term for "publishes beyond its model", which is the Unmodelled concept exactly.
     # Derived, never stored -- see `is_extended`.
     extended = bool(device.get("_is_extended"))
@@ -682,15 +791,21 @@ def device_object(
     }
     if extended:
         metadata["schemaExtensions"] = dict(extensions or {})
-    # Vendor keys, which i3X requires here whenever the object is extended.
-    metadata["system"] = {"quarantined": bool(device.get("is_quarantined"))}
+    # Vendor keys, which i3X requires here whenever the object is extended. The device's AAS shell is
+    # named by its id and its globalAssetId, so a client holding both views can match them.
+    metadata["system"] = {
+        "quarantined": bool(device.get("is_quarantined")),
+        "aasShellId": aas_shell_id(element_id, aas_base_iri),
+        "aasGlobalAssetId": aas_global_asset_id(element_id, aas_base_iri),
+    }
     return {
         "elementId": element_id,
         "displayName": device.get("name") or element_id,
         "typeElementId": schema_id or UNTYPED_DEVICE_TYPE_ID,
         "parentId": parent,
-        # A composition of its metrics, each a leaf component. Its own value stays their map.
-        "isComposition": bool(metric_ids),
+        # A composition of its metrics and its nameplate, each a leaf component. Its own value stays
+        # its metrics' map.
+        "isComposition": bool(components),
         "isExtended": extended,
         "metadata": metadata,
     }
@@ -699,6 +814,23 @@ def device_object(
 def metric_element_id(device_sid: str, name: str) -> str:
     """A metric's elementId. A sparkplug_id never contains `/`, so the first `/` splits it back."""
     return f"{device_sid}/{name}"
+
+
+# The namespace of the AAS shells aas-export and aas-api publish (AAS_BASE_IRI), and shell.ts's
+# default for it. test-harness/fixtures/asset-identities.json holds these and shell.ts to one answer.
+AAS_DEFAULT_BASE_IRI = "https://aber.local/ids/asset/"
+
+
+def aas_global_asset_id(device_sid: str, base_iri: Optional[str] = None) -> str:
+    """The globalAssetId of a device's AAS shell: the base IRI, its trailing `/`s made one, then the
+    device's sparkplug_id. As shell.ts does, only an unset base takes the default."""
+    base = AAS_DEFAULT_BASE_IRI if base_iri is None else base_iri
+    return base.rstrip("/") + "/" + device_sid
+
+
+def aas_shell_id(device_sid: str, base_iri: Optional[str] = None) -> str:
+    """The id of a device's AAS shell: its globalAssetId, then `/shell`."""
+    return aas_global_asset_id(device_sid, base_iri) + "/shell"
 
 
 _UNPRINTABLE = re.compile(r"[\x00-\x1f\x7f]")

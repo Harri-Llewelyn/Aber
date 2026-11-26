@@ -16,7 +16,7 @@ Each tab lists its entities in groups, one for each kind, such as **Devices**.
 2. Select **Expand all**, at the start of the line above the list, to open every group. It reads **Collapse all** while any is open.
 
 - **A group starts closed.** Its heading says how many rows it holds. A tab with one group starts with it open.
-- **A group draws 200 rows at a time.** A button at its end, such as **Show 200 more**, draws the next.
+- **A group draws 200 rows at a time.** A button at its end, such as **Show 200 More Devices**, draws the next. Beside it, "200 devices of 543 devices" says how many are drawn.
 - **A search opens the groups it finds something in.** You can close any of them. When you clear the search, the groups are as they were.
 - **A heading says one date as well,** on two of the tabs. On **Archived** it is the next auto-purge. On **Retired** it is the last deletion.
 - **A column's heading sorts the rows of each group** by that column, on every tab. Click it again to reverse the order, and a third time to go back to the usual order. An empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
@@ -71,7 +71,7 @@ Taking something out of service has two steps. Archiving is the step you can und
 
 Select a row to open its panel. It shows what an active entity's panel does, and when the entity was archived. Its actions are:
 
-- **Restore** puts an entity back into service with the identifiers it already had. That is why Aber archives things rather than deleting them. A machine back from a rebuild returns as itself, and everything that ever pointed at it still works. A device's replay lanes come back with it.
+- **Restore** puts an entity back into service with the identifiers it already had. That is why Aber archives things rather than deleting them. A machine back from a rebuild returns as itself, and everything that ever pointed at it still works. A device's replay lanes come back with it. A device archived while it was held in Quarantine goes back to the Quarantine tab.
 - **View in** and the name of a page opens the entity on that page, with the page's lifecycle filter on **Archived**. **View in Audit Trail** opens its history, for a role that may read it.
 - **Export Bundle…** is offered on a device. It opens the Devices page's export dialog with **Bundle** chosen. The bundle is the device's Asset Administration Shell, as an AASX file with the device's history inside. It holds the Audit Trail and the readings still in the live historian, at raw and hourly resolution. It also holds a manifest, which names the cold storage objects that hold older readings. The manifest says plainly what the bundle could not include.
 - A role that may not read the Audit Trail sees the bundle disabled, because the bundle contains it. A copy of each bundle is kept beside the cold storage objects, so it can still be fetched from this page after the device is deleted. If the record and its readings should leave with the machine, take the bundle before **Permanent Delete**, or before its **Auto-purge** date.
