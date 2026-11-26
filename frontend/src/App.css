@@ -2811,6 +2811,8 @@ main:focus { outline: none; }
   column-gap: 14px;
 }
 .schema-editor-fields > * { min-width: 0; }
+/* A template's name and IDTA number are long: its field takes the row, where it stands alone at every width. */
+.schema-editor-fields > .schema-editor-template { grid-column: 1 / -1; }
 .schema-editor-metrics { display: flex; flex-direction: column; }
 .modal-body-fill > .schema-editor-metrics { min-height: 210px; }
 
@@ -2846,13 +2848,18 @@ main:focus { outline: none; }
 .schema-asides > .field-error-above,
 .schema-asides > details[open] { flex: 1 0 100%; }
 .schema-asides > .field-error-above { margin-top: 12px; margin-bottom: 0; }
-.schema-derived { margin-top: 16px; }
+.schema-derived,
+.schema-template { margin-top: 16px; }
 .schema-derived-hint { margin: 4px 0 6px; }
 /* As tall as they are, up to two under their group's heading. Open, they take their height from the metric
    list, which then keeps its search and a row or two. */
 .schema-derived-choice > .schema-derived-list { flex: none; min-height: 0; max-height: 104px; }
 .modal-body-fill:has(> .schema-asides > .schema-derived[open]) > .schema-editor-metrics { min-height: 142px; }
 .modal-body-fill:has(> .schema-asides > .schema-derived[open]) > .schema-editor-metrics > .list-picker-list { min-height: 92px; }
+/* Template Elements (SchemaTemplateElements) is one of them: the elements nothing fills, up to three rows. */
+.schema-template-list { max-height: 112px; }
+.schema-template-list .badge { flex-shrink: 0; }
+.schema-template-fills .mono { font-size: inherit; }
 
 /* A numeric metric's range, beside its row: the two bounds and the dash between them. */
 .property-range {
@@ -8789,6 +8796,9 @@ ol.gateway-steps {
   font-size: 11px;
   color: var(--success-text);
 }
+
+/* A section's own act, such as a template's Build Schema: at the end of its heading. */
+.vocab-section-head > .vocab-section-action { margin-left: auto; }
 
 .vocab-section-body { padding: 12px 16px; }
 

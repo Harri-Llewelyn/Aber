@@ -513,6 +513,15 @@ draft and of a read-only version, so a person meets one form. Drift check 592 ho
   ticked, so nothing is lost by mistake. It is said at once over the section, in the database's own words
   (`derivedProblems()`, mirror check 174), and refuses the save. A save writes the metrics and the list in one
   request, because the database judges them together.
+- **Build Schema from Template is the same editor with a template** (`template`, `schemaTemplate()`). The
+  Template field is the last of the fields, so none of the others moves. Choosing one makes its id the semantic
+  id, shown as text, and ticks the metrics that fill its elements, in place of those the last one ticked. A
+  metric's row says the element it fills, and **Template Elements** (`common/SchemaTemplateElements.jsx`), a
+  closed `<details>` under the metrics, lists the elements nothing fills. A required one unfilled refuses the
+  save at the Template field, in the database's words (`templateProblems()`, mirror check 182). The rule is
+  `templateElementFill()`, held to the SQL by `test-harness/fixtures/schema-template-elements.json`. A version
+  built from a template shows it as a link to the Templates tab, and reads what it fills as stored until its
+  metrics change, as the database does.
 - **A version adds little:** its UUID and Change Description, the keys stored for each metric, the counts
   against the last saved draft, and its acts. Version History is a closed `<details>` under the metrics.
 - **What stands under the metrics is a closed `<details>`,** in `.schema-asides`: closed ones share a line, so
@@ -2902,8 +2911,8 @@ dependency but CodeMirror, Lezer and `yaml`.
 ### Schemas read and write YAML
 
 **The Schemas page reads and writes YAML with the Automations page's machinery, and shares it**: no second
-YAML style. Its list has **Upload** and **Export** beside **Build Schema from Catalog**, in the order the
-Automations toolbar has them. A row's box ticks it for **Export**, which says how many (**Export (2)**) and
+YAML style. Its list has **Upload** and **Export** beside **Build Schema from Catalog** and **Build Schema from
+Template**, in the order the Automations toolbar has them. A row's box ticks it for **Export**, which says how many (**Export (2)**) and
 saves them, or every schema in force with none ticked. A schema's one export is **Export YAML**, in its
 drawer: neither the drawer nor the detail dialog offers **Download JSON**. The format is
 `docs/device-schemas.md`.
@@ -3288,6 +3297,7 @@ second page uses one of these, its row moves to the group it belongs to.
 | Schemas | `PropertyRange` | A numeric metric's valid range, beside its row | |
 | Schemas | `SchemaDerivedMetrics` | A schema's derived metrics, chosen or read | |
 | Schemas | `SchemaEditor` | A schema's form, to build, edit or read | |
+| Schemas | `SchemaTemplateElements` | A template's elements no metric of a schema fills | |
 | Sign-in | `AmbientPipeline` | The moving background behind the sign-in card | |
 | Vocabulary | `ASHRAE223VocabularyPanel` | The ASHRAE 223P tab | |
 | Vocabulary | `IDTATemplatePanel` | The Templates tab | |

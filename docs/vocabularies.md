@@ -118,8 +118,8 @@ before proposing a change:
   a quantity by an ECLASS IRDI adds that IRDI to a metric named from an OPC UA ExpandedNodeId, and
   keeps both. The metric's own id stays primary: the REST API, i3X and a schema's metric list read
   it, and the `metric_semantic_id_crosswalk` view answers which metric carries a concept, across
-  both. Making a template's element id the primary one inside a schema built from that template is
-  Build Schema from Template's rule, not this table's.
+  both. Inside a schema built from a submodel template, the template's element id is the primary one and
+  the metric's own id a further one: that is Build Schema from Template's rule (`0342`), not this table's.
   **Each id also gets a `ConceptDescription`** in the
   Environment (`buildConceptDescriptions()`, #460), because most resolve nowhere (`aber.local`, an
   operator's IRDI). Its IEC 61360 content carries the concept's name, a definition,

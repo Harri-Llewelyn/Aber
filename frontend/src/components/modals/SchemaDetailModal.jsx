@@ -15,7 +15,7 @@ import {
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { Modal } from '../common/Modal'
-import { SchemaEditor, schemaDerived, schemaFields, useSchemaForm } from '../common/SchemaEditor'
+import { SchemaEditor, schemaDerived, schemaFields, schemaTemplate, useSchemaForm } from '../common/SchemaEditor'
 import { boundText, catalogPropertyEntry, isNumericType, rangeText, sameJson } from '../../utils/schemaProperty'
 import { Tooltip } from '../common/Tooltip'
 
@@ -84,10 +84,11 @@ function VersionHistory({ lineage, schema }) {
  * version as text. Read-only is the default and is the same read-only the database enforces:
  * `prevent_active_schema_mutation()` rejects the write. `isSchemaEditable()` is the single predicate and
  * fails closed; a role that may not manage schemas reads a draft too. Create Version is the one act on
- * the version in force.
+ * the version in force. A version built from a submodel template shows it, and the element each metric fills,
+ * from `templates` (the rows of idta_template_elements); a draft keeps its template.
  */
 export function SchemaDetailModal({
-  schema, schemas = [], catalog = [], deviceCount = 0, canManage = false,
+  schema, schemas = [], catalog = [], templates = [], deviceCount = 0, canManage = false,
   onFork, onPublish, onDiscard, onSaveDraft, onClose, showToast
 }) {
   const isDraft = isSchemaEditable(schema)
@@ -105,6 +106,7 @@ export function SchemaDetailModal({
     changeDescription: schema?.change_description || '',
     picked: new Set(modelledMetrics(schema) || []),
     derived: new Set(schema?.derived_metrics || []),
+    templateId: schema?.template_id || '',
     ...storedSemanticIdPair(schema?.semantic_id, schema?.semantic_id_type)
   }))
   const { picked, ranges } = form
@@ -207,6 +209,10 @@ export function SchemaDetailModal({
   const derivedRemoved = namedNow.filter(n => !form.derived.has(n))
   const derivedEdited = derivedAdded.length > 0 || derivedRemoved.length > 0
 
+  // What the version holds stands while its metrics are as stored, as the database keeps it; an edit of them
+  // is worked out again, as the save will be.
+  const template = schemaTemplate({ form, elements: templates, catalog, stored: metricsEdited ? null : schema?.template_elements || {} })
+
   const semanticNow = storedSemanticIdPair(schema?.semantic_id, schema?.semantic_id_type)
   const semanticEdited = storedSemanticIdPair(form.semanticId, form.semanticIdType)
   const dirty =
@@ -254,7 +260,9 @@ export function SchemaDetailModal({
   })
 
   // Saving asks for a change; publishing takes the draft as it is. The last one pressed speaks.
-  const fields = editing ? schemaFields('schema-detail', { form, catalog: activeCatalog, takesRange, derived, named: true }) : {}
+  const fields = editing
+    ? schemaFields('schema-detail', { form, catalog: activeCatalog, takesRange, derived, named: true, fromTemplate: !!template, template })
+    : {}
   const saving = useFormCheck(fields, { unchanged: !dirty })
   const publishing = useFormCheck(fields)
   const errors = Object.fromEntries(Object.keys(fields).map(k => [k, saving.errors[k] || publishing.errors[k]]))
@@ -383,6 +391,7 @@ export function SchemaDetailModal({
             </span>
           )
         }}
+        template={template && { chosen: template }}
         // Opening a draft can be enough to change it: a forked version takes the catalog as it is now,
         // which is how a new version comes to carry permitted values its parent lacked.
         above={fromCatalog.length > 0 && (

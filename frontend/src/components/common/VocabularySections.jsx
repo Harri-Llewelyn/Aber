@@ -10,7 +10,9 @@ import { plural } from '../../utils/format'
  * the section holds, with its "?" and its "N in use" beside it, and, when open, one chip for each entry,
  * or what the tab's `renderItems(section)` draws instead. `tab` is the tab descriptor VocabularyPanel
  * documents, whose `isUsed`, `isActionable`, `onUse`, `metaFor`, `tooltipFor`, `idFor` and `noteFor`
- * decide what a chip says and does; `isOpen(key)` and `toggle(key)` are the caller's (`useOpenGroups`).
+ * decide what a chip says and does; `isOpen(key)` and `toggle(key)` are the caller's (`useOpenGroups`). A tab's
+ * `actionFor(section)` is drawn at the end of a section's heading: an act on the section as a whole, such as
+ * building a schema from a template.
  * Each section carries its key as `data-section`, so a caller can scroll to one.
  * VocabularyPanel draws the standards' tabs with it, and a tab with a panel of its own (Imported) draws
  * its concepts with it, so a chip looks and acts the same on every tab.
@@ -26,10 +28,10 @@ export function VocabularySections({ sections, tab: active, canAddMetric, isOpen
         return (
           <div key={section.key} data-section={section.key}>
             {/* The button is the keyboard control; a click anywhere else on the band toggles too,
-                except on the "?", which a button cannot contain. */}
+                except on the "?", which a button cannot contain, and on the section's own act. */}
             <div
               className="vocab-section-head"
-              onClick={e => { if (!e.target.closest('button')) toggle(section.key) }}
+              onClick={e => { if (!e.target.closest('button, a')) toggle(section.key) }}
             >
               <GroupHeading
                 open={open}
@@ -45,6 +47,7 @@ export function VocabularySections({ sections, tab: active, canAddMetric, isOpen
                   <span className="vocab-in-use">{used} in use</span>
                 </Tooltip>
               )}
+              {active.actionFor?.(section)}
             </div>
 
             <div id={bodyId} className="vocab-section-body" hidden={!open}>

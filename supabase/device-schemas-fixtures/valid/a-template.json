@@ -1,0 +1,25 @@
+{
+  "about": "A schema built from a template that requires no element, with the template's id as its semantic id, given or left to the template.",
+  "document": [
+    {
+      "name": "Robot_Arm_Interfaces",
+      "template": "https://admin-shell.io/idta/AssetInterfacesDescription/1/0/Submodel",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    },
+    {
+      "name": "Robot_Arm_Interfaces_Too",
+      "semantic_id": "https://admin-shell.io/idta/AssetInterfacesDescription/1/0/Submodel",
+      "semantic_id_type": "IRI",
+      "template": "https://admin-shell.io/idta/AssetInterfacesDescription/1/0/Submodel",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

@@ -21,7 +21,7 @@ import { siteVocabularyTab } from '../common/SiteVocabularyPanel'
  * on the Metrics page: `onUseEntry` hands identifiers over, and MetricsTab, which holds the
  * vocabularies for its type picker, resolves the entry itself, so one place knows how a vocabulary
  * row becomes a metric. The Templates tab starts no metric: a submodel template is looked up, not used to
- * name one (common/IDTATemplatePanel.jsx). The Imported tab is the exception to "only read": it loads its
+ * name one, and its Build Schema opens Build Schema from Template on the Schemas page (common/IDTATemplatePanel.jsx). The Imported tab is the exception to "only read": it loads its
  * own rows, and an Administrator imports, removes and shares them (common/SiteVocabularyPanel.jsx), so
  * this page passes it `showToast`.
  */
@@ -135,7 +135,11 @@ export function VocabularyTab({ onUseEntry, hasPermission, showToast }) {
                 ? (field => onUseEntry?.({ standard: STANDARDS.VDA5050, name: field?.name }))
                 : undefined
             }),
-            idtaTemplateTab({ elements: templateElements, onNotify: showToast }),
+            idtaTemplateTab({
+              elements: templateElements,
+              onNotify: showToast,
+              deniedTitle: canUse ? null : requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
+            }),
             siteVocabularyTab({ canManage: canUse, onUseEntry, showToast, drawerHost })
           ]}
         />

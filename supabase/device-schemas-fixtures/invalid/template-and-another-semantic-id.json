@@ -1,0 +1,17 @@
+{
+  "about": "A schema built from a template whose semantic id is not the template's.",
+  "path": "$[0].semantic_id",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "semantic_id": "https://example.com/aber/robot-arm",
+      "template": "https://admin-shell.io/idta/AssetInterfacesDescription/1/0/Submodel",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}
