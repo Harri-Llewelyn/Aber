@@ -422,7 +422,7 @@ A trail from an earlier release can also hold `area_floors`, `cell_links`, `gate
 
 The view `entity_directory` uses these words too, as its `kind`. It has one row for each entity a page of the
 dashboard lists by its id, with every id that entity goes by, and `find_entities()` answers what one id
-names ([Every entity is listed and found by any id](../unreleased/migrations/0321.md)).
+names ([Every entity is listed and found by any id](../supabase/README.md#every-entity-is-listed-and-found-by-any-id-0321)).
 
 The other columns that hold a word for a kind:
 
