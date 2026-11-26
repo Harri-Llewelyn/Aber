@@ -25,9 +25,9 @@ import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
-import { OverflowText } from '../common/OverflowText'
+import { RecordChip } from '../common/RecordChip'
 import {
-  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconTag, IconUpload, IconTrash, IconHistory
+  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconUpload, IconTrash, IconHistory
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
@@ -599,10 +599,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                 {selectedSchema.derived_metrics.map(name => {
                   const metric = catalog.find(m => m.name === name)
                   return (
-                    <RouteLink key={name} className="chip chip-link" to={metricUrl(metric?.metric_uuid, metric?.deprecated, true)} title={`Open ${name} on the Metrics page`}>
-                      <IconTag size={11} />
-                      <OverflowText className="chip-name">{name}</OverflowText>
-                    </RouteLink>
+                    <RecordChip key={name} kind="metric_catalog" to={metricUrl(metric?.metric_uuid, metric?.deprecated, true)} name={name} />
                   )
                 })}
               </div>
@@ -620,16 +617,13 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               return (
                 <div className="context-device-list">
                   {counted.map(d => (
-                    <RouteLink
+                    <RecordChip
                       key={d.asset_id}
-                      className="chip chip-link"
+                      kind="devices"
                       to={deviceUrl(d.asset_id)}
                       onNavigate={() => onSelectDevice?.(d.asset_id)}
-                      title={`Open ${d.asset_name} on the Devices page`}
-                    >
-                      <IconCpu size={11} />
-                      <OverflowText className="chip-name">{d.asset_name}</OverflowText>
-                    </RouteLink>
+                      name={d.asset_name}
+                    />
                   ))}
                 </div>
               )

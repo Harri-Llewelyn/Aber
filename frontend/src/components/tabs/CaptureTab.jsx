@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Callout } from '../common/Callout'
-import { RouteLink } from '../common/RouteLink'
 import { captureJobUrl, captureSubjectUrl, schemaUrl } from '../../routes'
 import { api, isMachineMetric } from '../../api'
 import { playbackWorkerDeployed } from '../../config'
@@ -19,10 +18,10 @@ import { StartPlaybackModal } from '../modals/StartPlaybackModal'
 import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import { JobHistory } from './CaptureHistory'
 import {
-  IconClipboardList, IconCpu, IconDownload, IconPlay, IconRadio, IconRecord, IconTrash,
+  IconCpu, IconDownload, IconPlay, IconRadio, IconRecord, IconTrash,
   IconX
 } from '../common/Icons'
-import { OverflowText } from '../common/OverflowText'
+import { RecordChip } from '../common/RecordChip'
 import { DropZone } from '../common/DropZone'
 import { HelpTip } from '../common/HelpTip'
 import { CardHeading } from '../common/CardHeading'
@@ -676,16 +675,13 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                   ? (
                     <div className="context-device-list">
                       {selectedSchemas.map(s => (
-                        <RouteLink
+                        <RecordChip
                           key={s.schema_uuid}
-                          className="chip chip-link"
+                          kind="schemas"
                           to={schemaUrl(s.schema_uuid)}
                           onNavigate={onSelectSchema ? () => onSelectSchema(s.schema_uuid) : undefined}
-                          title={`Open ${s.schema_name} on the Schemas page`}
-                        >
-                          <IconClipboardList size={11} />
-                          <OverflowText className="chip-name">{s.schema_name}</OverflowText>
-                        </RouteLink>
+                          name={s.schema_name}
+                        />
                       ))}
                     </div>
                   )

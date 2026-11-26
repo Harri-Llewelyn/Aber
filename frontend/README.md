@@ -3060,6 +3060,12 @@ in "building management system".
   stands at the end. A caller passes `icon` only with a reason, said beside it: the strip of a
   running recording, playback or backup names its job. Drift check 611 refuses a callout written by
   hand.
+- **A chip that opens a record is a `RecordChip`.** `common/RecordChip.jsx` draws every one, in a
+  drawer's field, a Site Map panel or a table's cell: the kind's icon, the name as an `OverflowText`, a
+  status dot and flags in words where they apply, and the tooltip "Open {name} on the {page} page",
+  with a sentence after it where there is more to say (a device's state or alert). Without a link it
+  is a button that acts on the page: the Site Map's cell chip, the Audit Trail's Changed by, a list's
+  "N more". Drift check 620 refuses one written by hand.
 - **Callouts in a dialog.** A callout in a dialog's body leaves the gap it has above itself (12px)
   before a table, a list or a form, so a banner never sits flush on what it qualifies. One rule in
   `App.css` does it for every dialog. A replay lane that is offline gets an info callout, not the
@@ -3218,6 +3224,7 @@ The charts are History's alone so far, under [Used by one page](#used-by-one-pag
 | :--- | :--- | :--- |
 | `CardHeading` | A page's icon, title and one sentence, stated once | |
 | `GlobalSearch` | The top bar's search: pages, settings, help and records | One list's search: `SearchInput` |
+| `RecordChip` | A record another names, as a chip that opens it | A link in running text: `RouteLink` |
 | `RouteLink` | A link to a page of the dashboard | The help: `HelpLink` |
 | `Sidebar` | The rail of pages, with each page's tabs | |
 | `TabStrip` | A page's tabs, each with an address | A choice within a page: `SegmentedControl` |

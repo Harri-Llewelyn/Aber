@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Callout } from '../common/Callout'
-import { RouteLink } from '../common/RouteLink'
-import { OverflowText } from '../common/OverflowText'
+import { RecordChip } from '../common/RecordChip'
 import { cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
@@ -24,10 +23,11 @@ import {
 } from '../../utils/gatewayType'
 import { enrolmentStands, hadEnrolled, setupRevokesCredential } from '../../utils/credentialState'
 import { CONVERGE_JOURNAL, FLOW_SYNC_LOG, RESET_BUNDLE_EDITOR_PASSWORD, RESET_EDITOR_PASSWORD } from '../../utils/applianceCommands'
-import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags } from '../../utils/deviceStatus'
+import { deviceChipNote, deviceDotStyle, deviceColumnTags } from '../../utils/deviceStatus'
 import { inServiceDevices } from '../../utils/inService'
-import { alertIndex, alertForDevice, alertForGateway, alertState, statusSortRank } from '../../utils/alertSubjects'
+import { alertIndex, alertForDevice, alertForGateway, statusSortRank } from '../../utils/alertSubjects'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
+import { CellIcon } from '../../utils/cellIcon'
 import { isShadowGateway } from '../../utils/fleetCounts'
 import { PLAYBACK_GATEWAY_LABEL, PLAYBACK_GATEWAY_PARAM, PLAYBACK_GATEWAY_TIP, playbackAlert, playbackProblem } from '../../utils/playbackGateway'
 import { flowDriftState, flowDriftLabel, flowEditedOnAppliance, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
@@ -81,7 +81,6 @@ import {
   IconBookOpen,
   IconExternalLink,
   IconShieldAlert,
-  IconLayoutDashboard,
   IconDownload,
   IconEye,
   IconGitBranch,
@@ -1201,15 +1200,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                   ? `Area-Wide — ${areas.find(ar => ar.area_id === selected.area_id)?.area_name || selected.area_id}`
                 : selectedCell
                   ? (
-                      <RouteLink
-                        className="chip chip-link"
+                      <RecordChip
+                        kind="cells"
                         to={cellUrl(selectedCell.cell_id)}
                         onNavigate={() => onSelectCell?.(selectedCell.cell_id)}
-                        title={`Open ${selectedCell.cell_name} on the Cells page`}
-                      >
-                        <IconLayoutDashboard size={11} />
-                        <OverflowText className="chip-name">{selectedCell.cell_name}</OverflowText>
-                      </RouteLink>
+                        icon={<CellIcon cell={selectedCell} size={11} />}
+                        name={selectedCell.cell_name}
+                      />
                     )
                   : (selected.cell_id || null),
             help: !gatewayAcceptsCell(selected)
@@ -1574,21 +1571,19 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                    its own with the time of the device's last reading beside it. */
                 <div className={`context-device-list${arrivalsRead ? ' context-device-list-readings' : ''}`}>
                   {selectedDevices.map(d => {
-                    const status = deviceLifecycleStatus(d)
                     const alert = alertForDevice(alerts, d)
+                    // The dot is a ring once the alert is acknowledged, filled while it is nobody's.
                     const chip = (
-                      <RouteLink
+                      <RecordChip
                         key={d.asset_id}
-                        className="chip chip-link"
+                        kind="devices"
                         to={deviceUrl(d.asset_id)}
                         onNavigate={() => onSelectDevice?.(d.asset_id)}
-                        title={`Open ${d.asset_name} on the Devices page — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}` : deviceStatusTitle(status)}`}
-                      >
-                        {/* A ring once the alert is acknowledged, filled while it is nobody's. */}
-                        <span className="badge-dot" style={deviceDotStyle(d, alert)} />
-                        <OverflowText className="chip-name">{d.asset_name}</OverflowText>
-                        {d.is_archived && <span className="chip-flag">ARCHIVED</span>}
-                      </RouteLink>
+                        name={d.asset_name}
+                        note={deviceChipNote(d, alert)}
+                        dot={deviceDotStyle(d, alert)}
+                        flag={d.is_archived && 'ARCHIVED'}
+                      />
                     )
                     if (!arrivalsApply || !arrivalsRead) return chip
                     const last = d.is_archived ? null : deviceLastReading(deviceReadings, d.asset_id)

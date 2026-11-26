@@ -4343,7 +4343,7 @@ span.area-plan-pin { cursor: inherit; }
   color: var(--danger-text);
 }
 
-/* A chip that navigates, used in the context drawers for Serving Gateway, Cell and Schema. An <a>
+/* A chip that opens a record, drawn by `common/RecordChip.jsx` alone (drift check 620). An <a>
    when it opens another page (Ctrl-click opens a new tab), a <button> when it acts on this one.
    Inherits `.chip` and adds only the affordance. `text-align: left` because a button centres its
    text by default. */
@@ -5236,6 +5236,11 @@ a.chip { text-decoration: none; }
   font-weight: 700;
   flex-shrink: 0;
 }
+/* A flag's tone, which RecordChip's `flag` names: the word says it, and the colour repeats it. */
+.chip-flag-warning { color: var(--warning-text); }
+.chip-flag-danger { color: var(--danger-text); }
+.chip-flag-muted { color: var(--text-muted); }
+.chip-flag-accent { color: var(--accent-text); }
 
 /* A gateway name is `.mono`, which carries its own 13px. Inside a chip that is larger than
    everything beside it and it would grow the row it sits in. The colour is deliberately NOT reset --

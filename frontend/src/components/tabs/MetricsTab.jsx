@@ -54,7 +54,7 @@ import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { RouteLink } from '../common/RouteLink'
-import { OverflowText } from '../common/OverflowText'
+import { RecordChip } from '../common/RecordChip'
 import { deviceUrl, metricHistoryUrl, metricUrl, tabUrl, trailUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
@@ -69,7 +69,7 @@ import {
 } from '../../utils/schemaProperty'
 import {
   IconPlus, IconArchive, IconRefreshCw,
-  IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck, IconHistory, IconChartLine, IconDownload, IconUpload
+  IconPencil, IconBookOpen, IconTag, IconCheck, IconHistory, IconChartLine, IconDownload, IconUpload
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
@@ -214,10 +214,7 @@ const Definition = ({ derivation }) => (
 const AppliesTo = ({ devices, naming }) => (devices.length === 0 ? appliesToNone(naming) : (
   <div className="context-device-list">
     {appliesToDevices(devices).map(d => (
-      <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} title={`Open ${d.asset_name} on the Devices page`}>
-        <IconCpu size={11} />
-        <OverflowText className="chip-name">{d.asset_name}</OverflowText>
-      </RouteLink>
+      <RecordChip key={d.asset_id} kind="devices" to={deviceUrl(d.asset_id)} name={d.asset_name} />
     ))}
   </div>
 ))
@@ -1410,25 +1407,22 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                             <td>
                               <div className="context-device-list">
                                 {(showAll ? devices : devices.slice(0, UNCATALOGUED_DEVICES_SHOWN)).map(d => (
-                                  <RouteLink
+                                  <RecordChip
                                     key={d.id}
-                                    className="chip chip-link"
+                                    kind="devices"
                                     to={deviceUrl(d.id)}
-                                    title={`Open ${d.name} on the Devices page${d.quarantined ? '. It is in quarantine, awaiting approval.' : ''}`}
+                                    name={d.name}
+                                    note={d.quarantined && 'It is in quarantine, awaiting approval.'}
                                   >
-                                    <IconCpu size={11} />
-                                    <OverflowText className="chip-name">{d.name}</OverflowText>
                                     {d.quarantined && <span className="cell-meta">quarantined</span>}
-                                  </RouteLink>
+                                  </RecordChip>
                                 ))}
                                 {!showAll && (
-                                  <button
-                                    type="button"
-                                    className="chip chip-link"
+                                  <RecordChip
+                                    icon={null}
+                                    name={`${hidden} more`}
                                     onClick={() => setAllDevicesShown(prev => ({ ...prev, [u.metric_name]: true }))}
-                                  >
-                                    {hidden} more
-                                  </button>
+                                  />
                                 )}
                               </div>
                             </td>

@@ -1,7 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { Callout } from '../common/Callout'
-import { RouteLink } from '../common/RouteLink'
-import { OverflowText } from '../common/OverflowText'
+import { RecordChip } from '../common/RecordChip'
 import { areaUrl, cellHistoryUrl, cellUrl, deviceUrl, devicesInCellUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
@@ -40,7 +39,6 @@ import {
   IconRefreshCw,
   IconBookOpen,
   IconHistory,
-  IconRadio,
   IconShieldAlert,
   IconCpu,
   IconMap
@@ -55,9 +53,9 @@ import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { breakAfterSeparators, plural } from '../../utils/format'
-import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
+import { deviceChipNote, deviceDotStyle, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
 import { inServiceDevices, inServiceGateways } from '../../utils/inService'
-import { alertIndex, alertForDevice, alertState } from '../../utils/alertSubjects'
+import { alertIndex, alertForDevice } from '../../utils/alertSubjects'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { FilterDropdown } from '../common/FilterChecklist'
@@ -661,15 +659,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             label: 'Area',
             value: selectedCell.area_id
               ? (
-                <RouteLink
-                  className="chip chip-link"
+                <RecordChip
+                  kind="areas"
                   to={areaUrl(selectedCell.area_id)}
                   onNavigate={() => onSelectArea?.(selectedCell.area_id)}
-                  title={`Open ${selectedCellArea?.area_name || selectedCell.area_id} on the Areas page`}
-                >
-                  <AreaIcon area={selectedCellArea} size={11} />
-                  <OverflowText className="chip-name">{selectedCellArea?.area_name || selectedCell.area_id}</OverflowText>
-                </RouteLink>
+                  icon={<AreaIcon area={selectedCellArea} size={11} />}
+                  name={selectedCellArea?.area_name || selectedCell.area_id}
+                />
               )
               : 'Unfiled',
             help: 'The ISA-95 area this cell is in. Its devices derive their area from it.'
@@ -682,16 +678,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               ? (
                 <div className="context-device-list">
                   {selectedCellGateways.map(g => (
-                    <RouteLink
+                    <RecordChip
                       key={g.gateway_id}
-                      className="chip chip-link chip-gw"
+                      kind="gateways"
                       to={gatewayUrl(g.gateway_id)}
                       onNavigate={() => onSelectGateway?.(g.gateway_id)}
-                      title={`Open ${g.gateway_name} on the Gateways page`}
-                    >
-                      <IconRadio size={11} />
-                      <OverflowText className="chip-name">{g.gateway_name}</OverflowText>
-                    </RouteLink>
+                      name={g.gateway_name}
+                    />
                   ))}
                 </div>
               )
@@ -708,21 +701,19 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               ? (
                 <div className="context-device-list">
                   {selectedCellDevices.map(d => {
-                    const status = deviceLifecycleStatus(d)
                     const alert = alertForDevice(alerts, d)
+                    // The dot is a ring once the alert is acknowledged, filled while it is nobody's.
                     return (
-                      <RouteLink
+                      <RecordChip
                         key={d.asset_id}
-                        className="chip chip-link"
+                        kind="devices"
                         to={deviceUrl(d.asset_id)}
                         onNavigate={() => onSelectDevice?.(d.asset_id)}
-                        title={`Open ${d.asset_name} on the Devices page — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}` : deviceStatusTitle(status)}`}
-                      >
-                        {/* A ring once the alert is acknowledged, filled while it is nobody's. */}
-                        <span className="badge-dot" style={deviceDotStyle(d, alert)} />
-                        <OverflowText className="chip-name">{d.asset_name}</OverflowText>
-                        {d.is_archived && <span className="chip-flag">ARCHIVED</span>}
-                      </RouteLink>
+                        name={d.asset_name}
+                        note={deviceChipNote(d, alert)}
+                        dot={deviceDotStyle(d, alert)}
+                        flag={d.is_archived && 'ARCHIVED'}
+                      />
                     )
                   })}
                 </div>

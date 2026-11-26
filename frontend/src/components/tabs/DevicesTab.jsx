@@ -2,7 +2,7 @@ import { alertIndex, alertForDevice, statusSortRank } from '../../utils/alertSub
 import { AlertBadge } from '../common/AlertBadge'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { OverflowText } from '../common/OverflowText'
+import { RecordChip } from '../common/RecordChip'
 import { approvalsForUrl, areaUrl, automationsForEntityUrl, cellUrl, deviceHistoryUrl, deviceUrl, gatewayUrl, schemaRejectionsUrl, schemaUrl, trailUrl } from '../../routes'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
@@ -63,6 +63,7 @@ import {
   normaliseScope, locationSourceLabel, gatewayAcceptsCell, noCellReason
 } from '../../utils/cellResolution'
 import { AreaIcon } from '../../utils/areaIcon'
+import { CellIcon } from '../../utils/cellIcon'
 import { unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
 import { unsTopicField, UnsRenameNote } from '../common/UnsPlace'
 import { derivedValuesField } from '../common/DeviceDerivedValues'
@@ -87,15 +88,12 @@ import {
   IconArchive,
   IconRefreshCw,
   IconHistory,
-  IconClipboardList,
   IconBookOpen,
   IconCube,
   IconAlertTriangle,
   IconCheck,
   IconPlay,
   IconDownload,
-  IconRadio,
-  IconLayoutDashboard,
   IconTrash,
   IconChartLine,
   IconZap
@@ -1706,17 +1704,12 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             label: 'Serving Gateway',
             full: true,
             value: selectedDevice.active_gateway_id ? (
-              <RouteLink
-                className="chip chip-link"
+              <RecordChip
+                kind="gateways"
                 to={gatewayUrl(selectedDevice.active_gateway_id)}
                 onNavigate={() => onSelectGateway?.(selectedDevice.active_gateway_id)}
-                title={`Open ${selectedGateway?.gateway_name || selectedDevice.gateway_name || selectedDevice.active_gateway_id} on the Gateways page`}
-              >
-                <IconRadio size={11} />
-                <OverflowText className="chip-name">
-                  {selectedGateway?.gateway_name || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
-                </OverflowText>
-              </RouteLink>
+                name={selectedGateway?.gateway_name || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
+              />
             ) : null,
             help: "The edge node carrying this device's data. Reassign it in Edit Details."
           },
@@ -1734,30 +1727,26 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               const area = areaById.get(selectedLocation.effective_area_id)
               const cell = cellById.get(selectedLocation.effective_cell_id)
               const place = cell ? (
-                <RouteLink
-                  className="chip chip-link"
+                <RecordChip
+                  kind="cells"
                   to={cellUrl(cell.cell_id)}
                   onNavigate={() => onSelectCell?.(cell.cell_id)}
-                  title={`Open ${cell.cell_name} on the Cells page`}
-                >
-                  <IconLayoutDashboard size={11} />
-                  <OverflowText className="chip-name">{cell.cell_name}</OverflowText>
-                </RouteLink>
+                  icon={<CellIcon cell={cell} size={11} />}
+                  name={cell.cell_name}
+                />
               ) : NON_CELL_SOURCES.has(source) ? <span>{locationSourceLabel(source)}</span> : null
               if (!place) return null
               return (
                 <div className="device-location">
                   {area && (
                     <>
-                      <RouteLink
-                        className="chip chip-link"
+                      <RecordChip
+                        kind="areas"
                         to={areaUrl(area.area_id)}
                         onNavigate={() => onSelectArea?.(area.area_id)}
-                        title={`Open ${area.area_name} on the Areas page`}
-                      >
-                        <AreaIcon area={area} size={11} />
-                        <OverflowText className="chip-name">{area.area_name}</OverflowText>
-                      </RouteLink>
+                        icon={<AreaIcon area={area} size={11} />}
+                        name={area.area_name}
+                      />
                       <span aria-hidden="true">›</span>
                     </>
                   )}
@@ -1790,16 +1779,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               return (
                 <div className="context-device-list">
                   {attached.map(schema => (
-                    <RouteLink
+                    <RecordChip
                       key={schema.schema_uuid}
-                      className="chip chip-link"
+                      kind="schemas"
                       to={schemaUrl(schema.schema_uuid)}
                       onNavigate={() => onSelectSchema?.(schema.schema_uuid)}
-                      title={`Open ${schema.schema_name} on the Schemas page`}
-                    >
-                      <IconClipboardList size={11} />
-                      <OverflowText className="chip-name">{schema.schema_name}</OverflowText>
-                    </RouteLink>
+                      name={schema.schema_name}
+                    />
                   ))}
                 </div>
               )

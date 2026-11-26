@@ -232,6 +232,15 @@ export function deviceStatusTitle(status) {
 }
 
 /**
+ * The sentence a device's record chip says after where it opens (RecordChip's `note`): the alert
+ * that colours its dot, by name, else its lifecycle state.
+ */
+export function deviceChipNote(device, alert) {
+  if (alert) return `${isAcknowledged(alert) ? 'Alert acknowledged' : 'Alert firing'}: ${alert.alert_name}.`;
+  return `${deviceStatusTitle(deviceLifecycleStatus(device))}.`;
+}
+
+/**
  * The tile roll-up for a cell or lane. `attention` when anything there is waiting to be admitted,
  * `normal` when at least one device is live, `idle` when nothing is. Archived devices are
  * skipped. There is no 'alarm': a tile reports whether the cell is talking to the platform.
