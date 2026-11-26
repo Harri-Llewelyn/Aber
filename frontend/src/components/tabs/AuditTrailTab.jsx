@@ -40,6 +40,7 @@ import {
   windowEndsWords
 } from '../../utils/timeWindow'
 import CopyableId from '../common/CopyableId'
+import { RecordChip } from '../common/RecordChip'
 import { RouteLink } from '../common/RouteLink'
 import { entityUrl, identityUrl, personUrl } from '../../routes'
 import { TABS, tabIsVisible } from '../../navigation'
@@ -2199,17 +2200,16 @@ export function AuditTrailTab({ userRole, showToast }) {
 
           {/* The chosen actors stay in view while the popover is shut; selecting the chip clears them. */}
           {changedBy.length > 0 && (
-            <Tooltip text="Only their changes are shown. Select to show everyone's.">
-              <button
-                type="button"
-                className="chip chip-link trail-actor-chip"
-                onClick={() => setChangedBy([])}
-                aria-label={`Changed by ${changedByWords}. Show everyone's changes`}
-              >
-                <OverflowText className="chip-name">Changed by {changedByWords}</OverflowText>
-                <IconX size={11} aria-hidden="true" />
-              </button>
-            </Tooltip>
+            <RecordChip
+              icon={null}
+              className="trail-actor-chip"
+              title="Only their changes are shown. Select to show everyone's."
+              onClick={() => setChangedBy([])}
+              aria-label={`Changed by ${changedByWords}. Show everyone's changes`}
+              name={`Changed by ${changedByWords}`}
+            >
+              <IconX size={11} aria-hidden="true" />
+            </RecordChip>
           )}
 
           <div className="filter-bar-actions">

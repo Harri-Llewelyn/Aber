@@ -56,7 +56,8 @@ const renderMap = () => {
   )
 }
 
-const card = (name) => screen.getByRole('button', { name }).closest('.area-card')
+// By the button that names it on its card: a cell's panel names its area in a chip as well.
+const card = (name) => screen.getAllByRole('button', { name }).find(b => b.closest('.area-card'))?.closest('.area-card')
 const dialog = () => document.querySelector('dialog[open]')
 const esc = () => fireEvent.keyDown(document, { key: 'Escape' })
 /** Focused first, as a real press focuses it: the dialog hands focus back to what had it. */
@@ -145,7 +146,8 @@ describe('the Site Map', () => {
   it('opens the cell rather than toggling it shut when its panel is already open', async () => {
     window.history.replaceState(null, '', '/site-map?cell=cell-2')
     renderMap()
-    await screen.findByRole('button', { name: 'North Shop' })
+    // The card's name, and the open panel's chip for the cell's area.
+    await screen.findAllByRole('button', { name: 'North Shop' })
     press(within(card('North Shop')).getByRole('button', { name: 'Expand plan: North Shop' }))
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Paint Booth' }))
     expect(window.location.search).toMatch(/cell=cell-2/)

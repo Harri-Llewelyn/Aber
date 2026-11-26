@@ -235,13 +235,14 @@ describe("a derived metric's Applies To", () => {
     expect(line(document.querySelector('.context-panel'))).toContain('No device yet: none in service is bound to a schema that names it')
   })
 
-  it('has a Schemas field: how many name it, or that none does yet with a link to the Schemas page', async () => {
+  it('has a Schemas field: the versions that name it, or that none does yet with a link to the Schemas page', async () => {
     serve([])
     renderTab()
     const schemas = (drawer) => within(drawer).getByText('Schemas').closest('.context-field')
-    expect(schemas(await open('Controller/PARTS_PER_HOUR')).textContent).toContain('2 name it')
+    const named = (drawer) => [...schemas(drawer).querySelectorAll('a.chip')].map(a => a.textContent)
+    expect(named(await open('Controller/PARTS_PER_HOUR'))).toEqual(['Press_Schema v1', 'Power_Schema v1'])
     fireEvent.click(within(document.querySelector('.card table')).getByText('Power/TOTAL'))
-    expect(schemas(document.querySelector('.context-panel')).textContent).toContain('1 names it')
+    expect(named(document.querySelector('.context-panel'))).toEqual(['Power_Schema v1'])
     fireEvent.click(within(document.querySelector('.card table')).getByText('Controller/UPTIME'))
     const none = schemas(document.querySelector('.context-panel'))
     expect(none.textContent).toContain('No schema names it yet.')
