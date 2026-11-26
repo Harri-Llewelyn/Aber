@@ -1995,7 +1995,8 @@ tbody tr.table-group-foot:hover { background: none; }
 /* Narrower still, the UUID goes to the drawer, as a list page's does below 520px: it would show a few
    characters, and the columns left need its room for their headers and badges. */
 @container entities (max-width: 519px) {
-  .table-entities tr > :nth-child(2) { display: none; }
+  /* Kept in the grid at no width: a group row spans every column. */
+  .table-entities tr:not(.table-group-row) > :nth-child(2) { visibility: hidden; width: 0; padding: 0; overflow: hidden; }
   .table-entities th:nth-child(1) { width: 34%; }
   .table-entities-archived th:nth-child(1) { width: 30%; }
   .table-entities-archived th:nth-child(3) { width: 26%; }
@@ -2006,8 +2007,10 @@ tbody tr.table-group-foot:hover { background: none; }
 
 /* A list page's table fits its card at every width (`.table-fit`), by a query on its scroller, so a drawer
    opening or the rail closing is a narrower card. A column marked `fit-N` needs a card of N px: below
-   that it is hidden, and the row's drawer has it. The chevron moves to the last column shown. Text breaks
-   anywhere rather than widen its column, and an id column (`fit-id`) takes its share of the card and cuts
+   that it is hidden, and the row's drawer has it. A table with group rows, which span every column,
+   keeps the column in its grid at no width and no height instead: a column taken out would leave the
+   span a phantom one, which takes the room. The chevron moves to the last column shown. Text breaks anywhere rather than widen its column, a name after its
+   separators first (breakAfterSeparators). An id column (`fit-id`) takes its share of the card and cuts
    its CopyableId to it. Below 880px the cells close up, and below 520px a table with no group rows wraps
    its header labels. The steps are the cards a 1920, 1366 and 600px window give, rail open or closed,
    drawer open or closed (frontend/README.md, Table and Row Conventions). */
@@ -2031,19 +2034,27 @@ tbody tr.table-group-foot:hover { background: none; }
 .table-fit tr.row-selectable:hover > td::after { background-color: var(--text-primary); }
 .table-fit tr.row-selectable.row-selected > td::after { background-color: var(--accent); }
 @container table (max-width: 1399px) {
-  .table-fit .fit-1400 { display: none; }
+  .table-fit:not(:has(.table-group-row)) .fit-1400 { display: none; }
+  .table-fit:has(.table-group-row) .fit-1400 { visibility: hidden; width: 0; padding: 0; font-size: 0; line-height: 0; }
+  .table-fit:has(.table-group-row) .fit-1400 > * { display: none; }
   .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
 }
 @container table (max-width: 1279px) {
-  .table-fit .fit-1280 { display: none; }
+  .table-fit:not(:has(.table-group-row)) .fit-1280 { display: none; }
+  .table-fit:has(.table-group-row) .fit-1280 { visibility: hidden; width: 0; padding: 0; font-size: 0; line-height: 0; }
+  .table-fit:has(.table-group-row) .fit-1280 > * { display: none; }
   .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
 }
 @container table (max-width: 1099px) {
-  .table-fit .fit-1100 { display: none; }
+  .table-fit:not(:has(.table-group-row)) .fit-1100 { display: none; }
+  .table-fit:has(.table-group-row) .fit-1100 { visibility: hidden; width: 0; padding: 0; font-size: 0; line-height: 0; }
+  .table-fit:has(.table-group-row) .fit-1100 > * { display: none; }
   .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
 }
 @container table (max-width: 879px) {
-  .table-fit .fit-880 { display: none; }
+  .table-fit:not(:has(.table-group-row)) .fit-880 { display: none; }
+  .table-fit:has(.table-group-row) .fit-880 { visibility: hidden; width: 0; padding: 0; font-size: 0; line-height: 0; }
+  .table-fit:has(.table-group-row) .fit-880 > * { display: none; }
   .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
   .table-fit tr:not(.table-group-row) > :is(th, td) { padding-left: 8px; padding-right: 8px; }
   .table-fit th { letter-spacing: 0; }
@@ -2051,12 +2062,16 @@ tbody tr.table-group-foot:hover { background: none; }
   .table-fit thead th:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880)) { padding-right: 16px; }
 }
 @container table (max-width: 699px) {
-  .table-fit .fit-700 { display: none; }
+  .table-fit:not(:has(.table-group-row)) .fit-700 { display: none; }
+  .table-fit:has(.table-group-row) .fit-700 { visibility: hidden; width: 0; padding: 0; font-size: 0; line-height: 0; }
+  .table-fit:has(.table-group-row) .fit-700 > * { display: none; }
   .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880, .fit-700)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
   .table-fit thead th:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880, .fit-700)) { padding-right: 16px; }
 }
 @container table (max-width: 519px) {
-  .table-fit .fit-520 { display: none; }
+  .table-fit:not(:has(.table-group-row)) .fit-520 { display: none; }
+  .table-fit:has(.table-group-row) .fit-520 { visibility: hidden; width: 0; padding: 0; font-size: 0; line-height: 0; }
+  .table-fit:has(.table-group-row) .fit-520 > * { display: none; }
   .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880, .fit-700, .fit-520)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
   .table-fit thead th:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880, .fit-700, .fit-520)) { padding-right: 16px; }
   .table-fit:not(:has(.table-group-row)) th { white-space: normal; }
@@ -8500,10 +8515,13 @@ ol.gateway-steps {
 @container table (max-width: 1099px) {
   .metric-col-name { width: 180px; }
   .metric-col-semantic-id { width: 160px; }
+  /* Catalog and Deprecated hide Description, which took what was left: the name takes it now. */
+  .metric-table:has(.metric-col-semantic-id) .metric-col-name { width: auto; }
 }
 @container table (max-width: 699px) {
   .metric-col-name { width: 160px; }
-  .metric-col-units { width: 120px; }
+  /* The last column shown in the catalog here, with the chevron's room beside a unit's code. */
+  .metric-col-units { width: 150px; }
   .metric-col-superseded { width: 180px; }
 }
 @container table (max-width: 519px) {

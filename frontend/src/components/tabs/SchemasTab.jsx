@@ -35,7 +35,7 @@ import { useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { FilterDropdown } from '../common/FilterChecklist'
 import { applyFacets } from '../../utils/listFilters'
 import { useSortableRows } from '../../hooks/useTableSort'
-import { plural } from '../../utils/format'
+import { breakAfterSeparators, plural } from '../../utils/format'
 import { schemaIdsForDevice } from '../../utils/deviceTags'
 import { isDeviceInService } from '../../utils/inService'
 import { isShadowDevice } from '../../utils/fleetCounts'
@@ -442,7 +442,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                         />
                       </td>
                       <td>
-                        <strong>{sch.schema_name}</strong>
+                        <strong>{breakAfterSeparators(sch.schema_name)}</strong>
                         {/* A published version is read-only, and the lock says so on the row; the
                             Version header says why. */}
                         {!isSchemaEditable(sch) && (

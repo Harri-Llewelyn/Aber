@@ -7,7 +7,7 @@ import { useOpenGroups } from '../../hooks/useOpenGroups'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { useUrlState } from '../../hooks/useUrlState'
 import { siteVocabularyUrl } from '../../routes'
-import { formatDateTime, plural } from '../../utils/format'
+import { breakAfterSeparators, formatDateTime, plural } from '../../utils/format'
 import {
   vocabularyLabel, conceptTooltip, metricsUsing, SOURCE_FORMAT_LABELS
 } from '../../utils/siteVocabulary'
@@ -229,7 +229,7 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
                     <tr key={file.id} aria-current={file.id === focused ? 'true' : undefined}>
                       <td>
                         <Tooltip text={`${SOURCE_FORMAT_LABELS[file.source_format] || file.source_format}. SHA-256 ${file.sha256}.${file.licence_note ? ` Licence: ${file.licence_note}` : ''}`}>
-                          <span>{file.name}</span>
+                          <span>{breakAfterSeparators(file.name)}</span>
                         </Tooltip>
                       </td>
                       <td className="fit-700">

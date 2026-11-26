@@ -153,6 +153,8 @@ const stepOf = (el) => {
   const found = [...el.classList].map(c => /^fit-(\d+)$/.exec(c)?.[1]).filter(Boolean)
   return found.length ? Number(found[0]) : null
 }
+/** The zero-width characters in `text`, which would change what is copied or searched. */
+const zeroWidth = (text) => [...text].filter(ch => [0x200b, 0x200c, 0x200d, 0x2060, 0xad].includes(ch.codePointAt(0)))
 const labelOf = (th) => th.textContent.trim()
 
 async function tableOf(key) {
@@ -175,7 +177,7 @@ describe('the README names every list table', () => {
 })
 
 describe.each(readmeRows().map(r => [r.key, r]))('%s', (key, row) => {
-  it('takes table-fit, and each column, its header and its cells carry the README\'s step', async () => {
+  it('takes table-fit, each column carries the README\'s step, and the name wraps after its separators', async () => {
     const table = await tableOf(key)
     const heads = [...table.querySelector('thead tr').children]
     const named = heads.filter(th => labelOf(th))
@@ -207,9 +209,14 @@ describe.each(readmeRows().map(r => [r.key, r]))('%s', (key, row) => {
     const cols = [...table.querySelectorAll('colgroup > col')]
     if (cols.length) expect(cols.map(stepOf)).toEqual(heads.map(stepOf))
 
-    // The name stays at every width.
+    // The name stays at every width, and wraps after its separators before inside a word, reading
+    // as written (breakAfterSeparators).
     expect(row.stays.length).toBeGreaterThan(0)
     expect(stepOf(named[0])).toBeNull()
+    const nameCell = rows[0].children[heads.indexOf(named[0])]
+    const name = nameCell.querySelector('strong') || nameCell.querySelector('.mono') || nameCell
+    if (/[-_./:][^-_./:]/.test(name.textContent)) expect(name.querySelector('wbr'), `${key}: "${name.textContent}"`).toBeTruthy()
+    expect(zeroWidth(table.textContent)).toEqual([])
   })
 })
 
@@ -225,7 +232,10 @@ describe('App.css', () => {
 
   it.each(STEPS)('hides fit-%i below it, and moves the chevron to the last column shown', (n) => {
     const block = blockOf(`max-width: ${n - 1}px`)
-    expect(block).toContain(`.table-fit .fit-${n} { display: none; }`)
+    expect(block).toContain(`.table-fit:not(:has(.table-group-row)) .fit-${n} { display: none; }`)
+    // A group row spans every column, so there the column stays in the grid at no width or height.
+    expect(block).toContain(`.table-fit:has(.table-group-row) .fit-${n} { visibility: hidden; width: 0; padding: 0; font-size: 0; line-height: 0; }`)
+    expect(block).toContain(`.table-fit:has(.table-group-row) .fit-${n} > * { display: none; }`)
     const wider = STEPS.filter(s => s >= n).map(s => `.fit-${s}`).join(', ')
     expect(block).toContain(`.table-fit tr.row-selectable > td:nth-last-child(1 of :not(${wider})) { --fit-chevron: ""; position: relative; padding-right: 40px; }`)
     // Where the cells have closed up, the last header shown keeps the room its sort arrow hangs in.

@@ -15,7 +15,7 @@ import {
   metricNameError,
   composeMetricName, METRIC_GROUP_SEPARATOR
 } from '../../utils/metricGroup'
-import { formatDateTime, plural } from '../../utils/format'
+import { breakAfterSeparators, formatDateTime, plural } from '../../utils/format'
 import { DERIVED_METRICS_FILE_NAME } from '../../utils/derivedMetricsFile'
 import { modelledMetrics } from '../../utils/deviceTags'
 import {
@@ -993,7 +993,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     <>
       {/* The catalog lists measured metrics only; Deprecated lists both, so a derived one says so. */}
       <td>
-        <span className="mono">{m.name}</span>
+        <span className="mono">{breakAfterSeparators(m.name)}</span>
         {isDerived(m) && <> <DerivedTag /></>}
       </td>
       {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
@@ -1299,7 +1299,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                               onChange={() => yaml.toggle(m.metric_uuid)}
                             />
                           </td>
-                          <td><span className="mono">{m.name}</span></td>
+                          <td><span className="mono">{breakAfterSeparators(m.name)}</span></td>
                           <td className="cell-meta fit-880">{kindLabel(m.derivation.kind)}</td>
                           <td><Definition derivation={m.derivation} /></td>
                           <td className="cell-meta fit-700">{unitAndCode(unitOf(m)) || '—'}</td>
@@ -1337,7 +1337,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                             {metricCells(m, true)}
                             <td>
                               {replacement
-                                ? <span className="mono">{replacement.name}</span>
+                                ? <span className="mono">{breakAfterSeparators(replacement.name)}</span>
                                 : <span className="cell-meta">—</span>}
                             </td>
                           </tr>
@@ -1406,9 +1406,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                         const nameProblem = metricNameError(u.metric_name)
                         return (
                           <tr key={u.metric_name}>
-                            <td><span className="mono">{u.metric_name.split('/').map((part, i, all) => (
-                              <React.Fragment key={i}>{part}{i < all.length - 1 && <>/<wbr /></>}</React.Fragment>
-                            ))}</span></td>
+                            <td><span className="mono">{breakAfterSeparators(u.metric_name)}</span></td>
                             <td className="cell-meta fit-1100">{u.device_count}</td>
                             <td>
                               <div className="context-device-list">

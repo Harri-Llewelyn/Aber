@@ -14,6 +14,7 @@ import {
   gatewayGroupMismatch
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId, sparkplugGroupProblem } from '../../utils/sparkplugId'
+import { breakAfterSeparators } from '../../utils/format'
 import {
   GATEWAY_TYPES, SELECTABLE_TYPES, LISTED_TYPES, gatewayType, gatewayTypeFields,
   gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone, credentialIssuedHere,
@@ -838,7 +839,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                          }}
                        >
                          <td>
-                           <strong>{g.gateway_name}</strong>
+                           <strong>{breakAfterSeparators(g.gateway_name)}</strong>
                            {/* A state, not a kind: a gateway of any type can be archived. */}
                            {g.is_archived && (
                              <ArchivedBadge size="sm" className="gateway-name-badge" title="Archived: out of service. Restore it from its drawer." />

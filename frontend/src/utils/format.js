@@ -1,7 +1,10 @@
+import { createElement } from 'react'
+
 /**
  * The one place the dashboard turns a timestamp, a duration, a size or a count into text, so the
- * same value reads the same on every page. Each formatter returns a stable fallback for a missing
- * or invalid input, never "Invalid Date" or "NaN"; the fallback is named in each doc below.
+ * same value reads the same on every page, and gives a name in a table its places to wrap. Each
+ * formatter returns a stable fallback for a missing or invalid input, never "Invalid Date" or "NaN";
+ * the fallback is named in each doc below.
  */
 
 /** Shown wherever a value is absent or unreadable. */
@@ -105,4 +108,19 @@ export function formatBytes(n) {
 export function plural(n, word, pluralWord = `${word}s`) {
   const count = Number.isFinite(Number(n)) ? Number(n) : 0
   return `${count} ${count === 1 ? word : pluralWord}`
+}
+
+/** Between a separator and what follows it: `_`, `-`, `.`, `/` or `:`. A run of them stays whole. */
+const AFTER_SEPARATOR = /(?<=[-_./:])(?=[^-_./:])/
+
+/**
+ * A name or an id with a place to wrap after each separator in it, for a table cell that fits its card:
+ * `Sim_Gateway_Cell1_Machining` wraps between its words, and a part still longer than the cell breaks
+ * where the cell's `overflow-wrap: anywhere` lets it. Each place is a `<wbr>`, which adds no
+ * character, so what is read aloud, copied or searched is the text as written. Anything but a string
+ * comes back as it is.
+ */
+export function breakAfterSeparators(text) {
+  if (typeof text !== 'string') return text
+  return text.split(AFTER_SEPARATOR).flatMap((part, i) => (i ? [createElement('wbr', { key: i }), part] : [part]))
 }

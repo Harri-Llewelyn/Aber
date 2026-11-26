@@ -10,7 +10,7 @@ import { trackRequest } from '../../lib/apiActivity'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
-import { formatDateTime, formatRelative, plural } from '../../utils/format'
+import { breakAfterSeparators, formatDateTime, formatRelative, plural } from '../../utils/format'
 import { namesListed } from '../../utils/drawerWarnings'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
@@ -1150,7 +1150,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         }}
                       >
                         <td>
-                          <strong>{a.asset_name}</strong>
+                          <strong>{breakAfterSeparators(a.asset_name)}</strong>
                           {/* Marked whenever shown, because the toggle that revealed it is a filter
                               and filters are forgotten. The badge answers whether a reading
                               happened, wherever the row is seen. */}

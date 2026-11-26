@@ -3780,12 +3780,18 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
     of the card, and its `CopyableId` is cut to it, ending in an ellipsis; its tooltip and the drawer
     have the whole of it. Below 520px an id goes to the drawer too: a cut id would show three
     characters.
-  - **Text breaks anywhere** rather than widen its column. Below 880px the cells close up to 8px, and
-    below 520px a table with no group rows wraps its header labels.
+  - **Text breaks anywhere** rather than widen its column. A name or an id in the name column breaks
+    after its separators first (`_ - . / :`, `breakAfterSeparators()` in `utils/format.js`, a `<wbr>`
+    each, so it reads and copies as written), and inside a word only where a part is still longer than
+    the cell. Below 880px the cells close up to 8px, and below 520px a table with no group rows wraps its
+    header labels.
   - **A table with a grid of its own** (the Metrics tables' colgroup) hides its `<col>` with the
     column and narrows the columns left in the same steps (`.metric-col-*`), so its tabs still line up.
-    The Entities tables keep their own query (`@container entities`), and below 520px they too send
-    the UUID to the drawer.
+    When Description goes, the name takes what it left. The Entities tables keep their own query
+    (`@container entities`), and below 520px they too send the UUID to the drawer.
+  - **A table with group rows** (Metric Catalog, Entities) keeps a hidden column in its grid at no
+    width, out of sight, rather than taking it out: a group row spans every column, and a column taken
+    out leaves the span a phantom one at the end, which takes the room the others should have.
   - `tablesFitTheirCards.test.jsx` holds each list page's table to the table below: its header and
     every cell of a column carry the same step, and the steps are App.css's. Whether a table fits is
     measured in a browser; jsdom lays nothing out.

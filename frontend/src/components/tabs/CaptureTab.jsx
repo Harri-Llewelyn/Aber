@@ -39,7 +39,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { CAPTURE_FILE, CAPTURE_FILE_LIMIT } from '../../utils/captureFile'
-import { formatBytes, formatDateTime, formatDuration, plural } from '../../utils/format'
+import { breakAfterSeparators, formatBytes, formatDateTime, formatDuration, plural } from '../../utils/format'
 
 // Role checks, as the RLS makes them (`has_role`), not a permission; the title names the same list.
 const WRITE_ROLES = ['Administrator', 'Shopfloor_Manager']
@@ -1321,9 +1321,9 @@ function SubjectRow({ row, selected, onSelect }) {
         onSelect()
       }}
     >
-      <td>{row.name}</td>
+      <td>{breakAfterSeparators(row.name)}</td>
       {row.kind === 'device' && (
-        <td className="fit-1100" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{row.context}</td>
+        <td className="fit-1100" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{breakAfterSeparators(row.context)}</td>
       )}
       <td className="fit-id fit-520"><CopyableId value={row.sparkplugId} label="Sparkplug ID" /></td>
       {/* A column rather than a badge on the name, matching the Gateways page. */}

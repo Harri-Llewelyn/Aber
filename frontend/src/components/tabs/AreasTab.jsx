@@ -40,7 +40,7 @@ import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
-import { plural } from '../../utils/format'
+import { breakAfterSeparators, plural } from '../../utils/format'
 import { AreaPlanPanel } from '../common/AreaPlanPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -446,7 +446,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                     >
                       <td className="cell-icon-col"><AreaIcon area={a} size={16} /></td>
                       <td>
-                        <strong>{a.area_name}</strong>
+                        <strong>{breakAfterSeparators(a.area_name)}</strong>
                         {a.is_archived && (
                           <ArchivedBadge size="sm" className="badge-follow" title="Archived: its cells are still filed here and its topics are unchanged" />
                         )}

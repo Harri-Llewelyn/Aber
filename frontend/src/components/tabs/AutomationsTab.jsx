@@ -24,7 +24,7 @@ import { BuiltInAlerts } from './BuiltInAlerts'
 import { AUTOMATIONS_TABS, tabHref } from '../../navigation'
 import { renderAutomationsYaml } from '../../utils/automationYaml'
 import { downloadBlob } from '../../utils/downloadBlob'
-import { formatDateTime, formatRelative, plural } from '../../utils/format'
+import { breakAfterSeparators, formatDateTime, formatRelative, plural } from '../../utils/format'
 import { isUuid } from '../../utils/isUuid'
 import { severityOf } from '../../utils/alertHistory'
 import {
@@ -245,9 +245,9 @@ function AutomationList({ showToast, canWrite, onExport, onUpload, version }) {
                     </td>
                     <td>
                       <RouteLink to={automationUrl(e.key)} className="count-link" title={`Open ${e.alias}`}>
-                        <strong>{e.alias}</strong>
+                        <strong>{breakAfterSeparators(e.alias)}</strong>
                       </RouteLink>
-                      <div className="cell-meta mono">{e.key}</div>
+                      <div className="cell-meta mono">{breakAfterSeparators(e.key)}</div>
                     </td>
                     <td className="automation-summary fit-520">
                       <Tooltip text={e.summary}>

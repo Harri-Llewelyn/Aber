@@ -52,7 +52,7 @@ import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
-import { plural } from '../../utils/format'
+import { breakAfterSeparators, plural } from '../../utils/format'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
 import { inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
@@ -444,7 +444,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                     >
                       <td className="cell-icon-col"><CellIcon cell={c} size={16} /></td>
                       <td>
-                        <strong>{c.cell_name}</strong>
+                        <strong>{breakAfterSeparators(c.cell_name)}</strong>
                         {c.description && <div className="cell-meta">{c.description}</div>}
                         {c.is_archived && (
                           <ArchivedBadge size="sm" className="badge-follow" title="Archived: out of service, with no devices or gateways in it" />
