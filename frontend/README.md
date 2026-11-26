@@ -2965,8 +2965,9 @@ level all say it. "Campus" may gloss it in running text and tooltips, as in "the
 campus", but never names a control, a setting or an identifier. "Area" is used everywhere except
 in "building management system".
 
-- **Look first.** Before building a feature or an element, look for something similar: `components/common`,
-  `hooks`, `utils`, `App.css` and the sibling pages. Use it, or extend it for every caller. A second one drawn
+- **Look first.** Before building a feature or an element, look for something similar: `components/common`
+  and `hooks` ([What the dashboard already has](#what-the-dashboard-already-has) lists them), `utils`, `App.css`
+  and the sibling pages. Use it, or extend it for every caller. A second one drawn
   apart is two looks for one thing. The pull request says what was found, and whether it was used, extended or
   could not be ([`CONTRIBUTING.md`](../CONTRIBUTING.md#three-rules-worth-stating-up-front)).
 - **Page identity.** A page has one card. Its icon, title and one-sentence description are the
@@ -3193,6 +3194,7 @@ second page uses one of these, its row moves to the group it belongs to.
 | Metrics | `FurtherSemanticIds` | A metric's further semantic ids, as text or to edit | Its own id: `SemanticIdField` |
 | Metrics | `PermittedValuesField` | A metric's permitted values, as one line of text | |
 | Schemas | `PropertyRange` | A numeric metric's valid range, beside its row | |
+| Schemas | `SchemaDerivedMetrics` | A schema's derived metrics, chosen or read | |
 | Schemas | `SchemaEditor` | A schema's form, to build, edit or read | |
 | Sign-in | `AmbientPipeline` | The moving background behind the sign-in card | |
 | Vocabulary | `ASHRAE223VocabularyPanel` | The ASHRAE 223P tab | |
@@ -3219,6 +3221,7 @@ mounts, what one page uses, and what a component above calls for you.
 | `useClockTick` | Draws again on an interval, for words such as "12s ago" | Reading again: `usePolling` |
 | `useDisplayNames` | The names of the people whose ids a page shows | |
 | `useFormCheck` | What a form still needs, said by the press that asks for it | |
+| `useOpenGroups` | Which groups of a list are open, for `GroupHeading` | |
 | `usePendingAction` | One button's running state, started once; `usePendingKey` for a list's | |
 | `usePermissions` | What the role may do; `requiresRolesTitle` says who may | |
 | `usePolling` | Reads again on an interval, and slows down after failures | As a row changes: `useRealtimeTable` |
