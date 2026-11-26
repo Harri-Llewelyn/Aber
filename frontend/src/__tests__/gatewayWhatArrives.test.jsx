@@ -85,7 +85,9 @@ const valueOf = (label) => {
   const dt = [...document.querySelectorAll('.context-panel dt.context-field-label')].find(d => d.textContent.trim() === label)
   return dt?.parentElement.querySelector('dd')
 }
-const rowOf = (name) => screen.getByText(name).closest('.context-device-row')
+// In the drawer: the table's Devices column names the devices too.
+const drawer = () => within(document.querySelector('.context-panel'))
+const rowOf = (name) => drawer().getByText(name).closest('.context-device-row')
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -210,7 +212,7 @@ describe('the devices\' last readings', () => {
   it('gives the exact time in the tooltip of a reading', async () => {
     api.gatewayDevicesLastReading.mockResolvedValue([{ device_id: devices[0].asset_id, last_reading_at: '2026-11-10T14:30:00Z' }])
     await show(gateway({ devices }))
-    await screen.findByText('CNC_01')
+    await drawer().findByText('CNC_01')
     const text = await within(rowOf('CNC_01')).findByText(/^Last reading/)
     expect(text.getAttribute('aria-describedby')).toBeTruthy()
     fireEvent.focus(text)
@@ -236,7 +238,7 @@ describe('the devices\' last readings', () => {
   it('draws a gateway with no device as before, with no tip on the label', async () => {
     await show(gateway({ devices: [] }))
     await group()
-    expect(screen.getByText('No devices assigned')).toBeTruthy()
+    expect(drawer().getByText('No devices assigned')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /What the last reading beside each device means/ })).toBeNull()
   })
 })

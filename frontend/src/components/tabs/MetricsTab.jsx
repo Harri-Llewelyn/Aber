@@ -1261,7 +1261,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 />
               ) : (
                 <div className="table-wrap">
-                  <table className="table-fit metric-table metric-table-derived">
+                  <table className="table-fit metric-table">
                     <colgroup>
                       <col className="automation-select" />
                       <col className="metric-col-name" />
@@ -1321,7 +1321,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 <EmptyState icon={<IconArchive size={36} />} message="No metric is deprecated." />
               ) : (
                 <div className="table-wrap">
-                  <table className="table-fit metric-table metric-table-deprecated">
+                  <table className="table-fit metric-table">
                     {metricColumns(true)}
                     <thead>
                       <tr>

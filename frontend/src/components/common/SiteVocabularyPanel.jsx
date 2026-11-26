@@ -210,7 +210,7 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
           <>
             <div className="table-wrap">
               {/* Fits its card: a column the card has no room for is hidden (App.css). */}
-              <table className="table-fit table-site-vocabularies">
+              <table className="table-fit">
                 <thead>
                   <tr>
                     <SortHeader sort={sort} column="name" title="The file's name.">Vocabulary</SortHeader>

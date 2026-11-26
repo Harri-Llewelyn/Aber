@@ -419,7 +419,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         ) : (
           <div className="table-wrap">
             {/* Fits its card: a column the card has no room for goes, and the drawer has it (App.css). */}
-            <table className="table-fit table-areas">
+            <table className="table-fit">
               <thead>
                 <tr>
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>

@@ -589,7 +589,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
           ) : (
           <div className="table-wrap">
             {/* Fits its card: a column the card has no room for goes, and the drawer has it (App.css). */}
-            <table className="table-fit table-capture">
+            <table className="table-fit">
               <thead>
                 <tr>
                   <SortHeader sort={sort} column="name" title={subjectKind === 'gateway'

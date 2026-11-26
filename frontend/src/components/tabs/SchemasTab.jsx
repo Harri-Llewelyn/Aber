@@ -395,7 +395,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         ) : (
           <div className="table-wrap">
             {/* Fits its card: a column the card has no room for goes, and the drawer has it (App.css). */}
-            <table className="table-fit table-schemas">
+            <table className="table-fit">
               <thead>
                 <tr>
                   <th className="automation-select">

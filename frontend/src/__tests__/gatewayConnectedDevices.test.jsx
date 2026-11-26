@@ -298,21 +298,20 @@ describe('the gateways table sorts by a column (#801)', () => {
 
   /* The open drawer drops the UUID and Devices columns; a sort by one of them stays in the
      address and in the order of the rows, and its header returns marked when the drawer closes. */
-  it('opens sorted from the address, and keeps the order while the drawer hides the sorted column', async () => {
+  it('opens sorted from the address, and keeps the order while the drawer is open', async () => {
     await showFleet('/gateways?lifecycle=active,archived&sort=-devices')
     const sorted = ['Stale', 'Enrolled', 'Online', 'Offline', 'Pending', 'Archived']
     expect(names()).toEqual(sorted)
     expect(screen.getByRole('columnheader', { name: 'Devices' })).toHaveAttribute('aria-sort', 'descending')
 
+    // The drawer narrows the card, whose query may hide the sorted column; the order stays.
     fireEvent.click(screen.getByText('Online_Gateway', { selector: 'tbody strong' }))
-    await waitFor(() => expect(screen.queryByRole('columnheader', { name: 'Devices' })).toBeNull())
-    expect(screen.queryByRole('columnheader', { name: 'Gateway UUID' })).toBeNull()
-    expect(document.querySelectorAll('th[aria-sort]')).toHaveLength(0)
+    await waitFor(() => expect(address()).toBe('/gateways?lifecycle=active,archived&sort=-devices&gateway=gw-online'))
+    expect(screen.getByRole('columnheader', { name: 'Devices' })).toHaveAttribute('aria-sort', 'descending')
     expect(names()).toEqual(sorted)
-    expect(address()).toBe('/gateways?lifecycle=active,archived&sort=-devices&gateway=gw-online')
 
     fireEvent.click(screen.getByText('Online_Gateway', { selector: 'tbody strong' }))
-    await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Devices' })).toHaveAttribute('aria-sort', 'descending'))
+    await waitFor(() => expect(address()).toBe('/gateways?lifecycle=active,archived&sort=-devices'))
     expect(names()).toEqual(sorted)
   })
 })

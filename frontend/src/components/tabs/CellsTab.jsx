@@ -413,7 +413,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
         ) : (
           <div className="table-wrap">
             {/* Fits its card: a column the card has no room for goes, and the drawer has it (App.css). */}
-            <table className="table-fit table-cells">
+            <table className="table-fit">
               <thead>
                 <tr>
                   {/* The cell's own glyph, chosen in the New Cell form. Its header is a

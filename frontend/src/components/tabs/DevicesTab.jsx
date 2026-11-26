@@ -1121,7 +1121,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
          ) : (
           <div className="table-wrap">
             {/* Fits its card: a column the card has no room for goes, and the drawer has it (App.css). */}
-            <table className="table-fit table-devices">
+            <table className="table-fit">
               <thead>
                 <tr>
                   <SortHeader sort={rosterSort} column="name">Name</SortHeader>
