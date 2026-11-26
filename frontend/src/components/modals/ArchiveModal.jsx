@@ -12,11 +12,10 @@ import { Tooltip } from '../common/Tooltip'
  */
 export function ArchiveModal({ type, entityId, displayName, onArchive, onCancel }) {
   const [retentionDays, setRetentionDays] = useState(30)
-  const act = `Archive ${TYPE_WORD[type] || 'Entity'}`
 
   return (
     <ConfirmModal
-      title={act}
+      title={`Archive ${TYPE_WORD[type] || 'Entity'}`}
       subject={displayName}
       size="default"
       icon={<IconArchive size={18} />}
@@ -27,7 +26,7 @@ export function ArchiveModal({ type, entityId, displayName, onArchive, onCancel 
         {type === 'gateway' && ' It also revokes its broker credential and archives its forge repository.'}
         {' '}Raw readings are not held back: they still age out of the historian on its raw window.
       </>}
-      confirmLabel={act}
+      confirmLabel={`Archive ${TYPE_WORD[type] || 'Entity'}`}
       pendingLabel="Archiving…"
       onConfirm={() => onArchive(retentionDays)}
       onCancel={onCancel}
