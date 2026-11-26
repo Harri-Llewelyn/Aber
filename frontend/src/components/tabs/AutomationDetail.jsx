@@ -213,6 +213,12 @@ export function AutomationDetail({ automationKey, showToast, canWrite, hasPermis
               <IconDownload size={13} aria-hidden="true" /> Export
             </ActionButton>
           )}
+          {/* A destination drawn as the buttons beside it; withheld from a role that may not open the trail. */}
+          {!isNew && canReadTrail && base.row && (
+            <RouteLink to={trailUrl(base.row.id, 'AUTOMATION')} className="btn btn-primary btn-sm" title="Open the Audit Trail on this automation's own history">
+              <IconHistory size={13} aria-hidden="true" /> View in Audit Trail
+            </RouteLink>
+          )}
           {!isNew && (
             <ActionButton
               className="btn btn-primary btn-sm"
@@ -314,14 +320,6 @@ export function AutomationDetail({ automationKey, showToast, canWrite, hasPermis
               </div>
             )}
           </section>
-        )}
-
-        {!isNew && canReadTrail && base.row && (
-          <p className="automation-trail">
-            <RouteLink to={trailUrl(base.row.id, 'AUTOMATION')} className="count-link" title="Open the Audit Trail on this automation's own history">
-              <IconHistory size={13} aria-hidden="true" /> View in Audit Trail
-            </RouteLink>
-          </p>
         )}
       </div>
 

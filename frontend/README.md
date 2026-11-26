@@ -2803,8 +2803,9 @@ page's help is `help/pages/automations.md`.
   `set_automation_enabled()` and ends with a toast that links to the automation. The toolbar is
   search, then **Upload**, **Export** and **New Automation** last. **Export** writes the rows ticked,
   or every automation when none is.
-- **One automation** is the YAML in the editor, its recent firings with each alert's labels and
-  values, and a link to its history in the Audit Trail by its row's uuid. **Save** opens
+- **One automation** is the YAML in the editor and its recent firings with each alert's labels and
+  values. Its toolbar's acts are Enable or Disable, Export, **View in Audit Trail** (its history by
+  its row's uuid, for a reader of the trail, drawn as the buttons beside it), Delete and Save. **Save** opens
   `ApplyAutomationsModal`, which parses the text, calls `apply_automations(doc, true)` and lists each
   automation as new, changed, unchanged or refused with every reason and its line. Its confirm repeats
   the act and the count (**Save 1 Automation**, **Apply 3 Automations**) and applies the same document with

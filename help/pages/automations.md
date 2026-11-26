@@ -93,9 +93,9 @@ A file from another site needs its device ids changed first. Each site's devices
 Select a name in the list. The page shows:
 
 - **The editor**, with the automation as YAML. A comment beside each device id names the device and where it is.
-- **Disable** or **Enable**, **Export**, **Delete** and **Save**. **Delete** asks you to type the automation's name. Deleting an automation resolves the alerts it raised.
+- **Disable** or **Enable**, **Export**, **View in Audit Trail**, **Delete** and **Save**, in the row above the editor. **Delete** asks you to type the automation's name. Deleting an automation resolves the alerts it raised.
+- **View in Audit Trail** is there for anyone who may open the Audit Trail. It shows who created, changed, enabled, disabled or deleted this automation, and when.
 - **Recent firings**: the latest times it raised an alert, newest first. Each row shows the device, the metric, how long it fired, and the labels and values it carried.
-- **View in Audit Trail**, for anyone who may open it. It shows who created, changed, enabled, disabled or deleted this automation, and when.
 
 For an Operator or an Auditor, the editor is read-only. You can read and copy the text.
 
