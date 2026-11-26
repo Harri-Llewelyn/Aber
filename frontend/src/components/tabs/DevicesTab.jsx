@@ -73,7 +73,7 @@ import {
 } from '../../utils/deviceTags'
 import { oldDevicesLinkChanges, STATUS_OUT_OF_VOCABULARY, STATUS_UNMODELLED } from '../../utils/devicesAddress'
 import { assignableSchemas, isAssignableSchema } from '../../utils/schemaVersion'
-import { isHeldAgain } from '../../utils/quarantineHold'
+import { HELD_AGAIN_ROW, isHeldAgain } from '../../utils/quarantineHold'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
@@ -91,6 +91,7 @@ import {
   IconBookOpen,
   IconCube,
   IconAlertTriangle,
+  IconCheck,
   IconPlay,
   IconDownload,
   IconRadio,
@@ -938,6 +939,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                           </div>
                         </Tooltip>
                       )}
+                      {/* Where Reject would be, why it is not: Approve & Onboard is its way out. */}
+                      {isHeldAgain(q) && (
+                        <div className="cell-flag">
+                          <IconCheck size={10} />
+                          <span>{HELD_AGAIN_ROW}</span>
+                        </div>
+                      )}
                     </td>
                     <td><CopyableId value={q.reported_identity} label="published device id" onNotify={showToast} /></td>
                     <td>{q.gateway_name || '—'}</td>
@@ -953,15 +961,18 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                       >
                         Approve &amp; Onboard
                       </ActionButton>
-                      <ActionButton
-                        className="btn btn-danger btn-sm"
-                        permitted={canReject}
-                        deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.QUARANTINE_REJECT)}
-                        onClick={() => setRejectTarget(q)}
-                        title="Discard this device and its held readings"
-                      >
-                        Reject
-                      </ActionButton>
+                      {/* A registered device held again has none: it would take what is set on it. */}
+                      {!isHeldAgain(q) && (
+                        <ActionButton
+                          className="btn btn-danger btn-sm"
+                          permitted={canReject}
+                          deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.QUARANTINE_REJECT)}
+                          onClick={() => setRejectTarget(q)}
+                          title="Discard this device and its held readings"
+                        >
+                          Reject
+                        </ActionButton>
+                      )}
                     </td>
                   </tr>
                   )
@@ -1559,10 +1570,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         />
       )}
       {/* Reject deletes the row, so nothing is left to restore; a device that publishes again is
-          held afresh. */}
+          held afresh. Only a device nobody registered is offered it. */}
       {rejectTarget && (
         <ConfirmModal
           title="Reject Device"
+          subject={rejectTarget.asset_name}
           icon={<IconTrash size={18} />}
           message={
             `Reject the device '${rejectTarget.asset_name}'` +

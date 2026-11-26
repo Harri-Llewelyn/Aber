@@ -140,7 +140,7 @@ describe('Reject Device', () => {
     fireEvent.click(tabLink(/^Quarantine/))
     fireEvent.click(within((await screen.findByText('unknown_robot')).closest('tr')).getByRole('button', { name: 'Reject' }))
     await holdsUntilTyped({
-      dialog: screen.getByRole('dialog', { name: 'Reject Device' }),
+      dialog: screen.getByRole('dialog', { name: /^Reject Device — / }),
       label: 'device name', text: 'unknown_robot', button: 'Reject Device', act: api.post,
     })
     expect(api.post).toHaveBeenCalledWith(`/api/v1/quarantine/${held.asset_id}/reject`, {})
