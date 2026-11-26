@@ -15,7 +15,7 @@ import { deviceIdentifiers, deviceIds } from './sparkplugId'
 import { SOURCE_SHADOW, SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, groupDevicesByCell, isSiteWideSource } from './cellResolution'
 import { areaWideInService, inServiceDevices } from './inService'
 import { REPLAY_LANES_PARAM, isReplayLane } from './replayLanes'
-import { DERIVED_MAX_MINUTES, SHARE_UNIT, derivedInputCount, derivedReportedBy, percentWords, unitOf } from './derivedMetric'
+import { DERIVED_MAX_MINUTES, SHARE_UNIT, derivedInputCount, derivedMetricsOfDevice, percentWords, unitOf } from './derivedMetric'
 import { unitSticks, unitSymbol, withUnit } from './units'
 import { timelineTicks } from './timelineAxis'
 import {
@@ -335,14 +335,13 @@ export function deviceMatches(device, text) {
 /**
  * The metrics a device reports: those its last birth declared and those its schemas model, by
  * name. A metric it stopped declaring is still charted while a schema models it. With the `catalog`,
- * each derived metric whose inputs it reports is among them too, all of them (a derived metric applies
- * to every device that reports all its inputs); nothing else changes.
+ * the derived metrics its schemas name are among them too (derivedMetricsOfDevice()); nothing else changes.
  */
 export function deviceMetrics(device, schemas, catalog = null) {
   const declared = Array.isArray(device?.last_birth_metrics) ? device.last_birth_metrics : []
   const modelled = modelledMetricsAcross(schemasForDevice(device, schemas)) || new Set()
   const measured = [...new Set([...declared, ...modelled])].filter(Boolean)
-  const derived = catalog ? derivedReportedBy(new Set(measured), catalog) : []
+  const derived = catalog ? derivedMetricsOfDevice(device, schemas, catalog) : []
   return [...new Set([...measured, ...derived])].sort((a, b) => a.localeCompare(b))
 }
 
@@ -1592,8 +1591,7 @@ export function historyMetrics(devices, schemas, catalog) {
 /**
  * The devices in service that report `metric` (deviceMetrics()), narrowed to those in one of `areas`
  * and in one of `cells` (ids) and named in `keys` (telemetry keys), where each is given; in the
- * order given. With the `catalog`, a derived metric is reported by the devices that report all its
- * inputs.
+ * order given. With the `catalog`, a derived metric is reported by the devices whose schemas name it.
  */
 export function metricDevices(devices, schemas, metric, { areas = [], cells = [], keys = [], catalog = null } = {}) {
   return inServiceDevices(devices).filter(d =>

@@ -74,7 +74,8 @@ RECORD = {
                    "description": "Legal name of the manufacturer."}],
     "schemas": [{"id": "s1", "schema_name": "Mill_Schema", "semantic_id": "https://example.org/submodels/Mill/1/0",
                  "schema_definition": {"properties": {"Systems/TEMPERATURE": {}, "OEE/AVAILABILITY": {},
-                                                      "Controller/PART_COUNT": {}}}}],
+                                                      "Controller/PART_COUNT": {}}},
+                 "derived_metrics": ["Controller/PARTS_PER_HOUR"]}],
     "definitions": [{"semantic_id": MTC + "TEMPERATURE", "name": "TEMPERATURE",
                      "definition": "The temperature of a part of the equipment.", "standard": "MTConnect"}],
 }

@@ -170,7 +170,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
   // A derived metric is computed from the minutes by derived_series(), and no device publishes it.
   const derived = metricList.find(m => m.name === metric)?.derived ?? false
 
-  // Who reports the metric (a derived one: reports all its inputs): charted and read. The rest are named in words.
+  // Who reports the metric (a derived one: has a schema that names it): charted and read. The rest are named in words.
   const reporters = useMemo(() => machines.filter(d => deviceMetrics(d, schemas, catalog).includes(metric)), [machines, schemas, catalog, metric])
   const keys = useMemo(() => reporters.map(telemetryKey), [reporters])
   const keysKey = keys.join('\n')

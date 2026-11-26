@@ -131,7 +131,7 @@ export function HistoryMetric({ metric, devices, schemas, catalog = null, metric
   const unit = info?.unit ?? null
   const kind = info?.kind ?? null
   const stateKind = kind === 'text' || kind === 'flag'
-  // A derived metric is computed from the minutes, and its devices are those that report all its inputs.
+  // A derived metric is computed from the minutes, and its devices are those whose schemas name it.
   const derived = info?.derived ?? false
 
   // Everything that reports the metric, before any narrowing: what the Filters panel offers.

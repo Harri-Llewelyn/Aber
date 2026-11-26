@@ -108,6 +108,15 @@ one is judged against its **current value**, by one rule for each kind:
 
 The Devices drawer shows the same number, with the window in words. A time in state is shown as a percentage there and in History, and is a fraction wherever it is data: the API, an alert's `values` and a threshold.
 
+A device has the derived metrics its [schemas](device-schemas.md) name. So a threshold on one that none of
+the device's schemas names is refused, on the device's own line. The reason names the schemas, or says the
+device has none.
+
+- **What an automation watches already stays.** A schema may stop naming a derived metric later, and the
+  automation goes on as it was. The editor marks the device with a warning. A file that an export wrote
+  still applies.
+- **A replay lane has its original's derived metrics.**
+
 - **Why an hour.** A rate from one minute swings between 0 and sixty times the count, and one
   minute's share is 0 or 1. An hour is what "parts per hour" and "uptime" mean.
 - **A counter that stops counting reads 0 per hour.** A `below` threshold on a rate fires for a machine

@@ -63,13 +63,13 @@ const inCell = (cell) => ({ effective_cell_id: cell, location_source: 'inherited
 // holds one that reports another metric, Robots one that reports a text metric. The Area-Wide meter
 // reports Spindle/LOAD and is in no cell. Hall C is another area, whose machine reports it too.
 const devices = [
-  { asset_id: LATHE3, asset_name: 'Lathe 3', last_birth_metrics: ['Spindle/LOAD', 'Spindle/SPEED'], ...inCell('c1') },
-  { asset_id: LATHE4, asset_name: 'Lathe 4', last_birth_metrics: ['Spindle/LOAD'], ...inCell('c1') },
-  { asset_id: MILL, asset_name: 'Mill 2', last_birth_metrics: ['Spindle/LOAD', 'Coolant/TEMP'], ...inCell('c2'), status: 'OFFLINE' },
+  { asset_id: LATHE3, asset_name: 'Lathe 3', last_birth_metrics: ['Spindle/LOAD', 'Spindle/SPEED'], submodel_schema_ids: ['s-load'], ...inCell('c1') },
+  { asset_id: LATHE4, asset_name: 'Lathe 4', last_birth_metrics: ['Spindle/LOAD'], submodel_schema_ids: ['s-load'], ...inCell('c1') },
+  { asset_id: MILL, asset_name: 'Mill 2', last_birth_metrics: ['Spindle/LOAD', 'Coolant/TEMP'], submodel_schema_ids: ['s-load'], ...inCell('c2'), status: 'OFFLINE' },
   { asset_id: WELD, asset_name: 'Weld bot', last_birth_metrics: ['Weld/CURRENT'], ...inCell('c3') },
   { asset_id: ROBOT, asset_name: 'Robot 5', last_birth_metrics: ['Controller/EXECUTION'], ...inCell('c4') },
-  { asset_id: METER, asset_name: 'Area meter', last_birth_metrics: ['Spindle/LOAD'], effective_cell_id: null, location_source: 'area_wide', effective_area_id: 'a1', status: 'ONLINE' },
-  { asset_id: HALLC, asset_name: 'Hall C mill', last_birth_metrics: ['Spindle/LOAD'], ...inCell('c5') },
+  { asset_id: METER, asset_name: 'Area meter', last_birth_metrics: ['Spindle/LOAD'], submodel_schema_ids: ['s-load'], effective_cell_id: null, location_source: 'area_wide', effective_area_id: 'a1', status: 'ONLINE' },
+  { asset_id: HALLC, asset_name: 'Hall C mill', last_birth_metrics: ['Spindle/LOAD'], submodel_schema_ids: ['s-load'], ...inCell('c5') },
 ]
 const cells = [
   { cell_id: 'c1', cell_name: 'Turning', area_id: 'a1' },
@@ -91,11 +91,14 @@ const crowd = (n) => Array.from({ length: n }, (_, i) => ({
   last_birth_metrics: ['Spindle/LOAD'], ...inCell('c1'),
 }))
 
+/** The schema of the machines that report Spindle/LOAD, which names its rate: a catalog without the rate offers none. */
+const SCHEMAS = [{ schema_uuid: 's-load', schema_name: 'Spindle_Schema', schema_definition: { type: 'object' }, derived_metrics: ['Spindle/LOAD_RATE'] }]
+
 const routeGet = (list, cat = catalog) => (path) => {
   if (path.startsWith('/api/v1/devices')) return Promise.resolve(list)
   if (path.startsWith('/api/v1/cells')) return Promise.resolve(cells)
   if (path.startsWith('/api/v1/areas')) return Promise.resolve(areas)
-  if (path.startsWith('/api/v1/schemas')) return Promise.resolve([])
+  if (path.startsWith('/api/v1/schemas')) return Promise.resolve(SCHEMAS)
   if (path.startsWith('/api/v1/metric-catalog')) return Promise.resolve(cat)
   return Promise.resolve([])
 }
@@ -111,7 +114,7 @@ const visit = async (address, { userRole = 'Administrator', list = devices, cat 
 }
 
 const DENIED = 'Requires Administrator or Shopfloor Manager'
-// A derived metric every machine that reports Spindle/LOAD reports the input of: computed, and exported per bucket.
+// A derived metric the schema of every machine that reports Spindle/LOAD names: computed, and exported per bucket.
 const DERIVED = 'Spindle/LOAD_RATE'
 const withDerived = [...catalog, { name: DERIVED, units: 'kW/HOUR', datatype: 10, derivation: { kind: 'counter_rate', input: 'Spindle/LOAD' } }]
 const toolbar = () => document.querySelector('.filter-bar-actions')
@@ -468,7 +471,7 @@ describe('exporting a metric across devices', () => {
     expect(exportButton()).toHaveAccessibleDescription('No device in service reports No/SuchMetric, so there is nothing to export.')
   })
 
-  it('exports a derived metric for every device that reports its inputs, and says it comes at 1 minute where Raw is chosen', async () => {
+  it('exports a derived metric for every device that has it, and says it comes at 1 minute where Raw is chosen', async () => {
     await visit(`/history/metric/${encodeURIComponent(DERIVED)}`, { cat: withDerived })
     await waitFor(() => expect(api.readDerivedSeries).toHaveBeenCalled())
     expect(exportButton()).not.toBeDisabled()

@@ -29,8 +29,8 @@ import {
 } from '../../utils/semanticIdSources'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
 import {
-  DERIVED_DATATYPE, SHARE_UNIT_WORDS, appliesToDevices, appliesToNone, appliesToRule, isShare, describeDerivation, isDerived, kindLabel,
-  matchesDerivedSearch, derivationText, unitOf,
+  APPLIES_TO_RULE, DERIVED_DATATYPE, SHARE_UNIT_WORDS, appliesToDevices, appliesToNone, isShare, describeDerivation, isDerived, kindLabel,
+  matchesDerivedSearch, derivationText, schemasNaming, unitOf,
 } from '../../utils/derivedMetric'
 import { metricDevices } from '../../utils/history'
 import { unitAndCode } from '../../utils/units'
@@ -54,7 +54,7 @@ import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { RouteLink } from '../common/RouteLink'
 import { OverflowText } from '../common/OverflowText'
-import { deviceUrl, metricHistoryUrl, metricUrl, trailUrl } from '../../routes'
+import { deviceUrl, metricHistoryUrl, metricUrl, tabUrl, trailUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -205,9 +205,9 @@ const Definition = ({ derivation }) => (
 /**
  * A derived metric's Applies To: a chip for each device, in name order, that opens it on the Devices
  * page. It wraps with no cap, as the Schemas drawer's Devices field does, and a name too long for the
- * drawer is cut and slides on hover or focus. With none, what no device reports yet.
+ * drawer is cut and slides on hover or focus. With none, why: `naming` is how many schemas name the metric.
  */
-const AppliesTo = ({ devices, derivation }) => (devices.length === 0 ? appliesToNone(derivation) : (
+const AppliesTo = ({ devices, naming }) => (devices.length === 0 ? appliesToNone(naming) : (
   <div className="context-device-list">
     {appliesToDevices(devices).map(d => (
       <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} title={`Open ${d.asset_name} on the Devices page`}>
@@ -680,9 +680,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
   // Counts schemas that model the metric at all, not only those marking it `required`: this is the
   // impact warning on a destructive confirmation. Uses the same modelledMetrics() the device tags
-  // read.
-  const usageCountFor = (metricName) =>
-    schemas.filter(s => modelledMetrics(s)?.has(metricName)).length
+  // read. A derived metric is modelled by none: it is named.
+  const usageCountFor = (m) => (isDerived(m)
+    ? schemasNaming(m.name, schemas).length
+    : schemas.filter(s => modelledMetrics(s)?.has(m.name)).length)
 
   // Deprecate, Restore and Edit run from their dialogs, which show a refusal as it was worded and
   // stay open; each closes its dialog once the write has succeeded.
@@ -1040,7 +1041,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   })
 
   const selectedReplacement = selected?.superseded_by ? metricById.get(selected.superseded_by) : null
-  const selectedUsage = selected ? usageCountFor(selected.name) : 0
+  const selectedUsage = selected ? usageCountFor(selected) : 0
 
   /**
    * One column set for both tabs, fixed (`.metric-table`), so opening a group cannot move a column
@@ -1493,13 +1494,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             full: true,
             help: 'How Aber computes it from other metrics. It cannot be changed: a different definition is a new derived metric.'
           },
-          // The devices in service that report every input: the ones the Metric tab compares it across.
-          // The help names the inputs once; View in History compares the devices on one scale.
+          // The devices in service whose schemas name it: the ones the Metric tab compares it across.
+          // View in History compares them on one scale.
           isDerived(selected) && devices && {
             label: 'Applies To',
-            value: <AppliesTo devices={metricDevices(devices, schemas, selected.name, { catalog })} derivation={selected.derivation} />,
+            value: <AppliesTo devices={metricDevices(devices, schemas, selected.name, { catalog })} naming={selectedUsage} />,
             full: true,
-            help: `${appliesToRule(selected.derivation)} Each opens on the Devices page. Nothing is stored: the value is computed when it is drawn.`
+            help: `${APPLIES_TO_RULE} Each opens on the Devices page. Nothing is stored: the value is computed when it is drawn.`
           },
           !isDerived(selected) && { label: 'Standard', value: selected.standard_label || selected.standard || LOCAL_EXTENSION_LABEL },
           !isDerived(selected) && { label: 'Category', value: selected.category || null },
@@ -1529,7 +1530,14 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             mono: true,
             help: selectedReplacement ? undefined : 'No replacement was named'
           },
-          !isDerived(selected) && {
+          // A derived metric is named, not modelled: until a schema names it, no device has it.
+          isDerived(selected) ? {
+            label: 'Schemas',
+            value: selectedUsage > 0 ? `${selectedUsage} name${selectedUsage === 1 ? 's' : ''} it` : (
+              <>No schema names it yet. <RouteLink to={tabUrl('schemas')} className="count-link" title="Open the Schemas page, where a schema's editor names it">View in Schemas</RouteLink></>
+            ),
+            help: 'A device has the derived metrics its schemas name.'
+          } : {
             label: 'Schemas',
             value: selectedUsage === 0 ? 'None model it' : `${selectedUsage} model${selectedUsage === 1 ? 's' : ''} it`
           }
@@ -2010,7 +2018,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       {deprecateTarget && (
         <DeprecateMetricModal
           metric={deprecateTarget}
-          usageCount={usageCountFor(deprecateTarget.name)}
+          usageCount={usageCountFor(deprecateTarget)}
           catalog={catalog}
           onConfirm={handleDeprecate}
           onCancel={() => setDeprecateTarget(null)}
@@ -2020,7 +2028,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       {editTarget && (
         <EditMetricSemanticIdModal
           metric={editTarget}
-          usageCount={usageCountFor(editTarget.name)}
+          usageCount={usageCountFor(editTarget)}
           suggestion={suggestionForMetric(editTarget, {
             mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary, vda5050: vdaVocabulary
           })}

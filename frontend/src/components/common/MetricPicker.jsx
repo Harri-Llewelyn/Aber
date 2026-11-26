@@ -66,11 +66,14 @@ const metricGroups = (metrics) => groupCatalog(metrics).map(group => ({
  * @param {(metric: object, picked: boolean) => React.ReactNode} [renderNote] Text drawn inside the
  * row's label after the name, such as the keys a draft schema stores for it.
  * @param {boolean} [showUnits] Shows each metric's unit after its datatype.
+ * @param {string|null} [searchLabel] Names the search box. Null leaves it out, for a list too short to search.
+ * @param {boolean} [standards] The standard filter. False leaves it out, for metrics that have none.
+ * @param {string} [listClass] A class on the list, for a height App.css states.
  * @param {string} [emptyText] What the list says when no metric can be chosen at all.
  */
 export function MetricPicker({
   metrics, isPicked, onPick, single = false, isDisabled, renderExtra, renderNote, showUnits = false, listStyle,
-  emptyText = NO_MATCH
+  searchLabel = 'Search catalog metrics', standards = true, listClass, emptyText = NO_MATCH
 }) {
   const [standard, setStandard] = useState(ANY_STANDARD)
   const passes = useCallback(m => standard === ANY_STANDARD || (m.standard || '') === standard, [standard])
@@ -83,11 +86,11 @@ export function MetricPicker({
       onPick={onPick}
       single={single}
       isDisabled={isDisabled}
-      searchLabel="Search catalog metrics"
+      searchLabel={searchLabel}
       matches={metricMatches}
       passes={passes}
       // Filters the list only; what is chosen survives a change here.
-      filters={(
+      filters={standards && (
         <Tooltip text="Metrics already selected stay selected.">
           <select
             className="form-control metric-picker-standard"
@@ -123,6 +126,7 @@ export function MetricPicker({
       )}
       renderExtra={renderExtra}
       listStyle={listStyle}
+      listClass={listClass}
       emptyText={emptyText}
       noMatchText={NO_MATCH}
     />

@@ -1,0 +1,18 @@
+{
+  "about": "A deprecated derived metric the schema does not name already.",
+  "path": "$[0].derived_metrics[0]",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "derived_metrics": [
+        "@METRIC_DERIVED_OLD@"
+      ]
+    }
+  ]
+}

@@ -51,7 +51,7 @@ vi.mock('../api', async () => {
 
 const uuid = (n) => `2b3e0c4a-${String(n).padStart(4, '0')}-4000-8000-${String(n).padStart(12, '0')}`
 const place = (n, name, location, extra = {}) => ({
-  asset_id: uuid(n), asset_name: name, status: 'ONLINE', last_birth_metrics: ['Spindle/LOAD', 'Spindle/SPEED'], ...location, ...extra,
+  asset_id: uuid(n), asset_name: name, status: 'ONLINE', last_birth_metrics: ['Spindle/LOAD', 'Spindle/SPEED'], submodel_schema_ids: ['s-load'], ...location, ...extra,
 })
 const inCell = (cell) => ({ location_source: 'explicit', effective_cell_id: cell })
 const LATHE = place(1, 'Lathe 3', inCell('c1'))
@@ -74,8 +74,9 @@ const CELLS = [
 const AREAS = [{ area_id: 'a1', area_name: 'Hall B', name: 'Hall B' }, { area_id: 'a2', area_name: 'Annex', name: 'Annex', is_archived: true }]
 
 let fleet = DEVICES
-/** The metric catalog the page reads: none, unless a test gives it a derived metric. */
+/** The metric catalog and the schemas the page reads: none, unless a test gives it a derived metric. */
 let catalog = []
+let schemas = []
 let counted = { computed_from: '-infinity', computed_to: 'infinity', complete: true }
 /** Where the 5-minute rollup reaches back to: a window older than this comes back in hours, as 0245 reads it. */
 let fiveMinuteReach = -Infinity
@@ -97,6 +98,7 @@ const routeGet = (path) => {
   if (path.startsWith('/api/v1/cells')) return Promise.resolve(CELLS)
   if (path.startsWith('/api/v1/areas')) return Promise.resolve(AREAS)
   if (path.startsWith('/api/v1/metric-catalog')) return Promise.resolve(catalog)
+  if (path.startsWith('/api/v1/schemas')) return Promise.resolve(schemas)
   return Promise.resolve([])
 }
 
@@ -107,6 +109,7 @@ beforeEach(() => {
   polls.length = 0
   fleet = DEVICES
   catalog = []
+  schemas = []
   fiveMinuteReach = -Infinity
   counted = { computed_from: '-infinity', computed_to: 'infinity', complete: true }
   window.localStorage.clear()
@@ -629,20 +632,21 @@ describe('exporting from Overview', () => {
     await waitFor(() => expect(showToast).toHaveBeenCalledWith('Exported 1 row of 3 devices', 'success', { to: '/audit-trail?event=77' }))
   })
 
-  it('adds the derived metrics the box\'s devices have the inputs of, and says they come at 1 minute where Raw is chosen', async () => {
+  it("adds the derived metrics the box's devices have, and says they come at 1 minute where Raw is chosen", async () => {
     catalog = [
       { name: 'Spindle/LOAD', units: 'kW', datatype: 10 }, { name: 'Spindle/SPEED', units: 'rpm', datatype: 10 },
       { name: 'Spindle/LOAD_RATE', units: 'kW/HOUR', datatype: 10, derivation: { kind: 'counter_rate', input: 'Spindle/LOAD' } },
-      { name: 'Coolant/FLOW_RATE', units: 'L/HOUR', datatype: 10, derivation: { kind: 'counter_rate', input: 'Coolant/FLOW' } },
+      { name: 'Spindle/SPEED_RATE', units: 'rpm/HOUR', datatype: 10, derivation: { kind: 'counter_rate', input: 'Spindle/SPEED' } },
     ]
+    schemas = [{ schema_uuid: 's-load', schema_name: 'Spindle_Schema', schema_definition: { type: 'object' }, derived_metrics: ['Spindle/LOAD_RATE'] }]
     await visit('/history/overview?span=day&at=2026-11-02')
     const popover = tenToTwo()
     fireEvent.click(exportIn(popover))
     const dialog = await screen.findByRole('dialog', { name: /Export Readings — 3 devices/ })
-    // The rate of a counter none of them reports is not offered.
+    // The rate of a counter they all report is not offered: no schema of theirs names it.
     expect(within(dialog).getByText(/^3 devices · 3 metrics · /)).toBeInTheDocument()
     expect(within(dialog).getByText('Spindle/LOAD_RATE')).toBeInTheDocument()
-    expect(within(dialog).queryByText('Coolant/FLOW_RATE')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Spindle/SPEED_RATE')).not.toBeInTheDocument()
     expect(within(dialog).getByText(DERIVED_RAW_NOTE)).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
     await waitFor(() => expect(asked()).toHaveLength(1))

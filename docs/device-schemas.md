@@ -1,7 +1,7 @@
 # Device schemas: the file format and its rules
 
-A device schema says which catalogue metrics a kind of device is expected to publish, and the valid
-range of each number. This page is the reference for the file a person exports from the Schemas page
+A device schema says which catalogue metrics a kind of device is expected to publish, the valid range of
+each number, and which derived metrics its devices get. This page is the reference for the file a person exports from the Schemas page
 or writes and uploads to it. It is for the people who build that page and the editor, and for anything
 that calls the API. It says what the file may hold, and what the database does with it.
 
@@ -26,6 +26,8 @@ reads its files the same way: see [the automations reference](automations.md).
     - name: Spindle/LOAD
       minimum: 0
     - name: Spindle/MODE
+  derived_metrics:
+    - Spindle/TIME_IN_AUTOMATIC
 ```
 
 A file is a list of schemas. Aber takes a closed set of keys. Anything else is refused, never
@@ -45,8 +47,8 @@ To use it in VS Code's YAML extension, start the file with a comment:
 ```
 
 The schema is a convenience. The database is the authority, and it checks more: that each metric is in
-the catalogue and is not a derived one, and that no `name` is used twice in a file. A test holds the two
-together over the files in [`supabase/device-schemas-fixtures/`](../supabase/device-schemas-fixtures/):
+the catalogue and is not a derived one, that each derived metric is computed from metrics the schema
+lists, and that no `name` is used twice in a file. A test holds the two together over the files in [`supabase/device-schemas-fixtures/`](../supabase/device-schemas-fixtures/):
 one document and one reason each.
 
 ## The keys
@@ -63,6 +65,7 @@ A file is a list of schemas. Each is a set of these keys.
 | `semantic_id_type` | No | How to read `semantic_id`: `IRI`, `IRDI` or `ExpandedNodeId`. Only with `semantic_id`. |
 | `change_description` | No | Why this version exists, up to 1,000 characters. Used only when the file makes a new version or a new schema. |
 | `metrics` | Yes | The catalogue metrics the schema models: a list of 1 to 1,000. |
+| `derived_metrics` | No | The derived metrics the schema's devices get, by name: a list of up to 1,000. Left out, the schema names none. |
 
 ### A metric
 
@@ -91,15 +94,27 @@ Things to know:
   schemas in one file that find one lineage are refused, as a name used twice.
 - **A metric is named by its catalogue name.** Its type, its description and its permitted values come
   from the catalogue, as the schema builder writes them. The file does not repeat them.
-- **A metric the catalogue lacks is refused by name.** So is a derived metric: nothing publishes one,
-  so a schema cannot model it. A deprecated metric is accepted only where the schema already models it.
+- **A metric the catalogue lacks is refused by name.** So is a derived metric under `metrics`: nothing
+  publishes one, so it goes under `derived_metrics`. A deprecated metric is accepted only where the schema
+  already models it.
+- **`derived_metrics` names the derived metrics a device bound to the schema gets.** A device with several
+  schemas has every one they name. Aber computes them, so they are not among the metrics a device is judged
+  against.
+- **A schema is whole on its own.** Each metric a derived one is computed from must be under the same
+  schema's `metrics`. For a time in state, each state must be one the schema's copy of the input permits.
+  The reason names the derived metric and what is missing.
+- **A deprecated derived metric is accepted only where the schema already names it.** A name the catalogue
+  lacks is refused, and so is a measured metric.
+- **A file without `derived_metrics` names none.** A file says what is saved. A file exported before Aber
+  1.10 has no such key, so applying it removes every one the schema names. The preview lists each.
 - **A range is a number in the metric's catalogue unit.** Never write a unit. It applies to a metric
   that is a number, and `minimum` is not above `maximum`. Leave a side out for no bound. A device set to
   Enforce drops a reading outside the range.
 - **A metric's `semantic_id` is the catalogue's.** An export writes it, so a file shows which concept
   each name means. A file whose id differs from this site's catalogue is refused: the same name must not
   mean another thing. It is never written to the catalogue, and you can leave it out.
-- **The order of the metrics does not matter.** An export writes them in name order.
+- **The order of the metrics does not matter,** nor of the derived metrics. An export writes both in name
+  order.
 
 ## What the database does with a file
 
@@ -109,11 +124,13 @@ it twice: once with `p_dry_run` true for the preview, once with it false when th
 - **It answers one result per schema:** its `name`, its `status` and, for a refusal, `reasons`. The
   status is `new`, `changed`, `unchanged` or `refused`. For a changed schema `version` and
   `schema_name` say the draft it would make, and `metrics` lists the metrics it adds, removes and
-  changes.
+  changes. `derived_metrics` lists the derived metrics it adds and removes, and `changes` the keys that
+  differ, with a key the file leaves out among them.
 - **Each reason has a `path` and a `message`.** The path is a JSON path, such as
   `$[0].metrics[1].minimum`, which the editor maps back to a line.
 - **Every field is checked, and every reason is reported,** so a file is fixed in one pass. A file
-  holds at most 200 schemas, and a schema at most 1,000 metrics.
+  holds at most 200 schemas, and a schema at most 1,000 metrics and as many derived metrics. One thing is
+  judged last: a derived metric's state, against the permitted values the new version would hold.
 - **All or nothing.** With any refusal, nothing is written. A preview writes nothing either.
 - **A file never deletes.** A schema the file leaves out is left alone.
 - **A published version is never edited.** The version in force is what the file is compared with:

@@ -1826,6 +1826,7 @@ tbody tr:hover { background: var(--bg-glass); }
    Inside a card body, or a dialog, the container has already inset it, so the inline margin goes.
    The top margin stays, as the gap above. */
 .card-body > .callout, .modal .callout { margin-inline: 0; }
+.modal .callout > :not(.callout-icon) { min-width: 0; }
 
 /* A callout in a dialog's body is set off from what follows it (a table, a list, a form) by the gap
    it leaves above itself, 12px. Another callout after it already has that gap as its own top margin. */
@@ -2708,6 +2709,22 @@ main:focus { outline: none; }
 }
 .schema-editor-list > li:last-child { border-bottom: none; }
 .schema-editor-range { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+
+/* What stands under the metrics, each closed until it is asked for: the derived metrics a schema names and
+   the line of its versions. They share a line, so that closed they take nothing more from the metric list
+   than one of them does, and an open one takes the width. */
+.schema-asides { display: flex; flex-wrap: wrap; column-gap: 28px; }
+.schema-asides > * { flex: 0 1 auto; min-width: 0; }
+.schema-asides > .field-error-above,
+.schema-asides > details[open] { flex: 1 0 100%; }
+.schema-asides > .field-error-above { margin-top: 12px; margin-bottom: 0; }
+.schema-derived { margin-top: 16px; }
+.schema-derived-hint { margin: 4px 0 6px; }
+/* As tall as they are, up to two under their group's heading. Open, they take their height from the metric
+   list, which then keeps its search and a row or two. */
+.schema-derived-choice > .schema-derived-list { flex: none; min-height: 0; max-height: 104px; }
+.modal-body-fill:has(> .schema-asides > .schema-derived[open]) > .schema-editor-metrics { min-height: 142px; }
+.modal-body-fill:has(> .schema-asides > .schema-derived[open]) > .schema-editor-metrics > .list-picker-list { min-height: 92px; }
 
 /* A numeric metric's range, beside its row: the two bounds and the dash between them. */
 .property-range {
@@ -8584,7 +8601,10 @@ ol.gateway-steps {
 .apply-result { display: flex; gap: 10px; font-size: 13px; line-height: 1.5; color: var(--text-primary); }
 .apply-result-block { flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-xs); }
 .apply-result-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.apply-changes { font-size: 12px; color: var(--text-muted); }
+.apply-changes { min-width: 0; font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
+/* What a file would take away, by schema, in the warning over the list. */
+.apply-removed { margin: 6px 0 0; padding: 0; list-style: none; overflow-wrap: anywhere; }
+.apply-removed li { margin-top: 2px; }
 .apply-reasons li { display: flex; gap: 10px; font-size: 12px; line-height: 1.5; }
 .apply-line { flex-shrink: 0; color: var(--text-muted); }
 .apply-diffs { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }

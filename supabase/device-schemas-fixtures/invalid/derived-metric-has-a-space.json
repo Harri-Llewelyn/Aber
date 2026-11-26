@@ -1,0 +1,18 @@
+{
+  "about": "A name no metric can have.",
+  "path": "$[0].derived_metrics[0]",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "derived_metrics": [
+        "Parts per hour"
+      ]
+    }
+  ]
+}

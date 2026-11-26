@@ -8,6 +8,10 @@ says what the file may hold, and what the database does with it.
 The rows in the platform database are the record. The YAML is how a person sees and moves them. It is
 rendered from the rows on export and parsed on upload, and it is never stored.
 
+**A derived metric is on a device when one of the device's schemas names it.** This file says what each one
+is, and the [schemas file](device-schemas.md) says which devices get it, under `derived_metrics`. So a new one is
+on no device until a schema names it.
+
 To use it, open the Metrics page and read [its help](../help/pages/metrics.md). The Automations page and
 the Schemas page read their files the same way: see [the automations reference](automations.md) and
 [the device schemas reference](device-schemas.md).

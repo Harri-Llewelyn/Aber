@@ -172,7 +172,7 @@ describe('the Derived tab', () => {
     expect(drawer.textContent).toContain('share of time Controller/EXECUTION is ACTIVE')
     expect(within(drawer).getByRole('button', { name: 'Deprecate' })).toBeTruthy()
     expect(within(drawer).queryByRole('button', { name: 'Edit' })).toBeNull()
-    expect(drawer.textContent).not.toMatch(/Semantic ID|Permitted Values|Schemas/)
+    expect(drawer.textContent).not.toMatch(/Semantic ID|Permitted Values/)
   })
 
   it('names its Add button for the role that may add, and offers none to open without it', async () => {
@@ -188,9 +188,17 @@ describe('the Derived tab', () => {
 })
 
 describe("a derived metric's Applies To", () => {
-  const press = (n, metrics) => ({ asset_id: 'p' + n, asset_name: 'Press ' + n, last_birth_metrics: metrics, status: 'ONLINE', location_source: 'inherited' })
+  const press = (n, schemaIds) => ({
+    asset_id: 'p' + n, asset_name: 'Press ' + n, last_birth_metrics: ['Controller/PART_COUNT', 'Controller/EXECUTION'],
+    submodel_schema_ids: schemaIds, status: 'ONLINE', location_source: 'inherited'
+  })
+  const SCHEMAS = [
+    { schema_uuid: 's-press', schema_name: 'Press_Schema', status: 'active', schema_definition: { type: 'object' }, derived_metrics: ['Controller/PARTS_PER_HOUR'] },
+    { schema_uuid: 's-power', schema_name: 'Power_Schema', status: 'active', schema_definition: { type: 'object' }, derived_metrics: ['Controller/PARTS_PER_HOUR', 'Power/TOTAL'] },
+  ]
   const serve = (devices) => api.get.mockImplementation((path) => {
     if (path.startsWith('/api/v1/devices')) return Promise.resolve(devices)
+    if (path.startsWith('/api/v1/schemas')) return Promise.resolve(SCHEMAS)
     const key = Object.keys(routes).find(r => path.startsWith(r))
     return Promise.resolve(key ? routes[key] : [])
   })
@@ -204,37 +212,44 @@ describe("a derived metric's Applies To", () => {
   const line = (drawer) => within(drawer).getByText('Applies To').closest('.context-field').textContent
   const chips = (drawer) => [...within(drawer).getByText('Applies To').closest('.context-field').querySelectorAll('a.chip')].map(a => a.textContent)
 
-  it('lists the devices that report every input', async () => {
-    serve([press(1, ['Controller/PART_COUNT']), press(2, ['Controller/PART_COUNT', 'Other/X']), press(3, ['Other/X'])])
+  it('lists the devices whose schemas name it, and not the ones that only report its inputs', async () => {
+    serve([press(1, ['s-press']), press(2, ['s-power', 's-press']), press(3, [])])
     renderTab()
     const drawer = await open('Controller/PARTS_PER_HOUR')
     expect(chips(drawer)).toEqual(['Press 1', 'Press 2'])
   })
 
   it('lists every device past three, with no count of the rest', async () => {
-    serve([1, 2, 3, 4, 5].map(n => press(n, ['Controller/PART_COUNT'])))
+    serve([1, 2, 3, 4, 5].map(n => press(n, ['s-press'])))
     renderTab()
     const drawer = await open('Controller/PARTS_PER_HOUR')
     expect(chips(drawer)).toEqual(['Press 1', 'Press 2', 'Press 3', 'Press 4', 'Press 5'])
     expect(line(drawer)).not.toContain('more')
   })
 
-  it('needs every input of a sum, not one', async () => {
-    serve([press(1, ['Power/PHASE_A']), press(2, ['Power/PHASE_A', 'Power/PHASE_B'])])
+  it('says no device yet, and whether a schema names it', async () => {
+    serve([press(1, ['s-press'])])
     renderTab()
-    const drawer = await open('Power/TOTAL')
-    expect(chips(drawer)).toEqual(['Press 2'])
+    expect(line(await open('Controller/UPTIME'))).toContain('No device yet: no schema names it')
+    fireEvent.click(within(document.querySelector('.card table')).getByText('Power/TOTAL'))
+    expect(line(document.querySelector('.context-panel'))).toContain('No device yet: none in service is bound to a schema that names it')
   })
 
-  it('says no device reports the inputs yet, and what they are', async () => {
-    serve([press(1, ['Other/X'])])
+  it('has a Schemas field: how many name it, or that none does yet with a link to the Schemas page', async () => {
+    serve([])
     renderTab()
-    const drawer = await open('Controller/UPTIME')
-    expect(line(drawer)).toContain('No device yet: none reports Controller/EXECUTION')
+    const schemas = (drawer) => within(drawer).getByText('Schemas').closest('.context-field')
+    expect(schemas(await open('Controller/PARTS_PER_HOUR')).textContent).toContain('2 name it')
+    fireEvent.click(within(document.querySelector('.card table')).getByText('Power/TOTAL'))
+    expect(schemas(document.querySelector('.context-panel')).textContent).toContain('1 names it')
+    fireEvent.click(within(document.querySelector('.card table')).getByText('Controller/UPTIME'))
+    const none = schemas(document.querySelector('.context-panel'))
+    expect(none.textContent).toContain('No schema names it yet.')
+    expect(within(none).getByRole('link', { name: 'View in Schemas' }).getAttribute('href')).toBe('/schemas')
   })
 
   it('leaves a device out that is not in service', async () => {
-    serve([{ ...press(1, ['Controller/PART_COUNT']), is_archived: true }, press(2, ['Controller/PART_COUNT'])])
+    serve([{ ...press(1, ['s-press']), is_archived: true }, press(2, ['s-press'])])
     renderTab()
     const drawer = await open('Controller/PARTS_PER_HOUR')
     expect(chips(drawer)).toEqual(['Press 2'])
@@ -252,7 +267,7 @@ describe("a derived metric's Applies To", () => {
   })
 
   it('is not on a measured metric', async () => {
-    serve([press(1, ['Controller/PART_COUNT'])])
+    serve([press(1, ['s-press'])])
     renderTab()
     await waitFor(() => expect(queryTabLink('Metric Catalog')).toBeTruthy())
     fireEvent.click(queryTabLink('Metric Catalog'))

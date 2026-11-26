@@ -1,13 +1,12 @@
 /**
- * The browser's side of reading a derived metric (0282): which derived metrics a device's reports
- * make possible, how a read is split from the measured ones, what a window that is too long for one says,
+ * The browser's side of reading a derived metric (0282): that a device's are among its metrics, how a read is split from the measured ones, what a window that is too long for one says,
  * how the Area tab folds a cell, and the order and the words of the drawer's Applies To.
  */
 import { describe, it, expect } from 'vitest'
 import { HISTORY_MAX_ROWS } from '../api'
 import {
-  DERIVED_MAX_BUCKET_MINUTES, DERIVED_MAX_MINUTES, DERIVED_MAX_ROWS, SHARE_UNIT, appliesToDevices, appliesToNone, appliesToRule, currentWords,
-  derivedDefinitions, derivedInputCount, derivedReportedBy, derivedWindowMinutes, percentWords, splitDerived, unitOf,
+  DERIVED_MAX_BUCKET_MINUTES, DERIVED_MAX_MINUTES, DERIVED_MAX_ROWS, SHARE_UNIT, APPLIES_TO_RULE, appliesToDevices, appliesToNone, currentWords,
+  derivedDefinitions, derivedInputCount, derivedWindowMinutes, percentWords, splitDerived, unitOf,
 } from '../utils/derivedMetric'
 import {
   cellMetrics, chartSeries, chartSummary, defaultCellMetric, derivedReadProblem, deviceMetrics, foldByGroup, groupSeries, historyMetrics,
@@ -26,45 +25,38 @@ const catalog = [
   { name: 'Controller/UPTIME', datatype: 10, derivation: state },
   { name: 'Power/NET', datatype: 10, units: 'kW', derivation: power },
 ]
-const device = (id, name, metrics) => ({ asset_id: id, asset_name: name, last_birth_metrics: metrics, status: 'ONLINE', location_source: 'inherited' })
+const device = (id, name, metrics, schemaIds = []) => ({
+  asset_id: id, asset_name: name, last_birth_metrics: metrics, submodel_schema_ids: schemaIds, status: 'ONLINE', location_source: 'inherited'
+})
+const naming = (id, ...names) => ({ schema_uuid: id, schema_definition: { properties: {} }, derived_metrics: names })
 
-describe('which derived metrics a device reports', () => {
-  it('is each one whose inputs are all among the metrics it reports, in name order', () => {
-    expect(derivedReportedBy(['Controller/PART_COUNT'], catalog)).toEqual(['Controller/PARTS_PER_HOUR'])
-    expect(derivedReportedBy(new Set(['Controller/PART_COUNT', 'Controller/EXECUTION', 'Power/A']), catalog))
-      .toEqual(['Controller/PARTS_PER_HOUR', 'Controller/UPTIME'])
-    expect(derivedReportedBy(['Power/A', 'Power/B'], catalog)).toEqual(['Power/NET'])
-    expect(derivedReportedBy([], catalog)).toEqual([])
+describe('the derived metrics among what a device reports', () => {
+  it('are added to what deviceMetrics() lists when it is given the catalog, and not otherwise', () => {
+    const schemas = [naming('s1', 'Controller/PARTS_PER_HOUR')]
+    const press = device('d1', 'Press 1', ['Controller/PART_COUNT', 'Zed/OTHER'], ['s1'])
+    expect(deviceMetrics(press, schemas)).toEqual(['Controller/PART_COUNT', 'Zed/OTHER'])
+    expect(deviceMetrics(press, schemas, catalog)).toEqual(['Controller/PART_COUNT', 'Controller/PARTS_PER_HOUR', 'Zed/OTHER'])
   })
 
-  it('needs every input of a sum, not one', () => {
-    expect(derivedReportedBy(['Power/A'], catalog)).toEqual([])
+  it('are not added because it reports every input: a schema names them', () => {
+    const schemas = [{ schema_uuid: 's1', schema_definition: { properties: { 'Power/A': {}, 'Power/B': {} } }, derived_metrics: [] }]
+    expect(deviceMetrics(device('d1', 'Press 1', ['Controller/PART_COUNT'], ['s1']), schemas, catalog))
+      .toEqual(['Controller/PART_COUNT', 'Power/A', 'Power/B'])
   })
 
-  it('adds them to what deviceMetrics() lists when it is given the catalog, and not otherwise', () => {
-    const press = device('d1', 'Press 1', ['Controller/PART_COUNT', 'Zed/OTHER'])
-    expect(deviceMetrics(press, [])).toEqual(['Controller/PART_COUNT', 'Zed/OTHER'])
-    expect(deviceMetrics(press, [], catalog)).toEqual(['Controller/PART_COUNT', 'Controller/PARTS_PER_HOUR', 'Zed/OTHER'])
-  })
-
-  it('counts a metric a schema models as reported, as the Metric tab does', () => {
-    const schemas = [{ schema_uuid: 's1', schema_definition: { properties: { 'Power/A': {}, 'Power/B': {} } } }]
-    const press = { ...device('d1', 'Press 1', []), submodel_schema_ids: ['s1'] }
-    expect(deviceMetrics(press, schemas, catalog)).toEqual(['Power/A', 'Power/B', 'Power/NET'])
-  })
-
-  it("is the Metric tab's devices that report it: all the inputs, among those in service", () => {
+  it("make the Metric tab's devices that have it, among those in service", () => {
+    const schemas = [naming('s1', 'Power/NET')]
     const devices = [
-      device('d1', 'Press 1', ['Power/A', 'Power/B']),
-      device('d2', 'Press 2', ['Power/A']),
-      { ...device('d3', 'Press 3', ['Power/A', 'Power/B']), is_archived: true },
+      device('d1', 'Press 1', ['Power/A', 'Power/B'], ['s1']),
+      device('d2', 'Press 2', ['Power/A', 'Power/B']),
+      { ...device('d3', 'Press 3', ['Power/A', 'Power/B'], ['s1']), is_archived: true },
     ]
-    expect(metricDevices(devices, [], 'Power/NET', { catalog }).map(d => d.asset_name)).toEqual(['Press 1'])
-    expect(metricDevices(devices, [], 'Power/NET').map(d => d.asset_name)).toEqual([])
-    expect(cellMetrics(devices.slice(0, 2), [], catalog).map(m => [m.name, m.count])).toContainEqual(['Power/NET', 1])
-    const row = historyMetrics(devices, [], catalog).find(m => m.name === 'Power/NET')
+    expect(metricDevices(devices, schemas, 'Power/NET', { catalog }).map(d => d.asset_name)).toEqual(['Press 1'])
+    expect(metricDevices(devices, schemas, 'Power/NET').map(d => d.asset_name)).toEqual([])
+    expect(cellMetrics(devices.slice(0, 2), schemas, catalog).map(m => [m.name, m.count])).toContainEqual(['Power/NET', 1])
+    const row = historyMetrics(devices, schemas, catalog).find(m => m.name === 'Power/NET')
     expect(row).toEqual({ name: 'Power/NET', count: 1, unit: 'kW', kind: 'number', derived: true })
-    expect(historyMetrics(devices, [], catalog).find(m => m.name === 'Power/A').derived).toBeUndefined()
+    expect(historyMetrics(devices, schemas, catalog).find(m => m.name === 'Power/A').derived).toBeUndefined()
   })
 })
 
@@ -219,7 +211,7 @@ describe('a time in state as a percentage', () => {
   })
 
   it("is the unit the Metric tab's picker lists for it", () => {
-    const row = historyMetrics([device('d1', 'Press 1', ['Controller/EXECUTION'])], [], [...catalog, { name: 'Controller/UPTIME', datatype: 10, derivation: state }]).find(m => m.name === 'Controller/UPTIME')
+    const row = historyMetrics([device('d1', 'Press 1', ['Controller/EXECUTION'], ['s1'])], [naming('s1', 'Controller/UPTIME')], [...catalog, { name: 'Controller/UPTIME', datatype: 10, derivation: state }]).find(m => m.name === 'Controller/UPTIME')
     expect(row.unit).toBe('% of the time')
   })
 })
@@ -231,14 +223,12 @@ describe("a derived metric's Applies To", () => {
     expect(read[0].asset_name).toBe('Press 4')
   })
 
-  it('says once what the devices report, every input of a sum', () => {
-    expect(appliesToRule(counter)).toBe('The devices in service that report Controller/PART_COUNT.')
-    expect(appliesToRule(power)).toBe('The devices in service that report Power/A and Power/B.')
+  it('says once which devices they are', () => {
+    expect(APPLIES_TO_RULE).toBe('The devices in service bound to a schema that names it.')
   })
 
-  it('says what no device reports yet when there is none', () => {
-    expect(appliesToNone(counter)).toBe('No device yet: none reports Controller/PART_COUNT')
-    expect(appliesToNone(power)).toBe('No device yet: none reports Power/A and Power/B')
-    expect(appliesToNone(state)).toBe('No device yet: none reports Controller/EXECUTION')
+  it('says why there is none: no schema names it, or none in service has a schema that does', () => {
+    expect(appliesToNone(0)).toBe('No device yet: no schema names it')
+    expect(appliesToNone(2)).toBe('No device yet: none in service is bound to a schema that names it')
   })
 })
