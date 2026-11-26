@@ -708,7 +708,7 @@ describe('Tables shed what the panel now carries', () => {
     // No picker anywhere in the panel -- the write is gone from the read surface entirely.
     expect(within(panel()).queryByTitle(/Rebind this device/i)).toBeNull()
 
-    const link = getByTooltip(/Open this gateway on the Gateways page/i, panel())
+    const link = getByTooltip('Open Host_Gateway_NodeRED on the Gateways page', panel())
     // An anchor: the Gateways page's address names the gateway, so middle-click and "copy link
     // address" work, and a plain click navigates in place.
     expect(link.tagName).toBe('A')

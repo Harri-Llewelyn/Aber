@@ -626,7 +626,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                       title={`Open ${d.asset_name} on the Devices page`}
                     >
                       <IconCpu size={11} />
-                      <span className="chip-name">{d.asset_name}</span>
+                      <OverflowText className="chip-name">{d.asset_name}</OverflowText>
                     </RouteLink>
                   ))}
                 </div>

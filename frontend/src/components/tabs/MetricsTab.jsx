@@ -1417,7 +1417,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                                     title={`Open ${d.name} on the Devices page${d.quarantined ? '. It is in quarantine, awaiting approval.' : ''}`}
                                   >
                                     <IconCpu size={11} />
-                                    <span className="chip-name">{d.name}</span>
+                                    <OverflowText className="chip-name">{d.name}</OverflowText>
                                     {d.quarantined && <span className="cell-meta">quarantined</span>}
                                   </RouteLink>
                                 ))}

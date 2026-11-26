@@ -2184,7 +2184,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                 onClick={() => setChangedBy([])}
                 aria-label={`Changed by ${changedByWords}. Show everyone's changes`}
               >
-                <span className="chip-name">Changed by {changedByWords}</span>
+                <OverflowText className="chip-name">Changed by {changedByWords}</OverflowText>
                 <IconX size={11} aria-hidden="true" />
               </button>
             </Tooltip>

@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
+import { OverflowText } from '../common/OverflowText'
 import { areaUrl, cellHistoryUrl, cellUrl, deviceUrl, devicesInCellUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
@@ -662,10 +663,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                   className="chip chip-link"
                   to={areaUrl(selectedCell.area_id)}
                   onNavigate={() => onSelectArea?.(selectedCell.area_id)}
-                  title="Open this area on the Areas page"
+                  title={`Open ${selectedCellArea?.area_name || selectedCell.area_id} on the Areas page`}
                 >
-                  <AreaIcon area={areas.find(a => a.area_id === selectedCell.area_id)} size={11} />
-                  <span className="chip-name">{areas.find(a => a.area_id === selectedCell.area_id)?.area_name || selectedCell.area_id}</span>
+                  <AreaIcon area={selectedCellArea} size={11} />
+                  <OverflowText className="chip-name">{selectedCellArea?.area_name || selectedCell.area_id}</OverflowText>
                 </RouteLink>
               )
               : 'Unfiled',
@@ -687,7 +688,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                       title={`Open ${g.gateway_name} on the Gateways page`}
                     >
                       <IconRadio size={11} />
-                      <span className="chip-name">{g.gateway_name}</span>
+                      <OverflowText className="chip-name">{g.gateway_name}</OverflowText>
                     </RouteLink>
                   ))}
                 </div>
@@ -717,7 +718,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                       >
                         {/* A ring once the alert is acknowledged, filled while it is nobody's. */}
                         <span className="badge-dot" style={deviceDotStyle(d, alert)} />
-                        <span className="chip-name">{d.asset_name}</span>
+                        <OverflowText className="chip-name">{d.asset_name}</OverflowText>
                         {d.is_archived && <span className="chip-flag">ARCHIVED</span>}
                       </RouteLink>
                     )

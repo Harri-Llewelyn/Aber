@@ -5132,12 +5132,9 @@ a.chip { text-decoration: none; }
   min-width: 0;
 }
 
-/* The name gets the whole chip; ids live on the chip's `title`. The ellipsis rules stay for a name
-   long enough to overrun a tile. */
+/* The name gets the whole chip; ids live on the chip's tooltip. A name long enough to overrun a tile
+   is an OverflowText, cut and slid on hover or focus of the chip. */
 .chip-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   flex: 1 1 auto;
   min-width: 0;
 }

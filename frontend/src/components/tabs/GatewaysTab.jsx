@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { RouteLink } from '../common/RouteLink'
+import { OverflowText } from '../common/OverflowText'
 import { cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
@@ -1187,10 +1188,10 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                         className="chip chip-link"
                         to={cellUrl(selectedCell.cell_id)}
                         onNavigate={() => onSelectCell?.(selectedCell.cell_id)}
-                        title="Open this cell on the Cells page"
+                        title={`Open ${selectedCell.cell_name} on the Cells page`}
                       >
                         <IconLayoutDashboard size={11} />
-                        <span className="chip-name">{selectedCell.cell_name}</span>
+                        <OverflowText className="chip-name">{selectedCell.cell_name}</OverflowText>
                       </RouteLink>
                     )
                   : (selected.cell_id || null),
@@ -1568,7 +1569,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                       >
                         {/* A ring once the alert is acknowledged, filled while it is nobody's. */}
                         <span className="badge-dot" style={deviceDotStyle(d, alert)} />
-                        <span className="chip-name">{d.asset_name}</span>
+                        <OverflowText className="chip-name">{d.asset_name}</OverflowText>
                         {d.is_archived && <span className="chip-flag">ARCHIVED</span>}
                       </RouteLink>
                     )

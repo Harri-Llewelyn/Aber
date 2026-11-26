@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
+import { OverflowText } from '../common/OverflowText'
 import { Tooltip } from '../common/Tooltip'
 import { areaHistoryUrl, areaUrl, cellUrl, deviceUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
@@ -336,7 +337,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       title={`${c.cell_name} — ${inServiceDevices(devicesByCell.get(c.cell_id)).length} device(s). ${canManage ? 'Drag onto an area to file it; click' : 'Click'} to open on the Cells page`}
     >
       <CellIcon cell={c} size={11} />
-      <span className="chip-name">{c.cell_name}</span>
+      <OverflowText className="chip-name">{c.cell_name}</OverflowText>
       {c.is_archived && <span className="chip-flag">ARCHIVED</span>}
     </RouteLink>
   )
@@ -632,12 +633,12 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                 <div className="context-device-list">
                   {selectedWideGateways.map(g => (
                     <RouteLink key={g.gateway_id} className="chip chip-link chip-gw" to={gatewayUrl(g.gateway_id)} onNavigate={() => onSelectGateway?.(g.gateway_id)} title={`Open ${g.gateway_name} on the Gateways page`}>
-                      <IconRadio size={11} /><span className="chip-name">{g.gateway_name}</span>
+                      <IconRadio size={11} /><OverflowText className="chip-name">{g.gateway_name}</OverflowText>
                     </RouteLink>
                   ))}
                   {selectedWideDevices.map(d => (
                     <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} onNavigate={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page`}>
-                      <IconCpu size={11} /><span className="chip-name">{d.asset_name}</span>
+                      <IconCpu size={11} /><OverflowText className="chip-name">{d.asset_name}</OverflowText>
                     </RouteLink>
                   ))}
                 </div>

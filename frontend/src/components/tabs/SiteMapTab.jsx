@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
 import { RouteLink } from '../common/RouteLink'
+import { OverflowText } from '../common/OverflowText'
 import { areaUrl, cellUrl, deviceUrl, gatewayUrl, tabUrl } from '../../routes'
 import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
 import { api } from '../../api'
@@ -246,7 +247,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         title={`${a.asset_name} [${a.asset_id}] — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — Click to view on Devices page`}
       >
         <IconCpu size={11} />
-        <span className="chip-name">{a.asset_name}</span>
+        <OverflowText className="chip-name">{a.asset_name}</OverflowText>
         {status === DEVICE_STATUS.QUARANTINED && (
           <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>QUAR</span>
         )}
@@ -296,7 +297,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             : gwStatus === 'PENDING_ENROLLMENT' ? 'badge-pending'
               : gwStatus === 'AWAITING_BIRTH' ? 'badge-provisioned'
                 : 'badge-danger'}`} />
-        <span className="chip-name mono">{g.gateway_name}</span>
+        <OverflowText className="chip-name mono">{g.gateway_name}</OverflowText>
         {g.deployment === 'host' && <span className="chip-flag" style={{ color: 'var(--accent-text)' }} role="img" aria-label="Runs on this host"><IconZap size={9} /></span>}
       </RouteLink>
     )
@@ -318,7 +319,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px var(--danger)' }
             : { background: state.pin === 'alert' ? 'var(--danger)' : state.status === 'normal' ? 'var(--success)' : state.status === 'attention' ? 'var(--warning)' : 'var(--text-dim)' }} />
           <Icon size={11} />
-          <span className="chip-name">{c.cell_name}</span>
+          <OverflowText className="chip-name">{c.cell_name}</OverflowText>
           {unplaced && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>NOT PLACED</span>}
         </button>
       </Tooltip>
@@ -328,7 +329,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   /** A gateway in the cell and area panels: a chip that opens it on the Gateways page. */
   const panelGatewayChip = (g, areaWide = false) => (
     <RouteLink key={g.gateway_id} className="chip chip-link chip-gw" to={gatewayUrl(g.gateway_id)} onNavigate={() => onSelectGateway?.(g.gateway_id)} title={`Open ${g.gateway_name} on the Gateways page${areaWide ? ' — it serves the whole area' : ''}`}>
-      <IconRadio size={11} /><span className="chip-name">{g.gateway_name}</span>
+      <IconRadio size={11} /><OverflowText className="chip-name">{g.gateway_name}</OverflowText>
       {areaWide && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>AREA-WIDE</span>}
     </RouteLink>
   )
@@ -341,7 +342,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} onNavigate={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}` : deviceStatusTitle(status)}${areaWide ? ' — it serves the whole area' : ''}`}>
         <span className="badge-dot" style={deviceDotStyle(d, alert)} />
         <IconCpu size={11} />
-        <span className="chip-name">{d.asset_name}</span>
+        <OverflowText className="chip-name">{d.asset_name}</OverflowText>
         {alert && (
           <span className="chip-flag" style={{ color: 'var(--danger-text)' }}>
             {alertState(alert) === 'acknowledged' ? 'ACKNOWLEDGED' : alert.severity === 'critical' ? 'ALARM' : 'WARNING'}

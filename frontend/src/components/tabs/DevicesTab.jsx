@@ -3,6 +3,7 @@ import { reasonLabel } from '../../utils/alertAcknowledgement'
 import { acknowledgerName } from '../../utils/alertHistory'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
+import { OverflowText } from '../common/OverflowText'
 import { approvalsForUrl, areaUrl, automationsForEntityUrl, cellUrl, deviceHistoryUrl, deviceUrl, gatewayUrl, schemaRejectionsUrl, schemaUrl, trailUrl } from '../../routes'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
@@ -1719,13 +1720,12 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 className="chip chip-link"
                 to={gatewayUrl(selectedDevice.active_gateway_id)}
                 onNavigate={() => onSelectGateway?.(selectedDevice.active_gateway_id)}
-                title="Open this gateway on the Gateways page"
+                title={`Open ${selectedGateway?.gateway_name || selectedDevice.gateway_name || selectedDevice.active_gateway_id} on the Gateways page`}
               >
                 <IconRadio size={11} />
-                <span className="chip-name">
-                  {gateways.find(g => g.gateway_id === selectedDevice.active_gateway_id)?.gateway_name
-                    || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
-                </span>
+                <OverflowText className="chip-name">
+                  {selectedGateway?.gateway_name || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
+                </OverflowText>
               </RouteLink>
             ) : null,
             help: "The edge node carrying this device's data. Reassign it in Edit Details."
@@ -1748,10 +1748,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   className="chip chip-link"
                   to={cellUrl(cell.cell_id)}
                   onNavigate={() => onSelectCell?.(cell.cell_id)}
-                  title="Open this cell on the Cells page"
+                  title={`Open ${cell.cell_name} on the Cells page`}
                 >
                   <IconLayoutDashboard size={11} />
-                  <span className="chip-name">{cell.cell_name}</span>
+                  <OverflowText className="chip-name">{cell.cell_name}</OverflowText>
                 </RouteLink>
               ) : NON_CELL_SOURCES.has(source) ? <span>{locationSourceLabel(source)}</span> : null
               if (!place) return null
@@ -1763,10 +1763,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         className="chip chip-link"
                         to={areaUrl(area.area_id)}
                         onNavigate={() => onSelectArea?.(area.area_id)}
-                        title="Open this area on the Areas page"
+                        title={`Open ${area.area_name} on the Areas page`}
                       >
                         <AreaIcon area={area} size={11} />
-                        <span className="chip-name">{area.area_name}</span>
+                        <OverflowText className="chip-name">{area.area_name}</OverflowText>
                       </RouteLink>
                       <span aria-hidden="true">›</span>
                     </>
@@ -1808,7 +1808,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                       title={`Open ${schema.schema_name} on the Schemas page`}
                     >
                       <IconClipboardList size={11} />
-                      <span className="chip-name">{schema.schema_name}</span>
+                      <OverflowText className="chip-name">{schema.schema_name}</OverflowText>
                     </RouteLink>
                   ))}
                 </div>
