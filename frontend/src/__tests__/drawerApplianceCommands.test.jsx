@@ -66,6 +66,8 @@ const gateway = (overrides = {}) => ({
 })
 
 const show = async (row, { userRole = 'Shopfloor_Manager' } = {}) => {
+  // The Playback gateway is left off the list until its control is on.
+  if (row.is_shadow) window.history.replaceState(null, '', '/gateways?playback=1')
   api.get.mockImplementation((path) => {
     if (path.startsWith('/api/v1/cells')) return Promise.resolve([{ cell_id: 'cell-1', cell_name: 'Assembly', is_archived: false }])
     if (path.startsWith('/api/v1/gateways')) return Promise.resolve([row])
