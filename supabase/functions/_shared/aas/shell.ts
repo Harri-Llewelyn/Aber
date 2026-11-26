@@ -20,9 +20,29 @@ import { assignSubmodelKeys } from "./submodelKeys.ts";
 export const BASE_IRI = (Deno.env.get("AAS_BASE_IRI") ?? "https://aber.local/ids/asset/")
   .replace(/\/+$/, "") + "/";
 
+/**
+ * A device's globalAssetId: the base IRI, its trailing `/`s made one, then the device's sparkplug_id.
+ * The i3X server names it in each device's `metadata.system` (aas_global_asset_id() in
+ * i3x/address_space.py); test-harness/fixtures/asset-identities.json holds the two to one answer.
+ */
+export function globalAssetIdOf(sparkplugId: string, baseIri: string = BASE_IRI): string {
+  return `${baseIri.replace(/\/+$/, "")}/${sparkplugId}`;
+}
+
+/** The id of a device's shell: its globalAssetId, then `/shell`. */
+export function shellIdOf(sparkplugId: string, baseIri: string = BASE_IRI): string {
+  return `${globalAssetIdOf(sparkplugId, baseIri)}/shell`;
+}
+
 /** Where a consumer fetches the actual samples. The shell points at this; it never embeds them. */
 export const HISTORIAN_ENDPOINT =
   Deno.env.get("AAS_HISTORIAN_ENDPOINT") ?? "http://localhost:54321/rest/v1/telemetry";
+
+/**
+ * The i3X server's history route, where a second LinkedSegment points: blank while the chart
+ * publishes no i3X server, and then the segment is left out.
+ */
+export const I3X_HISTORY_ENDPOINT = (Deno.env.get("AAS_I3X_HISTORY_ENDPOINT") ?? "").trim();
 
 /**
  * Public base for 3D model objects. `devices.model_3d_path` stores an object key, so the absolute
@@ -262,6 +282,14 @@ export function modelledMetrics(definition: Record<string, unknown> | null): str
     for (const key of required) if (typeof key === "string") names.add(key);
   }
   return [...names].sort();
+}
+
+/**
+ * The elementId the i3X server gives a device, or one of its metrics: `<sparkplug_id>/<metric name>`.
+ * i3x/address_space.py mints the same and splits it at the first `/`, since a sparkplug_id has none.
+ */
+export function i3xElementId(sparkplugId: string, metricName?: string): string {
+  return metricName === undefined ? sparkplugId : `${sparkplugId}/${metricName}`;
 }
 
 /**
@@ -978,7 +1006,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     return null;
   };
 
-  const globalAssetId = `${BASE_IRI}${device.sparkplug_id}`;
+  const globalAssetId = globalAssetIdOf(String(device.sparkplug_id));
   const shellIdShort = toIdShort(String(device.name ?? ""), "Device");
   const submodelId = (suffix: string) => `${globalAssetId}/submodel/${suffix}`;
 
@@ -1193,6 +1221,26 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     "Historical samples for this asset. Query the endpoint filtered by asset_id.",
   );
 
+  // The same history from the i3X server, its standard read API, while the chart publishes one: by
+  // the elementIds of the submodel's own metrics. The query is the request's JSON body, to which a
+  // client adds startTime and endTime. The PostgREST segment stays for a site that turns i3X off.
+  const i3xSegment = (names: string[]) =>
+    I3X_HISTORY_ENDPOINT
+      ? collection(
+        "I3XLinkedSegment",
+        [
+          property("Endpoint", "xs:anyURI", I3X_HISTORY_ENDPOINT),
+          property(
+            "Query",
+            "xs:string",
+            JSON.stringify({ elementIds: names.map((name) => i3xElementId(String(device.sparkplug_id), name)) }),
+          ),
+        ],
+        "Historical samples for these metrics, from the i3X server. POST the query to the endpoint, " +
+          "with a startTime and an endTime added and a bearer token.",
+      )
+      : undefined;
+
   // One Submodel per attached schema, each attachment being its own aspect. A schema is still split
   // by `metric_catalog.standard` when it mixes provenances, so KeyPerformanceIndicators stays
   // meaningful for a schema that carries ISO 22400 KPIs beside MTConnect observations.
@@ -1218,12 +1266,17 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
       (schema.schema_definition as Record<string, unknown> | null) ?? null,
     );
     const telemetryProps: unknown[] = [];
+    const telemetryNames: string[] = [];
     const kpiProps: unknown[] = [];
 
     for (const name of modelled) {
       const { metric, element } = propertyFor(name);
-      if (isKpiMetric(metric, record.siteVocabularies)) kpiProps.push(element);
-      else telemetryProps.push(element);
+      if (isKpiMetric(metric, record.siteVocabularies)) {
+        kpiProps.push(element);
+      } else {
+        telemetryProps.push(element);
+        telemetryNames.push(name);
+      }
     }
 
     telemetryTotal += telemetryProps.length;
@@ -1236,7 +1289,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
 
     if (telemetryProps.length > 0) {
       const elements = [collection("Metrics", telemetryProps)];
-      if (linkedSegment) elements.push(collection("Segments", [linkedSegment]));
+      if (linkedSegment) elements.push(collection("Segments", [linkedSegment, i3xSegment(telemetryNames)].filter(Boolean)));
       submodels.push({
         modelType: "Submodel",
         id: submodelId(`${baseKey}/OperationalTelemetry`),
@@ -1332,7 +1385,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
 
   const shell = {
     modelType: "AssetAdministrationShell",
-    id: `${globalAssetId}/shell`,
+    id: shellIdOf(String(device.sparkplug_id)),
     idShort: shellIdShort,
     assetInformation: {
       assetKind: "Instance",

@@ -123,6 +123,10 @@ spec:
               value: {{ .Values.i3xService.maxComponents | quote }}
             - name: I3X_SERVER_NAME
               value: {{ .Values.i3xService.serverName | quote }}
+            # The namespace of the site's AAS shells, the value aas-export and aas-api are given, so
+            # each device names its shell in metadata.system.
+            - name: AAS_BASE_IRI
+              value: {{ .Values.supabaseFunctions.aas.baseIri | quote }}
             # Reported by GET /info as `serverVersion`: the release, not the image tag override.
             - name: I3X_SERVER_VERSION
               value: {{ .Chart.AppVersion | quote }}
