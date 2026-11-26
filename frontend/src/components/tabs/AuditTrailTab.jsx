@@ -15,6 +15,7 @@ import {
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
+import { HelpTip } from '../common/HelpTip'
 import { ClearFilters } from '../common/ClearFilters'
 import { FiltersPopover } from '../common/FiltersPopover'
 import { FilterCheck, FilterList } from '../common/FilterChecklist'
@@ -525,6 +526,11 @@ const laneLabel = (lane) => (lane.name
   ? [lane.name, lane.qualifier, lane.email && `(${lane.email})`].filter(Boolean).join(' ')
   : shortId(lane.entityId))
 
+/** What the search box takes, as audit_trail_matching() compares it (0331, mirror check 170). */
+const SEARCH_HELP =
+  'Takes a name or any ID: an entity, Sparkplug, published, semantic, automation, mutation or transaction '
+  + "ID, a capture's file or a backup's stamp."
+
 /**
  * What the entity, mutation and transaction ids in the event drawer are for. Each one ends by
  * saying where it can be pasted, because an identifier a reader cannot spend is the thing they
@@ -556,7 +562,8 @@ const TRANSACTION_ID_HELP =
  * Shared with `audit_trail_page()`'s `p_search`. A field the search matches and this does not is
  * a row you can find and cannot identify; a field here that the search does not match is a lane
  * you can see and cannot search for. `sparkplug_id` is immutable and is what telemetry and
- * alerts are keyed by, so it outranks the rest where a row carries both.
+ * alerts are keyed by, so it outranks the rest where a row carries both. The search matches an entity's
+ * further ids too (0331), which name no lane: a semantic id, a published id, a capture's file.
  *
  * `role` is deliberately absent even though `user_roles` rows carry one and `p_search` matches it:
  * the lane is a person, keyed by `user_roles.user_id`, and the role is what happened to them.
@@ -1344,9 +1351,9 @@ export function AuditTrailTab({ userRole, showToast }) {
 
   /**
    * The search, sent as the typed text. `p_search` reads the same fields the lane label falls back
-   * to, so a deleted entity is found by its name. It is a database predicate rather than a filter
-   * over the page, so the row limit applies to rows that will be shown, as with the action filter
-   * and the time range.
+   * to, and the further ids an entity goes by, so a deleted entity is found by its name or any of
+   * them. It is a database predicate rather than a filter over the page, so the row limit applies to
+   * rows that will be shown, as with the action filter and the time range.
    */
   const search = nameFilter.trim()
 
@@ -2109,8 +2116,9 @@ export function AuditTrailTab({ userRole, showToast }) {
             value={nameFilter}
             onChange={setNameFilter}
             placeholder="Search a name or any ID…"
-            ariaLabel="Search by name, entity ID, mutation ID or transaction ID"
+            ariaLabel="Search by name, entity ID, further ID, mutation ID or transaction ID"
           />
+          <HelpTip label="What the search takes" text={SEARCH_HELP} />
 
           {/* The window is a query parameter, so a narrower one does not spend the row budget
               outside it. Zoom in halves the axis drawn, which under All time is the events'. */}
