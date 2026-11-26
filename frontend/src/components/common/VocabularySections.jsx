@@ -11,6 +11,7 @@ import { plural } from '../../utils/format'
  * or what the tab's `renderItems(section)` draws instead. `tab` is the tab descriptor VocabularyPanel
  * documents, whose `isUsed`, `isActionable`, `onUse`, `metaFor`, `tooltipFor`, `idFor` and `noteFor`
  * decide what a chip says and does; `isOpen(key)` and `toggle(key)` are the caller's (`useOpenGroups`).
+ * Each section carries its key as `data-section`, so a caller can scroll to one.
  * VocabularyPanel draws the standards' tabs with it, and a tab with a panel of its own (Imported) draws
  * its concepts with it, so a chip looks and acts the same on every tab.
  */
@@ -23,7 +24,7 @@ export function VocabularySections({ sections, tab: active, canAddMetric, isOpen
         const bodyId = `${listId}-${at}`
         const used = active.isUsed ? section.items.filter(i => active.isUsed(i)).length : 0
         return (
-          <div key={section.key}>
+          <div key={section.key} data-section={section.key}>
             {/* The button is the keyboard control; a click anywhere else on the band toggles too,
                 except on the "?", which a button cannot contain. */}
             <div

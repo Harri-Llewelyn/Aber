@@ -1723,9 +1723,9 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`, `sort`; `device` |
 | Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
-| Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
+| Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort`; `declared`, the name a row's drawer is open on |
 | Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter; `built-in` for the Built-in tab | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new` and `/automations/built-in`, for an automation whose id is `new` or `built-in`. Built-in: `search`, `sort`, `rule` (a built-in alert's uid, which opens its drawer) |
-| Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
+| Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its drawer and its concepts |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
 | Entities | `archived`, `retired` | `find`, which the three tabs share; `kind`, the groups that start open; `sort`; `entity` |
@@ -3901,11 +3901,9 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
   | Capture | Gateways | Gateway, Stored capture | | | | Type | | Sparkplug ID |
   | Capture | Devices | Device, Stored capture | | | Gateway | Type | | Sparkplug ID |
   | Areas | areas | Area, Devices | | | | | Cells | Plan |
-  | Vocabulary | Imported | Vocabulary, Actions | | | Imported by, Imported | Concepts, In use | What it is, Version | Definitions |
+  | Vocabulary | Imported | Vocabulary | | | Imported by, Imported | Concepts, In use | What it is, Version | Definitions |
 
-  Uncatalogued and Imported rows have no drawer: a hidden column there is out of sight until the card
-  widens. Automations' rows open the automation's
-  own page, which has every field.
+  Automations' rows open the automation's own page, which has every field.
 - **Every table header, group band and section band is one opaque colour, `--bg-base`**, sticky or
   not. A tint (`--bg-glass`, or the card colour mixed with text) was tried and either vanished on a
   white card or showed rows through a pinned header. A header never takes an inline background.
