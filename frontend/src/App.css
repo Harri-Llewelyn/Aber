@@ -2061,6 +2061,9 @@ tbody tr.table-group-foot:hover { background: none; }
   .table-fit thead th:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880, .fit-700, .fit-520)) { padding-right: 16px; }
   .table-fit:not(:has(.table-group-row)) th { white-space: normal; }
 }
+/* Automations' Watches takes a share of the card, and its words are cut to that. */
+.table-automations .automation-summary { width: 35%; }
+.table-automations td.automation-summary { max-width: 0; }
 /* A gateway's name is often one long word: on a wide card it keeps a share rather than break mid-word. */
 @container table (min-width: 1100px) {
   .table-gateways th:first-child { width: 16%; }
@@ -8619,9 +8622,6 @@ ol.gateway-steps {
 .automation-select input,
 .automation-switch input { accent-color: var(--accent); }
 .automation-summary { max-width: 420px; }
-/* In the list, which fits its card, Watches takes a share of it and its words are cut to that. */
-.table-automations .automation-summary { width: 35%; }
-.table-automations td.automation-summary { max-width: 0; }
 .automation-summary-text { display: block; min-width: 0; }
 .automation-switch {
   display: inline-flex;
