@@ -7296,8 +7296,8 @@ paths:
 
         **Pagination** is `/shells`' own: `limit` (default 20, capped at 100) counts devices, and the
         cursor names the next one. Each descriptor costs a shell's construction, four built at once.
-        On a private database of 4,950 devices a page of 100 took 1.7 s and a page of 20 0.4 s,
-        wherever the page fell in the fleet.
+        On a private database of 4,950 devices a page of 100 took 1.7 to 2.3 s and a page of 20
+        0.4 s, wherever the page fell in the fleet.
       parameters:
         - name: limit
           in: query
@@ -7434,8 +7434,8 @@ paths:
         `globalAssetId` finds it. An archived device is not indexed either.
 
         With no `assetIds`, every indexed shell is listed. `limit` counts shells and the cursor
-        names the last device of the page. A serial number took 80 ms on a private database of
-        4,950 devices; a product URI 707 of them share, 0.6 s for a page of 20.
+        names the last device of the page. A serial number took 80 to 100 ms on a private database
+        of 4,950 devices; a product URI 707 of them share, 0.6 to 1.0 s for a page of 20.
 
         **No profile is declared.** Discovery's one profile, SSP-001, includes the writes, which
         answer `405`.

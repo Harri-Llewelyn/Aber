@@ -10510,8 +10510,9 @@ the same order and pages, with the submodels' descriptors inside it.
 - **`assetKind` and `assetType` filter a page.** Every shell is an `Instance` with no `assetType`.
   A page is a page of devices, so a filtered one may be short, or empty, and still have a cursor.
 - **A page costs a shell's construction for each device on it,** four at a time. On a private
-  database of 4,950 devices, a page of 100 took 1.7 s and a page of 20 0.4 s, wherever it fell in
-  the fleet. `/shells`, which builds one at a time, took 4.3 s for the same 100.
+  database of 4,950 devices, a page of 100 took 1.7 to 2.3 s and a page of 20 0.4 s, wherever it fell
+  in the fleet: the medians of two runs, the second beside other work. `/shells`, which builds one at
+  a time, took 4.3 to 5.8 s for the same 100.
 
 **Discovery goes from an asset id to its shell.** `/lookup/shells?assetIds=...` answers the ids of
 the shells that carry every link asked for. Each `assetIds` value is a SpecificAssetId's JSON,
@@ -10530,8 +10531,8 @@ base64url-encoded, such as `{"name":"partInstanceId","value":"SN-0001"}`.
 - **Nothing assumes a shell is a device's.** The candidates come from `devicesThatMayCarry()` in
   `aas-api/discovery.ts`, and a kind of shell that is not a device adds its own there.
 - **No profile is declared for it.** Discovery's one profile, SSP-001, includes the writes.
-- **A serial number took 80 ms** on the same database. A product URI that 707 devices share took
-  0.6 s for a page of 20, since each candidate's shell is built.
+- **A serial number took 80 to 100 ms** on the same database. A product URI that 707 devices share
+  took 0.6 to 1.0 s for a page of 20, since each candidate's shell is built.
 
 **What is not served:**
 
