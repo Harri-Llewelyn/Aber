@@ -6380,12 +6380,13 @@ row. The Digital Nameplate reader asks it for the six OPC 40001 Machinery concep
 #### Who reads a metric's semantic id
 
 Every reader of `metric_catalog.semantic_id` was read for whether it answers "which metric carries this
-concept?". Two do and now answer across both lists. The rest ask what the metric's own id is, and keep reading it
-alone. Drift check 450 refuses a new reader that is not listed here.
+concept?". Two did and now answer across both lists, and Discovery (`aas-api`, 1.10) is a third. The rest ask
+what the metric's own id is, and keep reading it alone. Drift check 450 refuses a new reader that is not listed here.
 
 | Reader | Reads | Why |
 | :--- | :--- | :--- |
 | `supabase/functions/_shared/aas/shell.ts` | **both** | The Property's `semanticId` is the own id and its `supplementalSemanticIds` the further ones. The Digital Nameplate join (`catalogBySemanticId`) finds a metric by either, the own id first. |
+| `supabase/functions/aas-api/discovery.ts` | **both** | Discovery looks for the devices that may publish a serial number or a product URI under the metrics that carry its concept as their own id or a further one, as the nameplate join reads them, then builds each one's shell and matches it. |
 | `frontend/src/api.js` | **both** | The nameplate reader reads the crosswalk, own id first, so the editor shows what the exporter will write. The catalogue read carries each metric's further ids beside the row. |
 | `i3x/i3x_service.py` | own id | A metric's i3X type is its catalogue row, in the namespace its own id is defined in (`metric_type_namespace()`). A further id names the same concept in another namespace, and the type has one. |
 | `ingestion/validate.py` | own id | It checks that i3X types carry the own id, as the metric's `sourceTypeId`. |
@@ -10241,7 +10242,7 @@ refuses a missing or wrong token or secret.
 | [`forge-signout`](functions/forge-signout) | the caller | Gitea's own sign-out link: ends the door's GoTrue session, then sends the browser to the dashboard's `/sign-out` (`FRONTEND_PUBLIC_URL`) |
 | [`forge-events`](functions/forge-events) | **no Supabase role at all** | Gitea's push webhook, authorised on its HMAC; records the head of `main` on the gateway row (`0095`) |
 | [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
-| [`aas-api`](functions/aas-api) | a signed-in person or a machine identity | The IDTA-01002 (AAS Part 2) read API over the mapping `aas-export` uses; queries as the caller, and every caller reads the same shells — see [Connecting an AAS client](#connecting-an-aas-client) |
+| [`aas-api`](functions/aas-api) | a signed-in person or a machine identity | The IDTA-01002 (AAS Part 2) read API over the mapping `aas-export` uses: the repository, the AAS Registry and Discovery. Queries as the caller, and every caller reads the same shells — see [Connecting an AAS client](#connecting-an-aas-client) |
 | [`broker-inventory`](functions/broker-inventory) | `Administrator` | The broker's accounts and roles, for the Access Control page |
 | [`broker-subscriber`](functions/broker-subscriber) | `Administrator` | Creates a read-only broker account (the `subscriber` role alone) and shows its password once, or deletes one; refuses any username outside the subscriber scheme (`0218`) |
 | [`service-logs`](functions/service-logs) | `Administrator` | A service's newest log lines from Loki, for System › Logs, built from parameters and never a query; each new read is recorded (`0225`) — see [Reading a service's logs is recorded](#reading-a-services-logs-is-recorded-0225) |
@@ -10403,13 +10404,39 @@ access control. Everything else about it follows from that.
 
 ### Connecting an AAS client
 
-`aas-api` is the live AAS repository. A client written against IDTA-01002 (AAS Part 2, the API)
-reads shells, submodels and the ConceptDescriptions they reference from it, with nothing exported
-first.
+`aas-api` is the live AAS repository, with an AAS Registry and Discovery over it. A client written
+against IDTA-01002 (AAS Part 2, the API) reads shells, submodels and the ConceptDescriptions they
+reference from it, with nothing exported first. It can also list what is there through the Registry,
+and get from an asset id, such as the serial number on a machine, to its shell through Discovery.
+
+**What is verified, and by what.** Three results, each covering only what it tests:
+
+- **IDTA's own test engine, `aas-test-engines` 1.0.3: not compliant.** It tests the read profiles
+  `aas-api` declares for the AAS Repository and the Submodel Repository. 7 of the first's 25
+  operations pass, and 4 of the second's 23. That was measured on 2026-11-26 on a private database of
+  4,950 devices, and CI holds each pass (`test-harness/aas_conformance.py`). Four of the passes hold
+  whatever `aas-api` answers: `GetThumbnail`, `GetFileByPath` (the first submodel holds no File),
+  and `GetSubmodelElementByPath`'s `-Metadata` and `-Path`. So what is shown to work is reading a
+  shell by its id, its asset information and `/description`.
+- **The rest fail for six reasons, none of them deliberate.** The `$metadata`, `$reference` and
+  `$path` modifiers and `/serialization` are not served. An invalid `level` or `extent` is accepted
+  rather than refused. `limit` is not applied to a shell's submodel references or a submodel's
+  elements, and on `/submodels` it counts devices. `/shells` reads no `idShort`, and accepts an
+  `assetIds` that is not base64url. One element's ValueOnly form is its bare value, not an object. So
+  not *Compatible* either: that would claim that what `aas-api` serves passes.
+- **The Registry and Discovery are read by our own suites.** IDTA's suites for the AAS Registry,
+  the Submodel Registry, Discovery and the ConceptDescription Repository are for its members only.
+  `aas-api/registry_test.ts` and `discovery_test.ts` hold the projection and the matching.
+  `test_a_registry_and_discovery_resolve_a_shell.py` (stack lane) reads both as each role.
+
+**Writes are refused, deliberately.** Every route is a `GET`. A write answers `405` with the reason:
+asset data is written in the dashboard, which keeps its Audit Trail, and a write here would go round
+both. So each profile `/description` declares is a read-only SSP-002 one.
 
 **The base URL** is `https://api.<domain>/functions/v1/aas-api` on a site, and
 `http://api.localhost/functions/v1/aas-api` on the development stack. A client adds `/shells`,
-`/submodels`, `/concept-descriptions` and `/description` after it.
+`/submodels`, `/concept-descriptions`, `/shell-descriptors`, `/lookup/shells` and `/description`
+after it.
 
 **What a request sends** is a bearer token in `Authorization`, and nothing else:
 
@@ -10438,7 +10465,7 @@ name its own.
 
 - **`partInstanceId` is Catena-X's name for a serial number.** Its `manufacturerPartId` is not
   written, because `device_nameplate` has no article-number column.
-- **The names are permanent once Discovery indexes them.** It matches on them, so a rename is a
+- **The names are permanent, since Discovery indexes them.** It matches on them, so a rename is a
   break.
 - **A replay lane lists none.** A lane republishes its original's DBIRTH, so it would carry the
   original's serial number. A lookup would then return the asset and every lane recorded from it.
@@ -10468,22 +10495,71 @@ So a definition an imported vocabulary does not share stays out of both
 - **No profile is declared for them.** IDTA-01002 has no read-only profile for the
   ConceptDescription Repository, and its one profile includes the writes.
 
+**The Registry describes every shell.** `/shell-descriptors` is the AAS Registry's read profile
+(SSP-002), which `/description` declares. It lists a descriptor of each shell `/shells` lists, in
+the same order and pages, with the submodels' descriptors inside it.
+
+- **A descriptor is projected from the shell,** built by the same `buildEnvironment()`. Its id,
+  idShort, `assetKind`, `globalAssetId` and `specificAssetIds` are the shell's, and each submodel's
+  id, idShort and `semanticId` are the submodel's. So the Registry and the repository cannot
+  disagree.
+- **Each endpoint is this service's own route:** the shell's is `AAS-3.0` at `/shells/{id}`, and
+  each submodel's `SUBMODEL-3.0` at `/submodels/{id}`. Each starts with `SUPABASE_PUBLIC_URL`, the
+  gateway's public address. It is `supabaseFunctions.gatewayEnrolment.supabasePublicUrl` where that
+  is set, and the API's own host otherwise.
+- **`assetKind` and `assetType` filter a page.** Every shell is an `Instance` with no `assetType`.
+  A page is a page of devices, so a filtered one may be short, or empty, and still have a cursor.
+- **A page costs a shell's construction for each device on it,** four at a time. On a private
+  database of 4,950 devices, a page of 100 took 1.7 to 2.3 s and a page of 20 0.4 s, wherever it fell
+  in the fleet: the medians of two runs, the second beside other work. `/shells`, which builds one at
+  a time, took 4.3 to 5.8 s for the same 100.
+
+**Discovery goes from an asset id to its shell.** `/lookup/shells?assetIds=...` answers the ids of
+the shells that carry every link asked for. Each `assetIds` value is a SpecificAssetId's JSON,
+base64url-encoded, such as `{"name":"partInstanceId","value":"SN-0001"}`.
+`/lookup/shells/{id}` lists one shell's links.
+
+- **A shell's links are its `globalAssetId` and its `specificAssetIds`.** The first goes under the
+  name `globalAssetId`, as the metamodel names it. The rest are the three above.
+- **Each answer is matched against the shell `/shells` serves.** The rows a link is taken from narrow
+  the candidates first: the nameplate, the device's birth values and its wire id. Then each
+  candidate's shell is built, and kept only if it carries every link. So an operator's serial number
+  that the device's own replaces finds nothing, as the shell does not carry it.
+- **A replay lane is not indexed,** though its birth repeats its original's serial number. Neither
+  its Sparkplug id nor its `globalAssetId` finds it, and `/lookup/shells/{id}` answers `404` for
+  it. An archived device is not indexed either.
+- **Nothing assumes a shell is a device's.** The candidates come from `devicesThatMayCarry()` in
+  `aas-api/discovery.ts`, and a kind of shell that is not a device adds its own there.
+- **No profile is declared for it.** Discovery's one profile, SSP-001, includes the writes.
+- **A serial number took 80 to 100 ms** on the same database. A product URI that 707 devices share
+  took 0.6 to 1.0 s for a page of 20, since each candidate's shell is built.
+
 **What is not served:**
 
-- the Registry and Discovery interfaces;
-- writes: every route is a `GET`, and the advertised profiles are the read-only SSP-002 pair;
-- the `$metadata`, `$reference` and `$path` modifiers, which answer `404`. Only `/$value`
-  is handled;
+- the Submodel Registry (`/submodel-descriptors`): each shell's descriptor carries its submodels';
+- writes, as above;
+- the `$metadata`, `$reference` and `$path` modifiers, which answer `404`, or `400` straight
+  after `/shells` or `/submodels`, where they are read as an identifier. Only `/$value` is handled;
 - a search. `GET /shells` reads only `limit` and `cursor`, so a client that asks by
-  `assetIds` or `idShort` gets every shell. `GET /concept-descriptions` likewise ignores `idShort`,
-  `isCaseOf` and `dataSpecificationRef`;
+  `assetIds` or `idShort` gets every shell; Discovery answers the first. `GET
+  /concept-descriptions` likewise ignores `idShort`, `isCaseOf` and `dataSpecificationRef`;
 - a page of submodels by count. On `/submodels`, `limit` counts devices, and a page holds every
   submodel of each.
 
-**A shell's history link has requirements of its own.** The Time Series submodel carries a
-`LinkedSegment` whose endpoint is PostgREST's `/rest/v1/telemetry` (`AAS_HISTORIAN_ENDPOINT`),
-queried by `asset_id`. That is the REST API, not `aas-api`, so a client following it sends the
-`apikey` as well as a person's or a machine identity's token.
+**A shell's history links have requirements of their own.** Each telemetry submodel's `Segments`
+holds one or two:
+
+- **`LinkedSegment`** points at PostgREST's `/rest/v1/telemetry` (`AAS_HISTORIAN_ENDPOINT`), queried
+  by `asset_id`. That is the REST API, not `aas-api`, so a client following it sends the `apikey` as
+  well as a person's or a machine identity's token.
+- **`I3XLinkedSegment`** points at the i3X server's `/v1/objects/history`
+  (`AAS_I3X_HISTORY_ENDPOINT`), while the chart publishes the server. Its `Query` is the request's
+  JSON body, naming the submodel's own metrics by their i3X elementIds:
+  `{"elementIds": ["<sparkplug_id>/<metric name>", ...]}`. A client adds a `startTime` and an
+  `endTime`, and sends a bearer token and no `apikey`.
+- **Both are in an exported file too.** Each names an address on the site, so only a client there can
+  follow it. The i3X server names this shell in turn, in each device's `metadata.system`
+  ([i3X: Address space](../i3x/README.md#address-space)).
 
 ### What a shell's submodels claim
 

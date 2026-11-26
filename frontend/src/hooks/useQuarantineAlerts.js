@@ -43,9 +43,10 @@ export function useQuarantineAlerts(showToast) {
     const describe = (device) =>
       device?.sparkplug_id || device?.asset_id || device?.id || 'unknown'
 
+    // An archived device is not in the queue, whatever a change to its row says.
     const announce = (device) => {
       const key = device?.id ?? device?.asset_id
-      if (!key || knownQuarantineIds.current.has(key)) return
+      if (!key || device.is_archived || knownQuarantineIds.current.has(key)) return
       knownQuarantineIds.current.add(key)
       showToastRef.current?.(
         `New device '${describe(device)}' discovered in the Quarantine queue`,

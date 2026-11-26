@@ -89,11 +89,13 @@ const show = async (search) => {
 }
 const unloadedShades = () => [...document.querySelectorAll('.trail-section .trail-shade-unloaded')]
 const foot = () => within(document.querySelector('.list-foot'))
+/** The foot's count of events, as it words one: "2,000 events of 4,000 events". */
+const counted = (shown, total) => `${shown.toLocaleString('en-GB')} events of ${total.toLocaleString('en-GB')} events`
 
 describe('a bounded window', () => {
   it('loads every page of the window by itself, and hatches nothing once it is covered', async () => {
     await show('?span=day&at=2026-11-01')
-    await waitFor(() => expect(screen.getByText('All 450 shown.')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('All 450 events shown.')).toBeInTheDocument())
     // One page asked for, then the two older ones, each from the cursor before it.
     expect(trailCalls()).toHaveLength(3)
     expect(pagedCalls()).toHaveLength(2)
@@ -102,14 +104,14 @@ describe('a bounded window', () => {
 
   it('pages on in a rolling and a custom range too', async () => {
     await show('?from=2026-11-01T00%3A00&to=2026-11-02T00%3A00')
-    await waitFor(() => expect(screen.getByText('All 450 shown.')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('All 450 events shown.')).toBeInTheDocument())
     expect(pagedCalls()).toHaveLength(2)
   })
 
   it('stops at the cap, and the hatch says the cap stopped it', async () => {
     trail = pagedServer(dayOf(2 * WINDOW_EVENT_CAP))
     await show('?span=day&at=2026-11-01')
-    await waitFor(() => expect(foot().getByText(`${WINDOW_EVENT_CAP} of ${2 * WINDOW_EVENT_CAP}`)).toBeInTheDocument())
+    await waitFor(() => expect(foot().getByText(counted(WINDOW_EVENT_CAP, 2 * WINDOW_EVENT_CAP))).toBeInTheDocument())
     await settle()
     // The cap in pages, and not one more.
     expect(trailCalls()).toHaveLength(WINDOW_EVENT_CAP / PAGE)
@@ -120,8 +122,8 @@ describe('a bounded window', () => {
     expect(Number(/([\d.]+) \*/.exec(heading.style.width)?.[1])).toBeCloseTo(0.5, 3)
 
     // Show more still goes on, a page at a time, and the window does not take over again.
-    fireEvent.click(foot().getByRole('button', { name: `Show ${PAGE} more` }))
-    await waitFor(() => expect(foot().getByText(`${WINDOW_EVENT_CAP + PAGE} of ${2 * WINDOW_EVENT_CAP}`)).toBeInTheDocument())
+    fireEvent.click(foot().getByRole('button', { name: `Show ${PAGE} More Events` }))
+    await waitFor(() => expect(foot().getByText(counted(WINDOW_EVENT_CAP + PAGE, 2 * WINDOW_EVENT_CAP))).toBeInTheDocument())
     await settle()
     expect(trailCalls()).toHaveLength(WINDOW_EVENT_CAP / PAGE + 1)
   })
@@ -130,7 +132,7 @@ describe('a bounded window', () => {
     // The newest 2,000 of 2,400 reach back to a sixth of the day: 167px of the 1,000.
     trail = pagedServer(dayOf(WINDOW_EVENT_CAP + 2 * PAGE))
     await show('?span=day&at=2026-11-01')
-    await waitFor(() => expect(foot().getByText(`${WINDOW_EVENT_CAP} of ${WINDOW_EVENT_CAP + 2 * PAGE}`)).toBeInTheDocument())
+    await waitFor(() => expect(foot().getByText(counted(WINDOW_EVENT_CAP, WINDOW_EVENT_CAP + 2 * PAGE))).toBeInTheDocument())
     expect(unloadedShades()[0]).toHaveTextContent(/^Not loaded: over 2,000$/)
   })
 
@@ -159,7 +161,7 @@ describe('a bounded window', () => {
     await waitFor(() => expect(pagedCalls()).toHaveLength(1))
     await settle()
     expect(pagedCalls()).toHaveLength(1)
-    expect(foot().getByRole('button', { name: `Show ${PAGE} more` })).toBeEnabled()
+    expect(foot().getByRole('button', { name: `Show ${PAGE} More Events` })).toBeEnabled()
   })
 
   it('drops a page asked for under the window before, once another is chosen', async () => {
@@ -180,11 +182,11 @@ describe('a bounded window', () => {
     await waitFor(() => expect(pagedCalls()).toHaveLength(1))
 
     fireEvent.click(screen.getByRole('button', { name: 'Next day' }))
-    await waitFor(() => expect(screen.getByText('All 1 shown.')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('1 event shown.')).toBeInTheDocument())
     release()
     await settle()
     // Still the one event of 2 November: 1 November's page landed and was dropped.
-    expect(screen.getByText('All 1 shown.')).toBeInTheDocument()
+    expect(screen.getByText('1 event shown.')).toBeInTheDocument()
     expect(document.querySelectorAll('.trail-node')).toHaveLength(1)
   })
 })
@@ -192,7 +194,7 @@ describe('a bounded window', () => {
 describe('All time', () => {
   it('loads one page and keeps Show more', async () => {
     await show('')
-    await waitFor(() => expect(foot().getByRole('button', { name: `Show ${PAGE} more` })).toBeInTheDocument())
+    await waitFor(() => expect(foot().getByRole('button', { name: `Show ${PAGE} More Events` })).toBeInTheDocument())
     await settle()
     expect(trailCalls()).toHaveLength(1)
     // Its axis is the loaded events', so there is no part of it to hatch.

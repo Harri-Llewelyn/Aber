@@ -1420,6 +1420,7 @@ paths:
                 properties:
                   events: { type: array, items: { $ref: '#/components/schemas/AuditTrailEntry' } }
                   total_matching: { type: integer, description: 'Rows the filters select in all, not just this page.' }
+                  matching_entities: { type: integer, description: 'Entities those rows are about, each once, under the same filters.' }
                   purged_assets: { type: integer, description: 'Deleted entities the filters cover.' }
                   truncated: { type: boolean, description: 'There is a next page.' }
                   next_cursor: { type: object, nullable: true, properties: { recorded_at: { type: string, format: date-time }, id: { type: integer, format: int64 } } }
@@ -6834,12 +6835,12 @@ paths:
         `http://api.localhost/functions/v1/aas-api`.
 
         **Also served:** the ConceptDescriptions the shells reference, at `/concept-descriptions`,
-        each the one the JSON export of a shell carries.
+        each the one the JSON export of a shell carries; the AAS Registry's descriptors, at
+        `/shell-descriptors`; and Discovery, from asset ids to shell ids, at `/lookup/shells`.
 
-        **Not served:** the Registry and Discovery interfaces, writes, and the `$metadata`,
-        `$reference` and `$path` modifiers, which answer `404`; only `/$value` is handled. `GET
-        /shells` reads `limit` and `cursor` alone, so a search by `assetIds` or `idShort` gets
-        every shell.
+        **Not served:** writes, and the `$metadata`, `$reference` and `$path` modifiers, which
+        answer `404`; only `/$value` is handled. `GET /shells` reads `limit` and `cursor` alone, so
+        a search by `assetIds` or `idShort` gets every shell: `/lookup/shells` answers the first.
 
         **This path itself answers `404`**, because there is no resource at a repository root and
         the specification defines no index. The body lists what *is* served, for the benefit of
@@ -6853,7 +6854,8 @@ paths:
         or machine identity, sees the same shells.
 
         Every route is a `GET`. Writes would bypass the dashboard's role model and its
-        `audit_trail` record, so the advertised profiles are the read-only SSP-002 pair.
+        `audit_trail` record, so the advertised profiles are the read-only SSP-002 ones, and a write
+        answers `405` saying so.
       responses:
         '404':
           description: No resource at the root; the body names the routes that exist.
@@ -6883,13 +6885,14 @@ paths:
         a standard AAS client sends a bearer token and nothing else (`docs/gateway.md`). Every
         other `aas-api` route authenticates the caller itself and fails closed.
 
-        Both advertised profiles are **SSP-002, the read-only variants**. Every route below is a
-        `GET`; asset data is authored through the dashboard, which has the role model and writes
+        The three advertised profiles, the AAS Repository's, the Submodel Repository's and the AAS
+        Registry's, are each **SSP-002, the read-only variant**. Every route below is a `GET`;
+        asset data is authored through the dashboard, which has the role model and writes
         `audit_trail`, and a write here would bypass both.
 
-        **No profile is declared for `/concept-descriptions`.** IDTA-01002 defines no read-only
-        profile for the ConceptDescription Repository. Its one profile, SSP-001, includes the
-        writes, so declaring it would promise them.
+        **No profile is declared for `/concept-descriptions` or `/lookup/shells`.** IDTA-01002
+        defines no read-only profile for the ConceptDescription Repository or for Discovery. Each
+        one's only profile, SSP-001, includes the writes, so declaring it would promise them.
       responses:
         '200':
           description: The advertised profiles.
@@ -6919,7 +6922,8 @@ paths:
         `main/index.ts` forwards only the environment each worker's registry entry names.
 
         **`limit` and `cursor` are the only parameters read.** `assetIds` and `idShort` are
-        ignored, so a client searching by asset id gets every shell, a page at a time.
+        ignored, so a client searching by asset id gets every shell, a page at a time. Discovery
+        (`/lookup/shells`) finds a shell by its asset ids.
 
         **Pagination.** `limit` (default 20, capped at 100) and an opaque `cursor`. A cursor names
         the next *device*, so a page carries every item belonging to the devices it covers — the
@@ -6947,7 +6951,7 @@ paths:
                     properties: { cursor: { type: string } }
                     description: Empty object on the last page — the cursor is omitted, not nulled.
                   result: { type: array, items: { type: object } }
-        '400': { description: Non-positive `limit`. }
+        '400': { description: Non-positive `limit`, or a cursor no page returned. }
         '401': { description: Missing or invalid Authorization header. }
         '500': { $ref: '#/components/responses/AasFailure' }
 
@@ -7266,6 +7270,228 @@ paths:
         '400': { description: Identifier is not valid base64url. }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No shell references that id. }
+        '500': { $ref: '#/components/responses/AasFailure' }
+
+  /functions/v1/aas-api/shell-descriptors:
+    get:
+      tags: [Edge Functions]
+      security:
+        - bearerAuth: []
+      summary: List shell descriptors (AAS Registry, SSP-002)
+      description: |
+        The read profile of IDTA-01002's Asset Administration Shell Registry, which `/description`
+        declares. One descriptor for each shell `/shells` lists, lanes included, in the same order:
+        its id, idShort, `assetKind`, `globalAssetId` and `specificAssetIds`, with a descriptor of
+        each submodel it references nested inside it. A descriptor is projected from the shell
+        `buildEnvironment()` builds from the caller's rows, so the Registry and the repository cannot
+        disagree.
+
+        **Each endpoint is this service's own route.** The shell's is `AAS-3.0` at
+        `/shells/{aasIdentifier}`, and each submodel's is `SUBMODEL-3.0` at
+        `/submodels/{submodelIdentifier}`, both under the gateway's public address
+        (`SUPABASE_PUBLIC_URL`), with `endpointProtocol` the address's scheme.
+
+        **`assetKind` and `assetType` filter the page.** Every shell is an `Instance` and names no
+        `assetType`. The page is a page of devices, so a filtered page may hold fewer than `limit`, or
+        none, and still carry a cursor.
+
+        **Pagination** is `/shells`' own: `limit` (default 20, capped at 100) counts devices, and the
+        cursor names the next one. Each descriptor costs a shell's construction, four built at once.
+        On a private database of 4,950 devices a page of 100 took 1.7 to 2.3 s and a page of 20
+        0.4 s, wherever the page fell in the fleet.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+          description: Opaque. Echo back `paging_metadata.cursor` from the previous page.
+        - name: assetKind
+          in: query
+          schema: { type: string, enum: [Instance, NotApplicable, Type] }
+        - name: assetType
+          in: query
+          schema: { type: string }
+          description: base64url-encoded.
+      responses:
+        '200':
+          description: A page of shell descriptors.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paging_metadata:
+                    type: object
+                    properties: { cursor: { type: string } }
+                    description: Empty object on the last page — the cursor is omitted, not nulled.
+                  result: { type: array, items: { type: object } }
+        '400': { description: Non-positive `limit`, a cursor no page returned, an `assetKind` the metamodel does not have, or an `assetType` that is not base64url. }
+        '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/AasFailure' }
+
+  /functions/v1/aas-api/shell-descriptors/{aasIdentifier}:
+    get:
+      tags: [Edge Functions]
+      security:
+        - bearerAuth: []
+      summary: Get one shell descriptor
+      description: |
+        The descriptor of the shell whose id is exactly `aasIdentifier` (base64url), the object
+        `/shell-descriptors` lists. A submodel's id, or the id of an archived device's shell, is a
+        `404`.
+      parameters:
+        - name: aasIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The shell descriptor.
+          content:
+            application/json: { schema: { type: object } }
+        '400': { description: Identifier is not valid base64url. }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: No such shell. }
+        '500': { $ref: '#/components/responses/AasFailure' }
+
+  /functions/v1/aas-api/shell-descriptors/{aasIdentifier}/submodel-descriptors:
+    get:
+      tags: [Edge Functions]
+      security:
+        - bearerAuth: []
+      summary: List a shell's submodel descriptors
+      description: |
+        The submodel descriptors the shell's descriptor nests, in the order the shell references its
+        submodels. `limit` counts descriptors, and the cursor is the last id of the page before,
+        base64url-encoded.
+      parameters:
+        - name: aasIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: A page of submodel descriptors, in the same envelope as every other list.
+          content:
+            application/json: { schema: { type: object } }
+        '400': { description: An identifier that is not base64url, or a cursor no page of this shell returned. }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: No such shell. }
+        '500': { $ref: '#/components/responses/AasFailure' }
+
+  /functions/v1/aas-api/shell-descriptors/{aasIdentifier}/submodel-descriptors/{submodelIdentifier}:
+    get:
+      tags: [Edge Functions]
+      security:
+        - bearerAuth: []
+      summary: Get one of a shell's submodel descriptors
+      parameters:
+        - name: aasIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+        - name: submodelIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The submodel descriptor.
+          content:
+            application/json: { schema: { type: object } }
+        '400': { description: Either identifier is not valid base64url. }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: No such shell, or that shell references no such submodel. }
+        '500': { $ref: '#/components/responses/AasFailure' }
+
+  /functions/v1/aas-api/lookup/shells:
+    get:
+      tags: [Edge Functions]
+      security:
+        - bearerAuth: []
+      summary: Find shells by asset ids (AAS Discovery)
+      description: |
+        IDTA-01002's Discovery: the ids of the shells whose asset links hold **every** link asked
+        for. Each `assetIds` value is a base64url-encoded SpecificAssetId, such as
+        `{"name":"partInstanceId","value":"SN-0001"}`; an encoded array of them is read too. Only
+        `name` and `value` are compared, exactly.
+
+        **A shell's links** are its `globalAssetId`, under the name `globalAssetId`, and its
+        `specificAssetIds`: the serial number (`partInstanceId`), the manufacturer's product URI
+        (`uriOfTheProduct`) and the Sparkplug id (`sparkplugId`). Each answer is matched against the
+        shell `/shells` serves, so a link the shell does not carry finds nothing, such as an
+        operator's serial number that the device's own replaces.
+
+        **A replay lane is not indexed.** It is a recording of an asset, not a second asset, and its
+        birth repeats the original's serial number. Neither its Sparkplug id nor its
+        `globalAssetId` finds it. An archived device is not indexed either.
+
+        With no `assetIds`, every indexed shell is listed. `limit` counts shells and the cursor
+        names the last device of the page. A serial number took 80 to 100 ms on a private database
+        of 4,950 devices; a product URI 707 of them share, 0.6 to 1.0 s for a page of 20.
+
+        **No profile is declared.** Discovery's one profile, SSP-001, includes the writes, which
+        answer `405`.
+      parameters:
+        - name: assetIds
+          in: query
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: true
+          description: base64url of a SpecificAssetId's JSON. Repeat it for each link that must hold.
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: A page of shell ids.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paging_metadata:
+                    type: object
+                    properties: { cursor: { type: string } }
+                  result: { type: array, items: { type: string } }
+        '400': { description: An `assetIds` value that is not an encoded SpecificAssetId, a non-positive `limit`, or a cursor no page returned. }
+        '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/AasFailure' }
+
+  /functions/v1/aas-api/lookup/shells/{aasIdentifier}:
+    get:
+      tags: [Edge Functions]
+      security:
+        - bearerAuth: []
+      summary: List one shell's asset links
+      description: |
+        The links Discovery finds the shell by: `{"name":"globalAssetId","value":...}` first, then
+        each of its `specificAssetIds` as the shell carries it. A lane's shell, an archived device's
+        and an id nobody holds are each a `404`.
+      parameters:
+        - name: aasIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The shell's asset links, as SpecificAssetIds.
+          content:
+            application/json: { schema: { type: array, items: { type: object } } }
+        '400': { description: Identifier is not valid base64url. }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: Discovery indexes no such shell. }
         '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/fplus-directory:

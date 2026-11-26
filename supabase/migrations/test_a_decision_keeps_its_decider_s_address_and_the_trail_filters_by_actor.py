@@ -425,7 +425,8 @@ class OneSignature(Base):
                 self.assertIn("p_search text DEFAULT NULL::text, p_changed_by uuid[] DEFAULT NULL::uuid[]", m.group(1),
                               f"{path.name} declares audit_trail_page without p_changed_by after p_search")
         self.assertEqual(sorted(found), ["0001_baseline_schema.sql",
-                                         "0168_every_schema_attached_to_a_device_counts.sql"])
+                                         "0168_every_schema_attached_to_a_device_counts.sql",
+                                         "0339_the_audit_trail_counts_the_entities_its_events_are_about.sql"])
 
     def test_the_grants_follow_the_new_form(self):
         self.cur.execute(

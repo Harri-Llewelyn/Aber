@@ -1698,9 +1698,15 @@ def check_i3x_device_typed_by_every_schema(ctx):
     components = relationships(obj).get("HasComponent")
     if components != [f"{known}/{name}" for name in names]:
         wrong.append(f"HasComponent is {components}; expected {names} under {known}")
-    if meta.get("system") != {"quarantined": False} or "quarantined" in meta or "schemaExtensions" in meta:
+    # Beside `quarantined`, the device's AAS shell: <base IRI><sparkplug_id>, and that with /shell.
+    system = meta.get("system") or {}
+    shell = str(system.get("aasGlobalAssetId") or "")
+    if (set(system) != {"quarantined", "aasShellId", "aasGlobalAssetId"} or system.get("quarantined") is not False
+            or not shell.endswith("/" + str(known)) or system.get("aasShellId") != shell + "/shell"
+            or "quarantined" in meta or "schemaExtensions" in meta):
         wrong.append("metadata carries system " + json.dumps(meta.get("system")) + ", expected "
-                     "{\"quarantined\": false} with no top-level quarantined or schemaExtensions")
+                     "{\"quarantined\": false} and its shell's aasGlobalAssetId and aasShellId, with no "
+                     "top-level quarantined or schemaExtensions")
     if wrong:
         return False, "; ".join(wrong)
     return True, (f"{known} is typed by its {len(ids)} schemas ({type_id}), not extended, and composed "

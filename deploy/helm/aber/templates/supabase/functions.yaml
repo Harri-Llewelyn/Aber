@@ -116,6 +116,12 @@ spec:
             # can reach: the ingress, not the in-cluster gateway.
             - name: AAS_HISTORIAN_ENDPOINT
               value: {{ .Values.supabaseFunctions.aas.historianEndpoint | default (printf "%s/rest/v1/telemetry" $supabasePublic) | quote }}
+            {{- /* The i3X server's history route, for a second LinkedSegment beside the one above.
+                   Blank while the chart routes no i3X server, as the dashboard's VITE_I3X_URL is,
+                   and then the shell carries the PostgREST segment alone. */}}
+            {{- $i3xUrl := ternary (include "aber.i3xUrl" .) "" (and .Values.i3xService.enabled (ne (index .Values.ingress.routes "i3x") false)) }}
+            - name: AAS_I3X_HISTORY_ENDPOINT
+              value: {{ ternary (printf "%s/v1/objects/history" $i3xUrl) "" (ne $i3xUrl "") | quote }}
             # Public base for the 3D models a VisualRepresentation submodel points at. It CANNOT be
             # derived from SUPABASE_URL above: in-cluster that is http://supabase-envoy:8000, which
             # resolves for this worker and for nothing outside the cluster, so a shell handed to a

@@ -401,7 +401,7 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs nine jobs:
 | **frontend-build** | Vitest, the mirrored-logic drift guards, production bundle |
 | **helm-chart** | `helm lint`, render, API-schema validation, chart guard rails |
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
-| **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions, the dashboard walked in Chrome under its Content-Security-Policy, all with NetworkPolicies on |
+| **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, IDTA's AAS test engine against `aas-api`, ingress assertions, the dashboard walked in Chrome under its Content-Security-Policy, all with NetworkPolicies on |
 | **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml`, then the i3X conformance suite through Traefik over HTTPS (*The install and upgrade rehearsals*, below) |
 | **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d, twice (`es256`, `hs256`): the last release installed as published, its values completed by the checkout's `setup.mjs`, then `helm upgrade` to the checkout |
 | **secret-scan** | gitleaks over the history of the commit under test and the working tree, on every push (*The secret scans*, below) |

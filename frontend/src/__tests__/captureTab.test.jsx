@@ -2025,12 +2025,14 @@ describe('the Captures and Playbacks tabs', () => {
     at(url)
     renderTab()
 
-    const more = await screen.findByRole('button', { name: 'Show 3 more' })
+    // What the page calls each kind's jobs.
+    const [noun, Noun] = kind === 'playback' ? ['playbacks', 'Playbacks'] : ['recordings', 'Recordings']
+    const more = await screen.findByRole('button', { name: `Show 3 More ${Noun}` })
     // The foot follows the scroller, so it stays on screen under the table.
     const foot = more.closest('.list-foot')
     expect(foot.parentElement).toBe(card())
     expect(foot.previousElementSibling).toBe(table().parentElement)
-    expect(within(foot).getByText('20 of 23')).toBeInTheDocument()
+    expect(within(foot).getByText(`20 ${noun} of 23 ${noun}`)).toBeInTheDocument()
     fireEvent.click(more)
 
     await waitFor(() => expect(bodyRows()).toHaveLength(23))
@@ -2039,7 +2041,7 @@ describe('the Captures and Playbacks tabs', () => {
       before: { created_at: first[19].created_at, id: first[19].id },
       limit: 20
     })
-    expect(screen.getByText('All 23 shown.')).toBeInTheDocument()
+    expect(screen.getByText(`All 23 ${noun} shown.`)).toBeInTheDocument()
   })
 
   it('keeps the microseconds of the cursor it pages from', async () => {
@@ -2047,7 +2049,7 @@ describe('the Captures and Playbacks tabs', () => {
     history((kind, { before }) => before ? page([captureJob(20)]) : page(first, { remaining: 21, more: true }))
     at('/capture/captures')
     renderTab()
-    fireEvent.click(await screen.findByRole('button', { name: 'Show 1 more' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show 1 More Recording' }))
     await waitFor(() => expect(api.jobHistory).toHaveBeenCalledTimes(2))
     expect(api.jobHistory.mock.calls[1][1].before.created_at).toMatch(/\.123456\+00:00$/)
   })

@@ -118,8 +118,9 @@ export function entityWarnings(row) {
   return [
     purgeWarning(row),
     // The row cannot tell a device new to Aber from a registered one held again, so the words fit both.
-    row?.variant === 'quarantined'
-      && { id: 'quarantined', tone: 'warning', text: 'Quarantined: its readings are held until somebody approves it on the Devices page\'s Quarantine tab. One new to Aber may be rejected there instead.' },
+    row?.variant === 'quarantined' && (row.state === 'archived'
+      ? { id: 'quarantined', tone: 'warning', text: 'Held in quarantine when it was archived. Restore returns it to the Quarantine tab on the Devices page.' }
+      : { id: 'quarantined', tone: 'warning', text: 'Quarantined: its readings are held until somebody approves it on the Devices page\'s Quarantine tab. One new to Aber may be rejected there instead.' }),
     row?.variant === 'withdrawn'
       && { id: 'withdrawn', tone: 'warning', text: 'Withdrawn: the API refuses every token that names this machine identity.' },
   ].filter(Boolean)
