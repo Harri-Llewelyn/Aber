@@ -224,7 +224,7 @@ export function SchemaEditor({
         ))}
 
         {template && (template.options && !readOnly ? (
-          <div className="form-group">
+          <div className="form-group schema-editor-template">
             <div className="semantic-id-label">
               <label className="form-label" htmlFor={id('template')}>Template <RequiredMark title={REQUIRED} /></label>
               <HelpTip text={TEMPLATE_HELP} label="What the template does" />
@@ -244,9 +244,10 @@ export function SchemaEditor({
           </div>
         ) : (
           <StaticField
+            className="schema-editor-template"
             label="Template"
             value={chosen && (
-              <RouteLink to={templatesUrl()} title="Open the submodel templates on the Vocabulary page">
+              <RouteLink className="count-link" to={templatesUrl()} title="Open the submodel templates on the Vocabulary page">
                 {chosen.title ?? form.templateId}{chosen.number ? ` (${chosen.number})` : ''}
               </RouteLink>
             )}

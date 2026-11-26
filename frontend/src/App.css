@@ -2810,6 +2810,8 @@ main:focus { outline: none; }
   column-gap: 14px;
 }
 .schema-editor-fields > * { min-width: 0; }
+/* A template's name and IDTA number are long: its field takes the row, where it stands alone at every width. */
+.schema-editor-fields > .schema-editor-template { grid-column: 1 / -1; }
 .schema-editor-metrics { display: flex; flex-direction: column; }
 .modal-body-fill > .schema-editor-metrics { min-height: 210px; }
 
@@ -2855,6 +2857,7 @@ main:focus { outline: none; }
 /* Template Elements (SchemaTemplateElements) is one of them: the elements nothing fills, up to three rows. */
 .schema-template-list { max-height: 112px; }
 .schema-template-list .badge { flex-shrink: 0; }
+.schema-template-fills .mono { font-size: inherit; }
 
 /* A numeric metric's range, beside its row: the two bounds and the dash between them. */
 .property-range {

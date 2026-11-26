@@ -628,7 +628,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             // A link to the templates, as the template is reference data with no drawer of its own.
             label: 'Template',
             value: selectedSchema.template_id ? (
-              <RouteLink to={templatesUrl()} title="Open the submodel templates on the Vocabulary page">
+              <RouteLink className="count-link" to={templatesUrl()} title="Open the submodel templates on the Vocabulary page">
                 {templateOf(selectedSchema)?.title ?? selectedSchema.template_id}
               </RouteLink>
             ) : null,

@@ -5,8 +5,8 @@ import { cardinalityLabel } from '../../utils/idtaTemplates'
 
 /**
  * The editor's Template Elements section, under the metrics of a schema built from a submodel template: the
- * elements a metric could fill that no metric here fills, each marked Required where the template requires
- * it. The metrics above say which element each fills. It is closed until it is asked for, as Derived Metrics
+ * elements a metric could fill that no metric here fills, those the template requires first and marked
+ * Required. The metrics above say which element each fills. It is closed until it is asked for, as Derived Metrics
  * is, so it takes nothing from the metric list, and its summary says how many elements are filled. What a
  * save would be refused for is said at the Template field, not here.
  *
@@ -16,7 +16,9 @@ import { cardinalityLabel } from '../../utils/idtaTemplates'
  */
 export function SchemaTemplateElements({ id, template }) {
   if (!template?.title) return null
-  const { title, fillable, unfilled, required } = template
+  const { title, fillable, required } = template
+  // The required ones first, so the one a save is refused for is in view; each group in the template's order.
+  const unfilled = [...template.unfilled].sort((a, b) => required.includes(b.path) - required.includes(a.path))
   return (
     <details className="schema-derived schema-template">
       <summary className="form-label schema-history-summary" id={id} tabIndex={0}>
