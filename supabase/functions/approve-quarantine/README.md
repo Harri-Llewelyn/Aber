@@ -24,7 +24,25 @@ A body with `merge_into_device_id` merges the quarantined device into that one a
 * `device_id` is not in Quarantine, or was registered before it was held (`requarantined_at`).
 * `merge_into_device_id` is archived, is in Quarantine itself, or has sent its first birth.
 
-It is the one refusal whose message is the database's. Every other failure answers a fixed sentence.
+## Refusals
+
+A refusal a person can act on, whose sentence was written for a person, is answered as the database words it. Everything else is answered in a fixed sentence, because the database's own names tables, columns and constraints. `refusals.ts` decides, `refusals_test.ts` holds each, and drift check 607 holds the triggers to it.
+
+| The database refuses | Code | Answer |
+| :--- | :--- | :--- |
+| A merge, for one of the reasons above | `P0001` | `409`, as it is worded |
+| A cell that is archived (`refuse_filing_in_an_archived_cell()`) | `23514` | `409`, as it is worded |
+| A gateway that is archived (`refuse_assigning_to_an_archived_gateway()`) | `23514` | `409`, as it is worded |
+| An Area-Wide device in an archived area (`refuse_area_wide_in_an_archived_area()`) | `23514` | `409`, as it is worded |
+| The Playback gateway (`refuse_hand_assigning_a_replay_lane()`), in words that name a table and a column | `23514` | `500`, `Approval failed` |
+| A replay lane moved to another gateway (`refuse_hand_making_a_replay_lane()`). Not on this path: the RPC runs as its owner, whom it lets through | `23514` | `500`, `Approval failed` |
+| A CHECK constraint, which names itself and its table | `23514` | `500`, `Approval failed` |
+| A gateway, cell or area that does not exist | `23503` | `500`, `Approval failed` |
+| A scope with no cell or area, or a device merged into itself | `22023` | `400`, `Invalid approval request` |
+| A device that does not exist, either one | `P0002` | `404`, `Device not found` |
+| An actor without the role | `42501` | `403`, `Forbidden: Insufficient privileges` |
+
+The code alone does not say which `23514` is which, so the three that are shown are known by how their sentence ends.
 
 ## Smoke Testing with Curl
 

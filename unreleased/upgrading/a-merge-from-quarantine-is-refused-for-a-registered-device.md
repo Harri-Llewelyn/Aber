@@ -8,6 +8,6 @@ to run.
   when the other device is archived, is in Quarantine, or has sent its first birth.
 - **The answer is HTTP 409,** and `error` is a sentence that names the device.
 - **What to do.** Use **Approve & Onboard** to admit the device again. Its schemas, nameplate and links are
-  kept. The dialog starts at **Follow Gateway**, so choose its location again if it had one of its own.
+  kept. The dialog starts from the location and the gateway the device has, so approving it moves nothing.
 - **Devices held at the upgrade.** The Audit Trail says which were registered before. db-init's log
   counts them.

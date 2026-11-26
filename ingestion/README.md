@@ -221,6 +221,13 @@ function, which calls the atomic `public.approve_quarantined_device()` RPC.
 the hold of a registered device writes it (`0328`). The dashboard offers no match for a device that
 has it, and the RPC refuses to merge one, because a merge deletes the held row.
 
+The approval dialog starts such a device from its own location and its own gateway. A `GATEWAY_MISMATCH`
+names the edge node that published, and the dialog says which gateway that is, from the sentence
+`verify_gateway_binding()` wrote (`frontend/src/utils/quarantineHold.js`). Mirror check 172 holds the
+two to each other, so a change of the sentence is a change of both. The picker stays on the gateway the
+device is bound to. A message for it through another gateway is also what a forged one looks like, so an
+approval never moves the device unless a person chooses to.
+
 ---
 
 ## Schema Conformance

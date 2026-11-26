@@ -225,8 +225,8 @@ export function deviceStatusTitle(status) {
     return 'Online — the device has sent a Sparkplug B DBIRTH and has not since gone quiet';
   }
   if (status === DEVICE_STATUS.QUARANTINED) {
-    return 'Quarantined — announced itself under an id nobody registered. Its telemetry is being '
-      + 'dropped until an Administrator approves it';
+    return 'Quarantined — held until somebody approves it on the Quarantine tab, which says why. '
+      + 'Its telemetry is being dropped until then';
   }
   return 'Offline — a Sparkplug B DDEATH was received, or the liveness watchdog timed the device out';
 }
