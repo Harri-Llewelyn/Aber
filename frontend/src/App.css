@@ -1509,6 +1509,20 @@ a.tab-strip-tab { text-decoration: none; }
 }
 .search-input .search-input-field { padding-left: 30px; padding-right: 28px; }
 .search-input .search-input-field::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+/* The placeholder SearchInput draws over its empty field, inside the field's border and padding,
+   so a cut one slides (OverflowText). The native one stays, transparent, for a screen reader. */
+.search-input .search-input-field::placeholder { color: transparent; }
+.search-input-placeholder {
+  position: absolute;
+  left: 31px;
+  right: 29px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  line-height: normal;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.filter-checklist .search-input-placeholder { font-size: 13px; }
 .search-input-clear {
   position: absolute;
   right: 6px;
