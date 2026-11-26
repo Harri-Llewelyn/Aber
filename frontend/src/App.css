@@ -427,17 +427,14 @@ html, body, #root {
   overflow: hidden;
 }
 
-/* Truncates rather than wrapping or pushing: the bar is a fixed 52px, so a second line would be
-   clipped mid-glyph. The element carries a `title` in App.jsx, so the full name stays reachable. */
+/* Cut rather than wrapping or pushing: the bar is a fixed 52px, so a second line would be clipped
+   mid-glyph. Both lines are OverflowTexts, and the button's tooltip names the brand. */
 .brand-name {
   font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: 0.4px;
   line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .brand-sub {
@@ -446,9 +443,6 @@ html, body, #root {
   letter-spacing: 0.9px;
   text-transform: uppercase;
   line-height: 1.3;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* The mirror of .topbar-brand -- same weight, opposite alignment. `justify-content: flex-end`
@@ -521,8 +515,8 @@ html, body, #root {
 .user-menu-button-open { color: var(--text-primary); background: var(--bg-glass); }
 .user-menu-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* Truncates: the menu's head is where the address is shown in full. */
-.user-menu-email { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Cut (an OverflowText): the button's tooltip and the menu's head show the address in full. */
+.user-menu-email { min-width: 0; }
 
 /* A fixed square, not padding: a circle sized by its padding goes oval when the glyph's metrics
    change, and this one is 28px at every viewport. Round is what marks it as the identity control. */
@@ -932,7 +926,11 @@ a.sidebar-item { text-decoration: none; }
   text-decoration: none;
   white-space: nowrap;
 }
-.sidebar-tab-label { overflow: hidden; text-overflow: ellipsis; }
+/* An OverflowText. The rail's tabs carry no tooltips, so under reduced motion, which stops the slide,
+   a label too long for the rail wraps instead. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-tab .sidebar-tab-label { white-space: normal; }
+}
 .sidebar-tab:hover { color: var(--text-primary); }
 .sidebar-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .sidebar-tab.sidebar-tab-warning:not(.active) { color: var(--warning-text); }
@@ -1082,9 +1080,6 @@ a.sidebar-item { text-decoration: none; }
 .global-search-result-label {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* A record: its name, over the id it was found by where the text was one. Each is cut and slides by itself
@@ -1493,7 +1488,7 @@ a.tab-strip-tab { text-decoration: none; }
 /* A list filter in the toolbar keeps the width of the select it replaced, so the row keeps its shape:
    the words are cut at the edge, the chevron sits at the right. */
 .filter-dropdown { justify-content: space-between; min-width: 0; }
-.filter-dropdown-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-dropdown-words { min-width: 0; }
 
 /* SearchInput: a form control with a leading icon and a clear button inside its right edge. The
    native search cancel is hidden, since the clear button replaces it. */
@@ -1914,12 +1909,8 @@ tbody tr.table-group-foot:hover { background: none; }
    the accent name, and its chevron and icon kept whole. A page sizes it to the row it sits in. */
 .group-heading-chevron,
 .group-heading-icon { display: inline-flex; flex-shrink: 0; }
-.group-heading-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* The name is an OverflowText. */
+.group-heading-label { min-width: 0; }
 /* A heading with a row to itself wraps its name, such as an imported file's, rather than cut it. */
 .table-group-row .group-heading-label,
 .vocab-section-head .group-heading-label { white-space: normal; overflow-wrap: anywhere; }
@@ -5261,15 +5252,13 @@ a.chip { text-decoration: none; }
   color: var(--accent);
 }
 
+/* Holds the title as an OverflowText, so a cut one slides on hover. */
 .context-panel-title {
   min-width: 0;
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1.25;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .context-panel-subtitle {
@@ -5800,14 +5789,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .help-result:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .help-result-title { font-weight: 600; }
 .help-result-page { font-weight: 400; color: var(--text-muted); }
+/* An OverflowText: a cut snippet slides on the result's hover or focus. */
 .help-result-snippet {
-  display: block;
   margin-top: 2px;
-  overflow: hidden;
   font-size: 11.5px;
   color: var(--text-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Below 800px there is no room for the drawer beside the list, so it slides over the page, still

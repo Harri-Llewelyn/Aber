@@ -299,7 +299,7 @@ export function GlobalSearch({ tabs, currentTab, userRole, onNavigate, onSelectS
           <OverflowText className="global-search-result-label" active={i === cursor && mark !== null}>{r.label}</OverflowText>
           {r.foundBy && <OverflowText className="global-search-record-id mono" active={i === cursor && mark !== null}>{r.foundBy}</OverflowText>}
         </span>
-      ) : <span className="global-search-result-label">{r.label}</span>}
+      ) : <OverflowText className="global-search-result-label" active={i === cursor && mark !== null}>{r.label}</OverflowText>}
       {r.detail && <span className="global-search-result-detail">{r.detail}</span>}
       {/* Only on the highlighted row: thirteen return arrows down the side of the list
           would be thirteen claims that Enter does thirteen different things. */}

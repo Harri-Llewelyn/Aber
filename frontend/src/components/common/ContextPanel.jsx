@@ -3,6 +3,7 @@ import { IconX, IconAlertTriangle, IconAlertCircle, IconCheck, IconBellOff } fro
 import CopyableId from './CopyableId'
 import { GroupHeading } from './GroupHeading'
 import { HelpTip } from './HelpTip'
+import { OverflowText } from './OverflowText'
 import { RouteLink } from './RouteLink'
 import { Tooltip } from './Tooltip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
@@ -151,11 +152,11 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, al
           <div className="context-panel-heading">
             {/* No type badge: the kind is already established by the page, and is announced on the
                 region label. */}
-            {/* Truncated, with the whole name in the tooltip: an entity name long enough to overrun
-                the drawer is exactly the kind you opened the panel to read. */}
+            {/* Cut, it slides on hover, and the whole name is in the tooltip: an entity name long
+                enough to overrun the drawer is exactly the kind you opened the panel to read. */}
             <div className="context-panel-title-row">
               {icon && <span className="context-panel-icon" aria-hidden="true">{icon}</span>}
-              <Tooltip text={title}><div className="context-panel-title">{title}</div></Tooltip>
+              <Tooltip text={title}><div className="context-panel-title"><OverflowText>{title}</OverflowText></div></Tooltip>
             </div>
             {subtitle && <div className="context-panel-subtitle">{subtitle}</div>}
           </div>
