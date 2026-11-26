@@ -49,7 +49,7 @@ describe('a registered device held again', () => {
   it('is told in the approval dialog that approving keeps what is set on it', async () => {
     const row = await openQueue(REGISTERED)
     fireEvent.click(within(row).getByRole('button', { name: /Approve & Onboard/ }))
-    const dialog = await screen.findByRole('dialog', { name: /Approve Discovered Device/ })
+    const dialog = await screen.findByRole('dialog', { name: /Approve & Onboard/ })
     expect(within(dialog).getByText(HELD_AGAIN_APPROVAL)).toHaveClass('form-hint')
   })
 
@@ -74,7 +74,7 @@ describe('a device nobody registered', () => {
   it('is told nothing of a registration in the approval dialog', async () => {
     const row = await openQueue()
     fireEvent.click(within(row).getByRole('button', { name: /Approve & Onboard/ }))
-    const dialog = await screen.findByRole('dialog', { name: /Approve Discovered Device/ })
+    const dialog = await screen.findByRole('dialog', { name: /Approve & Onboard/ })
     expect(within(dialog).queryByText(HELD_AGAIN_APPROVAL)).toBeNull()
   })
 })

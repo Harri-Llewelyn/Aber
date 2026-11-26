@@ -208,7 +208,7 @@ describe('the Quarantine tab', () => {
       fireEvent.click(tab(/^Quarantine/))
       const row = within(card()).getByText('Unknown_Robot').closest('tr')
       fireEvent.click(within(row).getByRole('button', { name: 'Reject' }))
-      return screen.getByRole('dialog', { name: 'Reject Device' })
+      return screen.getByRole('dialog', { name: /^Reject Device — / })
     }
 
     it('names the device and says what Reject deletes, and that it cannot be undone', async () => {

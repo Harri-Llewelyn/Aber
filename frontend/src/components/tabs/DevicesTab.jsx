@@ -90,6 +90,7 @@ import {
   IconBookOpen,
   IconCube,
   IconAlertTriangle,
+  IconCheck,
   IconPlay,
   IconDownload,
   IconRadio,
@@ -1561,6 +1562,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       {rejectTarget && (
         <ConfirmModal
           title="Reject Device"
+          subject={rejectTarget.asset_name}
           icon={<IconTrash size={18} />}
           message={
             `Reject the device '${rejectTarget.asset_name}'` +
