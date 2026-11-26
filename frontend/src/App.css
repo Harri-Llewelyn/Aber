@@ -1993,6 +1993,60 @@ tbody tr.table-group-foot:hover { background: none; }
   .table-entities-retired th:nth-child(5) { width: 23%; }
 }
 
+/* A list page's table fits its card at every width (`.table-fit`), by a query on its scroller, so a drawer
+   opening or the rail closing is a narrower card. A column marked `fit-N` needs a card of N px: below
+   that it is hidden, and the row's drawer has it. The chevron moves to the last column shown. Text breaks
+   anywhere rather than widen its column, and an id column (`fit-id`) takes its share of the card and cuts
+   its CopyableId to it. Below 880px the cells close up, and below 520px a table with no group rows wraps
+   its header labels. The steps are the cards a 1920, 1366 and 600px window give, rail open or closed,
+   drawer open or closed (frontend/README.md, Table and Row Conventions). */
+.table-wrap:has(> .table-fit) { position: relative; container: table / inline-size; }
+.table-fit td { overflow-wrap: anywhere; }
+.table-fit .fit-id { width: 20%; }
+.table-fit td.fit-id { max-width: 0; }
+.table-fit tr.row-selectable > td:not(:last-child)::after {
+  content: var(--fit-chevron, none);
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  background-color: var(--text-dim);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 5l7 7-7 7'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 5l7 7-7 7'/%3E%3C/svg%3E") center / contain no-repeat;
+  pointer-events: none;
+}
+.table-fit tr.row-selectable:hover > td::after { background-color: var(--text-primary); }
+.table-fit tr.row-selectable.row-selected > td::after { background-color: var(--accent); }
+@container table (max-width: 1399px) {
+  .table-fit .fit-1400 { display: none; }
+  .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
+}
+@container table (max-width: 1279px) {
+  .table-fit .fit-1280 { display: none; }
+  .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
+}
+@container table (max-width: 1099px) {
+  .table-fit .fit-1100 { display: none; }
+  .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
+}
+@container table (max-width: 879px) {
+  .table-fit .fit-880 { display: none; }
+  .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
+  .table-fit tr:not(.table-group-row) > :is(th, td) { padding-left: 8px; padding-right: 8px; }
+  .table-fit th { letter-spacing: 0; }
+}
+@container table (max-width: 699px) {
+  .table-fit .fit-700 { display: none; }
+  .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880, .fit-700)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
+}
+@container table (max-width: 519px) {
+  .table-fit .fit-520 { display: none; }
+  .table-fit tr.row-selectable > td:nth-last-child(1 of :not(.fit-1400, .fit-1280, .fit-1100, .fit-880, .fit-700, .fit-520)) { --fit-chevron: ""; position: relative; padding-right: 40px; }
+  .table-fit:not(:has(.table-group-row)) th { white-space: normal; }
+}
+
 /* What else a search found, between the toolbar and the table. */
 .entities-found {
   margin: 0;
