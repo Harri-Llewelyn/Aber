@@ -15,7 +15,7 @@ import {
   metricNameError,
   composeMetricName, METRIC_GROUP_SEPARATOR
 } from '../../utils/metricGroup'
-import { formatDateTime, plural } from '../../utils/format'
+import { breakAfterSeparators, formatDateTime, plural } from '../../utils/format'
 import { DERIVED_METRICS_FILE_NAME } from '../../utils/derivedMetricsFile'
 import { modelledMetrics } from '../../utils/deviceTags'
 import {
@@ -987,21 +987,24 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     }
   ].filter(Boolean)
 
-  /** The cells both tabs share, so a metric reads the same in each. */
-  const metricCells = (m) => (
+  /**
+   * The cells both tabs share, so a metric reads the same in each. The deprecated tab's narrowest card
+   * has room for Superseded By in place of Units (`superseded`).
+   */
+  const metricCells = (m, superseded = false) => (
     <>
       {/* The catalog lists measured metrics only; Deprecated lists both, so a derived one says so. */}
       <td>
-        <span className="mono">{m.name}</span>
+        <span className="mono">{breakAfterSeparators(m.name)}</span>
         {isDerived(m) && <> <DerivedTag /></>}
       </td>
       {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
-      <td className="cell-meta">{m.standard_label || m.standard || LOCAL_EXTENSION_LABEL}</td>
-      <td className="cell-meta">{m.category || '—'}</td>
-      <td className="cell-meta">{unitAndCode(unitOf(m)) || '—'}</td>
-      <td className="cell-meta">{datatypeLabel(m.datatype)}</td>
+      <td className="cell-meta fit-1280">{m.standard_label || m.standard || LOCAL_EXTENSION_LABEL}</td>
+      <td className="cell-meta fit-1400">{m.category || '—'}</td>
+      <td className={`cell-meta${superseded ? ' fit-520' : ''}`}>{unitAndCode(unitOf(m)) || '—'}</td>
+      <td className="cell-meta fit-700">{datatypeLabel(m.datatype)}</td>
       {/* Cut in the middle: the ids share a long prefix, and the end tells two apart. */}
-      <td>
+      <td className="fit-880">
         {m.semantic_id
           ? <CopyableId
               value={m.semantic_id}
@@ -1015,7 +1018,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           <div className="cell-meta">+{m.further_semantic_ids.length} further</div>
         )}
       </td>
-      <td className="cell-meta">{m.description || '—'}</td>
+      <td className="cell-meta fit-1100">{m.description || '—'}</td>
     </>
   )
 
@@ -1043,25 +1046,25 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const metricColumns = (superseded) => (
     <colgroup>
       <col className="metric-col-name" />
-      <col className="metric-col-standard" />
-      <col className="metric-col-category" />
-      <col className="metric-col-units" />
-      <col className="metric-col-datatype" />
-      <col className="metric-col-semantic-id" />
-      <col />
+      <col className="metric-col-standard fit-1280" />
+      <col className="metric-col-category fit-1400" />
+      <col className={`metric-col-units${superseded ? ' fit-520' : ''}`} />
+      <col className="metric-col-datatype fit-700" />
+      <col className="metric-col-semantic-id fit-880" />
+      <col className="fit-1100" />
       {superseded && <col className="metric-col-superseded" />}
     </colgroup>
   )
 
-  const catalogHeaders = (sort) => (
+  const catalogHeaders = (sort, superseded = false) => (
     <>
       <SortHeader sort={sort} column="name">Name</SortHeader>
-      <SortHeader sort={sort} column="standard" title="Which standard vocabulary this metric was named from">Standard</SortHeader>
-      <SortHeader sort={sort} column="category" title="MTConnect observation category">Category</SortHeader>
-      <SortHeader sort={sort} column="units">Units</SortHeader>
-      <SortHeader sort={sort} column="datatype" title="How the value is encoded on the wire">Datatype</SortHeader>
-      <SortHeader sort={sort} column="semantic_id" title="The AAS id of the concept the metric measures. A dash is a metric mapped to none, which Edit can map. A line under an id counts the further ids it carries.">Semantic ID</SortHeader>
-      <SortHeader sort={sort} column="description">Description</SortHeader>
+      <SortHeader sort={sort} column="standard" className="fit-1280" title="Which standard vocabulary this metric was named from">Standard</SortHeader>
+      <SortHeader sort={sort} column="category" className="fit-1400" title="MTConnect observation category">Category</SortHeader>
+      <SortHeader sort={sort} column="units" className={superseded ? 'fit-520' : undefined}>Units</SortHeader>
+      <SortHeader sort={sort} column="datatype" className="fit-700" title="How the value is encoded on the wire">Datatype</SortHeader>
+      <SortHeader sort={sort} column="semantic_id" className="fit-880" title="The AAS id of the concept the metric measures. A dash is a metric mapped to none, which Edit can map. A line under an id counts the further ids it carries.">Semantic ID</SortHeader>
+      <SortHeader sort={sort} column="description" className="fit-1100">Description</SortHeader>
     </>
   )
 
@@ -1159,7 +1162,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 />
               ) : (
                 <div className="table-wrap">
-                  <table className="metric-table">
+                  <table className="table-fit metric-table">
                     {metricColumns(false)}
                     <thead><tr>{catalogHeaders(catalogSort)}</tr></thead>
                     {catalogGroups.map((group, i) => {
@@ -1260,14 +1263,14 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 />
               ) : (
                 <div className="table-wrap">
-                  <table className="metric-table metric-table-derived">
+                  <table className="table-fit metric-table">
                     <colgroup>
                       <col className="automation-select" />
                       <col className="metric-col-name" />
-                      <col className="metric-col-kind" />
+                      <col className="metric-col-kind fit-880" />
                       <col />
-                      <col className="metric-col-units" />
-                      <col className="metric-col-description" />
+                      <col className="metric-col-units fit-700" />
+                      <col className="metric-col-description fit-1100" />
                     </colgroup>
                     <thead>
                       <tr>
@@ -1281,10 +1284,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                           />
                         </th>
                         <SortHeader sort={derivedSort} column="name">Name</SortHeader>
-                        <SortHeader sort={derivedSort} column="kind" title="How the value is computed">Kind</SortHeader>
+                        <SortHeader sort={derivedSort} column="kind" className="fit-880" title="How the value is computed">Kind</SortHeader>
                         <SortHeader sort={derivedSort} column="definition" title="The metrics it is computed from, and how. A definition cannot change once saved.">Definition</SortHeader>
-                        <SortHeader sort={derivedSort} column="units" title="Follows the inputs: a rate is the counter's unit per hour, a share of time has none">Units</SortHeader>
-                        <SortHeader sort={derivedSort} column="description">Description</SortHeader>
+                        <SortHeader sort={derivedSort} column="units" className="fit-700" title="Follows the inputs: a rate is the counter's unit per hour, a share of time has none">Units</SortHeader>
+                        <SortHeader sort={derivedSort} column="description" className="fit-1100">Description</SortHeader>
                       </tr>
                     </thead>
                     <tbody>
@@ -1298,11 +1301,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                               onChange={() => yaml.toggle(m.metric_uuid)}
                             />
                           </td>
-                          <td><span className="mono">{m.name}</span></td>
-                          <td className="cell-meta">{kindLabel(m.derivation.kind)}</td>
+                          <td><span className="mono">{breakAfterSeparators(m.name)}</span></td>
+                          <td className="cell-meta fit-880">{kindLabel(m.derivation.kind)}</td>
                           <td><Definition derivation={m.derivation} /></td>
-                          <td className="cell-meta">{unitAndCode(unitOf(m)) || '—'}</td>
-                          <td className="cell-meta">{m.description || '—'}</td>
+                          <td className="cell-meta fit-700">{unitAndCode(unitOf(m)) || '—'}</td>
+                          <td className="cell-meta fit-1100">{m.description || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1320,11 +1323,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 <EmptyState icon={<IconArchive size={36} />} message="No metric is deprecated." />
               ) : (
                 <div className="table-wrap">
-                  <table className="metric-table metric-table-deprecated">
+                  <table className="table-fit metric-table">
                     {metricColumns(true)}
                     <thead>
                       <tr>
-                        {catalogHeaders(deprecatedSort)}
+                        {catalogHeaders(deprecatedSort, true)}
                         <SortHeader sort={deprecatedSort} column="superseded_by" title="The metric named as its replacement when it was deprecated, or a dash where none was.">Superseded By</SortHeader>
                       </tr>
                     </thead>
@@ -1333,10 +1336,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                         const replacement = m.superseded_by ? metricById.get(m.superseded_by) : null
                         return (
                           <tr key={m.metric_uuid} {...rowProps(m)}>
-                            {metricCells(m)}
+                            {metricCells(m, true)}
                             <td>
                               {replacement
-                                ? <span className="mono">{replacement.name}</span>
+                                ? <span className="mono">{breakAfterSeparators(replacement.name)}</span>
                                 : <span className="cell-meta">—</span>}
                             </td>
                           </tr>
@@ -1374,22 +1377,22 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 />
               ) : (
                 <div className="table-wrap">
-                  <table className="metric-table metric-table-uncatalogued">
+                  <table className="table-fit metric-table metric-table-uncatalogued">
                     <colgroup>
                       <col className="metric-col-name" />
-                      <col className="metric-col-count" />
+                      <col className="metric-col-count fit-1100" />
                       <col />
-                      <col className="metric-col-datatype" />
-                      <col className="metric-col-declared" />
+                      <col className="metric-col-datatype fit-700" />
+                      <col className="metric-col-declared fit-880" />
                       {canManageSchema && <col className="metric-col-action" />}
                     </colgroup>
                     <thead>
                       <tr>
                         <SortHeader sort={uncataloguedSort} column="name">Name</SortHeader>
-                        <SortHeader sort={uncataloguedSort} column="devices" title="How many devices declare this name">Devices</SortHeader>
+                        <SortHeader sort={uncataloguedSort} column="devices" className="fit-1100" title="How many devices declare this name">Devices</SortHeader>
                         <ColumnHeader title="The devices that declare it. Each opens on the Devices page.">Declared By</ColumnHeader>
-                        <SortHeader sort={uncataloguedSort} column="datatype" title="The datatype the devices' births gave it. A dash means none gave it a value; several mean they disagree.">Datatype</SortHeader>
-                        <SortHeader sort={uncataloguedSort} column="last_declared" title="The latest birth that changed what one of these devices declares. A rebirth declaring the same names does not count.">Last Declared</SortHeader>
+                        <SortHeader sort={uncataloguedSort} column="datatype" className="fit-700" title="The datatype the devices' births gave it. A dash means none gave it a value; several mean they disagree.">Datatype</SortHeader>
+                        <SortHeader sort={uncataloguedSort} column="last_declared" className="fit-880" title="The latest birth that changed what one of these devices declares. A rebirth declaring the same names does not count.">Last Declared</SortHeader>
                         {canManageSchema && <th className="row-actions" aria-label="Actions" />}
                       </tr>
                     </thead>
@@ -1402,10 +1405,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                         const nameProblem = metricNameError(u.metric_name)
                         return (
                           <tr key={u.metric_name}>
-                            <td><span className="mono">{u.metric_name.split('/').map((part, i, all) => (
-                              <React.Fragment key={i}>{part}{i < all.length - 1 && <>/<wbr /></>}</React.Fragment>
-                            ))}</span></td>
-                            <td className="cell-meta">{u.device_count}</td>
+                            <td><span className="mono">{breakAfterSeparators(u.metric_name)}</span></td>
+                            <td className="cell-meta fit-1100">{u.device_count}</td>
                             <td>
                               <div className="context-device-list">
                                 {(showAll ? devices : devices.slice(0, UNCATALOGUED_DEVICES_SHOWN)).map(d => (
@@ -1431,10 +1432,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                                 )}
                               </div>
                             </td>
-                            <td className="cell-meta">
+                            <td className="cell-meta fit-700">
                               {datatypes.length ? datatypes.map(datatypeLabel).join(', ') : '—'}
                             </td>
-                            <td className="cell-meta">{formatDateTime(u.last_declared_at)}</td>
+                            <td className="cell-meta fit-880">{formatDateTime(u.last_declared_at)}</td>
                             {canManageSchema && (
                               <td className="row-actions">
                                 <Tooltip text={nameProblem

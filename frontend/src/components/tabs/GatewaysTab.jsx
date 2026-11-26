@@ -16,6 +16,7 @@ import {
   gatewayGroupMismatch
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId, sparkplugGroupProblem } from '../../utils/sparkplugId'
+import { breakAfterSeparators } from '../../utils/format'
 import {
   GATEWAY_TYPES, SELECTABLE_TYPES, LISTED_TYPES, gatewayType, gatewayTypeFields,
   gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone, credentialIssuedHere,
@@ -625,8 +626,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // The seeded Playback gateway does not count, so a new install still prompts under its row.
   const hasOwnGateway = gateways.some(g => !isShadowGateway(g))
   const isFiltered = hasOwnGateway || activeFilterCount > 0
-  // With the drawer open, the columns it repeats are dropped so the table fits beside it.
-  const compact = !!selected
 
   // The panel's one primary: setup while pending, else the console, else Restore when archived,
   // else Edit. The Playback gateway cannot be edited, so its credential takes Edit's place.
@@ -803,16 +802,17 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
          ) : (
            <>
            <div className="table-wrap">
-             <table>
+             {/* Fits its card: a column the card has no room for goes, and the drawer has it (App.css). */}
+             <table className="table-fit table-gateways">
                <thead>
                  <tr>
                    <SortHeader sort={sort} column="name">Gateway Name</SortHeader>
-                   {!compact && <SortHeader sort={sort} column="uuid" title="The id to quote in a query, a ticket or an API call. The Sparkplug edge node id is derived from it.">Gateway UUID</SortHeader>}
-                   <SortHeader sort={sort} column="type" title={"Remote: an appliance on the plant network. Third-party: an edge node Aber does not manage. Host: inside this stack. Simulated: generated readings. Playback: republished captures."}>Type</SortHeader>
-                   <SortHeader sort={sort} column="location" title="The cell, area or site it serves; a dash for a simulated or playback one. Devices set to Follow Gateway take it.">Location</SortHeader>
+                   <SortHeader sort={sort} column="uuid" className="fit-id fit-520" title="The id to quote in a query, a ticket or an API call. The Sparkplug edge node id is derived from it.">Gateway UUID</SortHeader>
+                   <SortHeader sort={sort} column="type" className="fit-1280" title={"Remote: an appliance on the plant network. Third-party: an edge node Aber does not manage. Host: inside this stack. Simulated: generated readings. Playback: republished captures."}>Type</SortHeader>
+                   <SortHeader sort={sort} column="location" className="fit-1400" title="The cell, area or site it serves; a dash for a simulated or playback one. Devices set to Follow Gateway take it.">Location</SortHeader>
                    <SortHeader sort={sort} column="status" title="What the gateway last reported, shown as Stale once its heartbeat is over 90 seconds old">Gateway Status</SortHeader>
-                   <SortHeader sort={sort} column="last_heartbeat" title="How long since the edge node's last Sparkplug B node message: its birth, data or death.">Last Heartbeat</SortHeader>
-                   {!compact && <SortHeader sort={sort} column="devices" title="The devices this gateway serves. The summary counts them by state; archived ones are listed, not counted.">Devices</SortHeader>}
+                   <SortHeader sort={sort} column="last_heartbeat" className="fit-700" title="How long since the edge node's last Sparkplug B node message: its birth, data or death.">Last Heartbeat</SortHeader>
+                   <SortHeader sort={sort} column="devices" className="fit-1100" title="The devices this gateway serves. The summary counts them by state; archived ones are listed, not counted.">Devices</SortHeader>
                  </tr>
                </thead>
                <tbody>
@@ -838,7 +838,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                          }}
                        >
                          <td>
-                           <strong>{g.gateway_name}</strong>
+                           <strong>{breakAfterSeparators(g.gateway_name)}</strong>
                            {/* A state, not a kind: a gateway of any type can be archived. */}
                            {g.is_archived && (
                              <ArchivedBadge size="sm" className="gateway-name-badge" title="Archived: out of service. Restore it from its drawer." />
@@ -851,13 +851,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                              </Tooltip>
                            )}
                          </td>
-                         {!compact && <td><CopyableId value={g.gateway_id} label="Gateway UUID" onNotify={showToast} /></td>}
-                         <td>
+                         <td className="fit-id fit-520"><CopyableId value={g.gateway_id} label="Gateway UUID" onNotify={showToast} /></td>
+                         <td className="fit-1280">
                            <Badge tone={gatewayTypeTone(type)} size="sm">
                              {gatewayTypeLabel(type)}
                            </Badge>
                          </td>
-                         <td>
+                         <td className="fit-1400">
                            {/* Four answers, the first being that the question does not apply: a
                                simulated gateway cannot hold a cell, so its stored scope is inert and
                                not printed. Site-Wide is an answer for every other gateway and must
@@ -884,11 +884,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                              )}
                          </td>
                          <Tooltip text={g.last_heartbeat ? new Date(g.last_heartbeat).toLocaleString() : null}>
-                           <td className={`cell-meta${liveStatus === 'STALE' ? ' gateway-cell-warning' : ''}`}>
+                           <td className={`cell-meta fit-700${liveStatus === 'STALE' ? ' gateway-cell-warning' : ''}`}>
                              {formatHeartbeat(g.last_heartbeat)}
                            </td>
                          </Tooltip>
-                         {!compact && <td>
+                         <td className="fit-1100">
                            {g.is_archived ? (
                              <span className="cell-meta">—</span>
                            ) : gwAssets.length === 0 ? (
@@ -899,7 +899,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                                 answers, and a quarantined device because it calls for action. */
                              <TagList limit={3} tags={deviceColumnTags(gwAssets, countedDevices(gwAssets))} />
                            )}
-                         </td>}
+                         </td>
                        </tr>
                      </React.Fragment>
                    )

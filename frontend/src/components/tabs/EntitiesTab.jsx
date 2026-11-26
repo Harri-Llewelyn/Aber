@@ -41,7 +41,7 @@ import {
   nextPurge, purgeIsHeld, purgeIsSoon, retiredRow, variantBadge,
 } from '../../utils/entities'
 import { KIND_ICONS } from '../../utils/entityPages'
-import { formatDate, formatDateTime, plural } from '../../utils/format'
+import { breakAfterSeparators, formatDate, formatDateTime, plural } from '../../utils/format'
 
 /** The three states, in tab order (navigation.jsx). The description is the tab's tooltip; the help page has the rest. */
 export const STAGES = ENTITIES_TABS
@@ -619,7 +619,7 @@ const ActiveRow = memo(function ActiveRow({ row, selected, onSelect, notify }) {
   return (
     <tr {...opensDrawer(row, selected, onSelect)}>
       <td>
-        <strong>{row.name || '—'}</strong>
+        <strong>{row.name ? breakAfterSeparators(row.name) : '—'}</strong>
         {badge && <Badge size="sm" tone={badge.tone} title={badge.title} className="badge-follow">{badge.label}</Badge>}
       </td>
       <td><CopyableId value={row.id} label="uuid" onNotify={notify} /></td>
@@ -637,7 +637,7 @@ const ArchivedRow = memo(function ArchivedRow({ row, selected, onSelect, notify,
   return (
     <tr {...opensDrawer(row, selected, onSelect)}>
       <td>
-        <strong>{row.name || '—'}</strong>
+        <strong>{row.name ? breakAfterSeparators(row.name) : '—'}</strong>
         {latestExport && (
           <Tooltip text={`A bundle of this device was taken ${formatDateTime(latestExport.taken_at)} and is kept beside the cold tier`}>
             <div className="cell-meta">Exported {formatDate(latestExport.taken_at)}</div>
@@ -662,7 +662,7 @@ const ArchivedRow = memo(function ArchivedRow({ row, selected, onSelect, notify,
 const RetiredRow = memo(function RetiredRow({ row, selected, onSelect, notify }) {
   return (
     <tr {...opensDrawer(row, selected, onSelect)}>
-      <td><strong>{row.name || '—'}</strong></td>
+      <td><strong>{row.name ? breakAfterSeparators(row.name) : '—'}</strong></td>
       <td><CopyableId value={row.id} label="uuid" onNotify={notify} /></td>
       <Tooltip text={row.archived_at ? `Archived ${formatDateTime(row.archived_at)}` : null}>
         <td className="cell-meta">{formatDateTime(row.retired_at)}</td>

@@ -474,20 +474,18 @@ describe('the Gateways list', () => {
     expect(panelOpen()).toBe(false)
   })
 
-  it('drops the columns the drawer repeats while it is open, and puts them back on close', async () => {
+  it('keeps its columns while the drawer is open: the card\'s width decides which show', async () => {
     await open([live()])
     const headers = () => [...document.querySelectorAll('thead th')].map(th => th.textContent)
-    expect(headers()).toContain('Gateway UUID')
-    expect(headers()).toContain('Devices')
+    const before = headers()
+    expect(before).toContain('Gateway UUID')
+    expect(before).toContain('Devices')
 
+    // The drawer narrows the card, and the table's query hides what it has no room for
+    // (tablesFitTheirCards.test.jsx); the drawer shows both.
     fireEvent.click(rowNamed('Host_Gateway_NodeRED').querySelector('td strong'))
-    expect(headers()).not.toContain('Gateway UUID')
-    expect(headers()).not.toContain('Devices')
-    // Every row drops the same cells, so the columns stay aligned.
+    expect(headers()).toEqual(before)
     expect(rowNamed('Host_Gateway_NodeRED').querySelectorAll('td')).toHaveLength(headers().length)
-
-    fireEvent.click(rowNamed('Host_Gateway_NodeRED').querySelector('td strong'))
-    expect(headers()).toContain('Gateway UUID')
   })
 
   it('scrolls inside its card', async () => {

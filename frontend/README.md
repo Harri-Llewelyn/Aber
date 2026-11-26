@@ -3840,9 +3840,52 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
 
 ## Table and Row Conventions
 
-- **Constrain cells holding variable-length data.** `.table-wrap` scrolls horizontally, so an
-  unconstrained cell pushes the row's action buttons off-screen. This has bitten the quarantine
-  queue twice.
+- **A list page's table fits its card at every width** (#1671). Nothing scrolls sideways: a column
+  the card has no room for is hidden, and the row's drawer, which has every field, shows it. The table
+  takes `table-fit` (`App.css`), which makes its `.table-wrap` a container, so the steps below are
+  read from the card and not the window: a drawer opening or the rail closing is a narrower card.
+  - **A column marked `fit-N` needs a card of N px**, and is hidden below it, header and cells alike.
+    The steps are 1400, 1280, 1100, 880, 700 and 520: the cards a 1920, 1366 and 600px window give,
+    rail open or closed, drawer open or closed. The chevron moves to the last column shown.
+  - **The name, the status and the page's key column stay.** An id column (`fit-id`) takes a fifth
+    of the card, and its `CopyableId` is cut to it, ending in an ellipsis; its tooltip and the drawer
+    have the whole of it. Below 520px an id goes to the drawer too: a cut id would show three
+    characters.
+  - **Text breaks anywhere** rather than widen its column. A name or an id in the name column breaks
+    after its separators first (`_ - . / :`, `breakAfterSeparators()` in `utils/format.js`, a `<wbr>`
+    each, so it reads and copies as written), and inside a word only where a part is still longer than
+    the cell. Below 880px the cells close up to 8px, and below 520px a table with no group rows wraps its
+    header labels.
+  - **A table with a grid of its own** (the Metrics tables' colgroup) hides its `<col>` with the
+    column and narrows the columns left in the same steps (`.metric-col-*`), so its tabs still line up.
+    When Description goes, the name takes what it left. The Entities tables keep their own query
+    (`@container entities`), and below 520px they too send the UUID to the drawer.
+  - **A table with group rows** (Metric Catalog, Entities) keeps a hidden column in its grid at no
+    width, out of sight, rather than taking it out: a group row spans every column, and a column taken
+    out leaves the span a phantom one at the end, which takes the room the others should have.
+  - `tablesFitTheirCards.test.jsx` holds each list page's table to the table below: its header and
+    every cell of a column carry the same step, and the steps are App.css's. Whether a table fits is
+    measured in a browser; jsdom lays nothing out.
+
+  | Page | Table | Stays | Hidden below 1400 | 1280 | 1100 | 880 | 700 | 520 |
+  | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+  | Gateways | gateways | Gateway Name, Gateway Status | Location | Type | Devices | | Last Heartbeat | Gateway UUID |
+  | Cells | cells | Cell Name, Area | | | Assigned Gateways | | Devices | Cell UUID |
+  | Devices | Registered | Name, Status | | | | | Metric groups | Device UUID, Cell |
+  | Schemas | schemas | Schema Name, Version, Devices | | | | | Change Description | Schema UUID |
+  | Metrics | Metric Catalog | Name, Units | Category | Standard | Description | Semantic ID | Datatype | |
+  | Metrics | Deprecated Metrics | Name, Superseded By | Category | Standard | Description | Semantic ID | Datatype | Units |
+  | Metrics | Derived | Name, Definition | | | Description | Kind | Units | |
+  | Metrics | Uncatalogued | Name, Declared By | | | Devices | Last Declared | Datatype | |
+  | Automations | automations | Automation, Enabled, Firing now | | | | Applies because | Last fired | Watches |
+  | Capture | Gateways | Gateway, Stored capture | | | | Type | | Sparkplug ID |
+  | Capture | Devices | Device, Stored capture | | | Gateway | Type | | Sparkplug ID |
+  | Areas | areas | Area, Devices | | | | | Cells | Plan |
+  | Vocabulary | Imported | Vocabulary, Actions | | | Imported by, Imported | Concepts, In use | What it is, Version | Definitions |
+
+  Uncatalogued and Imported rows have no drawer: a hidden column there is out of sight until the card
+  widens. Automations' rows open the automation's
+  own page, which has every field.
 - **Every table header, group band and section band is one opaque colour, `--bg-base`**, sticky or
   not. A tint (`--bg-glass`, or the card colour mixed with text) was tried and either vanished on a
   white card or showed rows through a pinned header. A header never takes an inline background.

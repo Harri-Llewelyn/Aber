@@ -25,7 +25,7 @@ import { BuiltInAlerts } from './BuiltInAlerts'
 import { AUTOMATIONS_TABS, tabHref } from '../../navigation'
 import { renderAutomationsYaml } from '../../utils/automationYaml'
 import { downloadBlob } from '../../utils/downloadBlob'
-import { formatDateTime, formatRelative, plural } from '../../utils/format'
+import { breakAfterSeparators, formatDateTime, formatRelative, plural } from '../../utils/format'
 import { isUuid } from '../../utils/isUuid'
 import { severityOf } from '../../utils/alertHistory'
 import {
@@ -209,7 +209,8 @@ function AutomationList({ showToast, canWrite, onExport, onUpload, version }) {
         />
       ) : (
         <div className="table-wrap">
-          <table>
+          {/* Fits its card: a column the card has no room for goes; the automation's own page has it (App.css). */}
+          <table className="table-fit table-automations">
             <caption className="sr-only">Automations, with what each watches and whether it is firing</caption>
             <thead>
               <tr>
@@ -223,11 +224,11 @@ function AutomationList({ showToast, canWrite, onExport, onUpload, version }) {
                   />
                 </th>
                 <SortHeader sort={sort} column="alias" title="The name each automation is given, with its id under it">Automation</SortHeader>
-                <ColumnHeader title="What its triggers watch, in words. Open the automation to read them in full.">Watches</ColumnHeader>
-                {entity && <ColumnHeader title="Why the automation applies to this entity">Applies because</ColumnHeader>}
+                <ColumnHeader className="automation-summary fit-520" title="What its triggers watch, in words. Open the automation to read them in full.">Watches</ColumnHeader>
+                {entity && <ColumnHeader className="fit-880" title="Why the automation applies to this entity">Applies because</ColumnHeader>}
                 <SortHeader sort={sort} column="enabled" title="Whether it is evaluated. Turning one off resolves its open alerts.">Enabled</SortHeader>
                 <SortHeader sort={sort} column="firing" title="How many alerts it is raising now, one for each device that breaches">Firing now</SortHeader>
-                <SortHeader sort={sort} column="last" title="When it last raised an alert">Last fired</SortHeader>
+                <SortHeader sort={sort} column="last" className="fit-700" title="When it last raised an alert">Last fired</SortHeader>
               </tr>
             </thead>
             <tbody>
@@ -245,17 +246,17 @@ function AutomationList({ showToast, canWrite, onExport, onUpload, version }) {
                     </td>
                     <td>
                       <RouteLink to={automationUrl(e.key)} className="count-link" title={`Open ${e.alias}`}>
-                        <strong>{e.alias}</strong>
+                        <strong>{breakAfterSeparators(e.alias)}</strong>
                       </RouteLink>
-                      <div className="cell-meta mono">{e.key}</div>
+                      <div className="cell-meta mono">{breakAfterSeparators(e.key)}</div>
                     </td>
-                    <td className="automation-summary">
+                    <td className="automation-summary fit-520">
                       <Tooltip text={e.summary}>
                         <span tabIndex={0} className="automation-summary-text"><OverflowText>{e.summary}</OverflowText></span>
                       </Tooltip>
                     </td>
                     {entity && (
-                      <td>
+                      <td className="fit-880">
                         {(entity.reasons.get(e.key) || []).map(reason => (
                           <Tooltip key={reason} text={APPLIES_BECAUSE[reason]?.title}>
                             <span className="badge badge-sm badge-neutral automation-reason" tabIndex={0}>{APPLIES_BECAUSE[reason]?.label ?? reason}</span>
@@ -283,7 +284,7 @@ function AutomationList({ showToast, canWrite, onExport, onUpload, version }) {
                         ? <span className={`badge badge-sm badge-${severityOf(worst).tone}`}>{e.firing.length} firing</span>
                         : <span className="cell-meta">—</span>}
                     </td>
-                    <td className="cell-meta">
+                    <td className="cell-meta fit-700">
                       {e.lastFiredAt
                         ? <Tooltip text={formatDateTime(e.lastFiredAt)}><span tabIndex={0}>{formatRelative(e.lastFiredAt)}</span></Tooltip>
                         : 'Never'}

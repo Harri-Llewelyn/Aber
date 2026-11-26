@@ -40,7 +40,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { CAPTURE_FILE, CAPTURE_FILE_LIMIT } from '../../utils/captureFile'
-import { formatBytes, formatDateTime, formatDuration, plural } from '../../utils/format'
+import { breakAfterSeparators, formatBytes, formatDateTime, formatDuration, plural } from '../../utils/format'
 
 // Role checks, as the RLS makes them (`has_role`), not a permission; the title names the same list.
 const WRITE_ROLES = ['Administrator', 'Shopfloor_Manager']
@@ -586,7 +586,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             />
           ) : (
           <div className="table-wrap">
-            <table>
+            {/* Fits its card: a column the card has no room for goes, and the drawer has it (App.css). */}
+            <table className="table-fit">
               <thead>
                 <tr>
                   <SortHeader sort={sort} column="name" title={subjectKind === 'gateway'
@@ -595,14 +596,14 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                     {subjectKind === 'gateway' ? 'Gateway' : 'Device'}
                   </SortHeader>
                   {subjectKind === 'device' && (
-                    <SortHeader sort={sort} column="gateway" title="The edge node it publishes through. A capture of the device also records that node's birth certificate.">
+                    <SortHeader sort={sort} column="gateway" className="fit-1100" title="The edge node it publishes through. A capture of the device also records that node's birth certificate.">
                       Gateway
                     </SortHeader>
                   )}
-                  <SortHeader sort={sort} column="sparkplug_id" title="The ID Aber issued. A capture is filed under it, and playback rewrites it onto the target's own assets">
+                  <SortHeader sort={sort} column="sparkplug_id" className="fit-id fit-520" title="The ID Aber issued. A capture is filed under it, and playback rewrites it onto the target's own assets">
                     Sparkplug ID
                   </SortHeader>
-                  <SortHeader sort={sort} column="type" title={"Remote: an appliance on the plant network. Third-party: an edge node Aber does not manage. Host: inside this stack. Simulated: generated readings."}>
+                  <SortHeader sort={sort} column="type" className="fit-880" title={"Remote: an appliance on the plant network. Third-party: an edge node Aber does not manage. Host: inside this stack. Simulated: generated readings."}>
                     Type
                   </SortHeader>
                   <SortHeader sort={sort} column="stored" title="The one capture stored for this subject. Recording again replaces it">
@@ -1327,13 +1328,13 @@ function SubjectRow({ row, selected, onSelect }) {
         onSelect()
       }}
     >
-      <td>{row.name}</td>
+      <td>{breakAfterSeparators(row.name)}</td>
       {row.kind === 'device' && (
-        <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{row.context}</td>
+        <td className="fit-1100" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{breakAfterSeparators(row.context)}</td>
       )}
-      <td><CopyableId value={row.sparkplugId} label="Sparkplug ID" /></td>
+      <td className="fit-id fit-520"><CopyableId value={row.sparkplugId} label="Sparkplug ID" /></td>
       {/* A column rather than a badge on the name, matching the Gateways page. */}
-      <td>
+      <td className="fit-880">
         <Badge tone={gatewayTypeTone(row.type)} size="sm">
           {gatewayTypeLabel(row.type)}
         </Badge>

@@ -54,7 +54,7 @@ import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
-import { plural } from '../../utils/format'
+import { breakAfterSeparators, plural } from '../../utils/format'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
 import { inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { alertIndex, alertForDevice, alertState } from '../../utils/alertSubjects'
@@ -411,7 +411,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           />
         ) : (
           <div className="table-wrap">
-            <table>
+            {/* Fits its card: a column the card has no room for goes, and the drawer has it (App.css). */}
+            <table className="table-fit">
               <thead>
                 <tr>
                   {/* The cell's own glyph, chosen in the New Cell form. Its header is a
@@ -419,9 +420,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
                   <SortHeader sort={sort} column="name">Cell Name</SortHeader>
                   <SortHeader sort={sort} column="area" title="The ISA-95 area the cell is in, and whether it has a place on its plan. Edit Details files or places it.">Area</SortHeader>
-                  <SortHeader sort={sort} column="uuid">Cell UUID</SortHeader>
-                  <SortHeader sort={sort} column="gateways">Assigned Gateways</SortHeader>
-                  <SortHeader sort={sort} column="devices" title="Devices in this cell — its gateways' devices, plus any device filed here explicitly. Archived ones are listed, not counted.">Devices</SortHeader>
+                  <SortHeader sort={sort} column="uuid" className="fit-id fit-520">Cell UUID</SortHeader>
+                  <SortHeader sort={sort} column="gateways" className="fit-1100">Assigned Gateways</SortHeader>
+                  <SortHeader sort={sort} column="devices" className="fit-700" title="Devices in this cell — its gateways' devices, plus any device filed here explicitly. Archived ones are listed, not counted.">Devices</SortHeader>
                 </tr>
               </thead>
               <tbody>
@@ -442,7 +443,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                     >
                       <td className="cell-icon-col"><CellIcon cell={c} size={16} /></td>
                       <td>
-                        <strong>{c.cell_name}</strong>
+                        <strong>{breakAfterSeparators(c.cell_name)}</strong>
                         {c.description && <div className="cell-meta">{c.description}</div>}
                         {c.is_archived && (
                           <ArchivedBadge size="sm" className="badge-follow" title="Archived: out of service, with no devices or gateways in it" />
@@ -466,8 +467,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                           </div>
                         )}
                       </td>
-                      <td><CopyableId value={c.cell_id} label="cell UUID" onNotify={showToast} /></td>
-                      <td>
+                      <td className="fit-id fit-520"><CopyableId value={c.cell_id} label="cell UUID" onNotify={showToast} /></td>
+                      <td className="fit-1100">
                         {cellGateways.length === 0 ? (
                           <span className="cell-meta">No gateways assigned</span>
                         ) : (
@@ -488,7 +489,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                           />
                         )}
                       </td>
-                      <td>
+                      <td className="fit-700">
                         {cellAssets.length === 0 ? (
                           <span className="cell-meta">No devices here</span>
                         ) : (

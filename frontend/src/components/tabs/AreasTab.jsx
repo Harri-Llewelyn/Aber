@@ -42,7 +42,7 @@ import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
-import { plural } from '../../utils/format'
+import { breakAfterSeparators, plural } from '../../utils/format'
 import { AreaPlanPanel } from '../common/AreaPlanPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -412,13 +412,14 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           />
         ) : (
           <div className="table-wrap">
-            <table>
+            {/* Fits its card: a column the card has no room for goes, and the drawer has it (App.css). */}
+            <table className="table-fit">
               <thead>
                 <tr>
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
                   <SortHeader sort={sort} column="name" title="Also the area's segment of every topic beneath it in the Unified Namespace.">Area</SortHeader>
-                  <SortHeader sort={sort} column="plan" title="Whether the area has an SVG plan for the Site Map to draw. Without one it draws a default outline.">Plan</SortHeader>
-                  <SortHeader sort={sort} column="cells">Cells</SortHeader>
+                  <SortHeader sort={sort} column="plan" className="fit-520" title="Whether the area has an SVG plan for the Site Map to draw. Without one it draws a default outline.">Plan</SortHeader>
+                  <SortHeader sort={sort} column="cells" className="fit-700">Cells</SortHeader>
                   <SortHeader sort={sort} column="devices" title="Devices in service in this area: in its cells, or Area-Wide in it. Area-Wide says how many of them belong to no one cell.">Devices</SortHeader>
                 </tr>
               </thead>
@@ -439,13 +440,13 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                     >
                       <td className="cell-icon-col"><AreaIcon area={a} size={16} /></td>
                       <td>
-                        <strong>{a.area_name}</strong>
+                        <strong>{breakAfterSeparators(a.area_name)}</strong>
                         {a.is_archived && (
                           <ArchivedBadge size="sm" className="badge-follow" title="Archived: its cells are still filed here and its topics are unchanged" />
                         )}
                         {a.description && <div className="cell-meta">{a.description}</div>}
                       </td>
-                      <td>
+                      <td className="fit-520">
                         <Badge size="sm">
                           {a.plan_path ? 'Plan' : 'Default outline'}
                         </Badge>
@@ -453,7 +454,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                           {placed === 0 ? 'No cells placed' : `${plural(placed, 'cell')} placed`}
                         </div>
                       </td>
-                      <td>
+                      <td className="fit-700">
                         {areaCells.length === 0 ? (
                           <span className="cell-meta">No cells filed here</span>
                         ) : (

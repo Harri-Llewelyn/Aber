@@ -18,6 +18,8 @@ Open **Automations** in the sidebar. It has a group of its own, under **Vocabula
 
 **Search** comes first in the toolbar. It matches a name, an id, a description, a metric and a device's name. A heading sorts the table, and the address keeps the order.
 
+The table fits the window. With less room, it hides **Last fired** first, then **Watches**. A list of one entity's automations hides **Applies because** before either. Open the automation to read them.
+
 Tick the box at the start of a row to pick it for **Export**.
 
 ## The Built-in tab

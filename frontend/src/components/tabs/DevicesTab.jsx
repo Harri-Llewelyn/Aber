@@ -10,7 +10,7 @@ import { trackRequest } from '../../lib/apiActivity'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
-import { formatDateTime, formatRelative, plural } from '../../utils/format'
+import { breakAfterSeparators, formatDateTime, formatRelative, plural } from '../../utils/format'
 import { namesListed } from '../../utils/drawerWarnings'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
@@ -1115,14 +1115,15 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
            />
          ) : (
           <div className="table-wrap">
-            <table>
+            {/* Fits its card: a column the card has no room for goes, and the drawer has it (App.css). */}
+            <table className="table-fit">
               <thead>
                 <tr>
                   <SortHeader sort={rosterSort} column="name">Name</SortHeader>
-                  <SortHeader sort={rosterSort} column="uuid" title="The id to quote in a query, a ticket or an API call. The Sparkplug id is derived from it.">Device UUID</SortHeader>
+                  <SortHeader sort={rosterSort} column="uuid" className="fit-id fit-520" title="The id to quote in a query, a ticket or an API call. The Sparkplug id is derived from it.">Device UUID</SortHeader>
                   <SortHeader sort={rosterSort} column="status" title="Its lifecycle state, any alert, and any finding. Sorts by the alert, then the lifecycle state.">Status</SortHeader>
-                  <SortHeader sort={rosterSort} column="group" style={{ width: 'auto' }} title="The metric groups the device's schemas model: the part of each metric name before its first /.">Metric groups</SortHeader>
-                  <SortHeader sort={rosterSort} column="cell" title="The device's own cell if it has one, otherwise its gateway's. A cell set on the device stays if the gateway moves.">Cell</SortHeader>
+                  <SortHeader sort={rosterSort} column="group" className="fit-700" style={{ width: 'auto' }} title="The metric groups the device's schemas model: the part of each metric name before its first /.">Metric groups</SortHeader>
+                  <SortHeader sort={rosterSort} column="cell" className="fit-520" title="The device's own cell if it has one, otherwise its gateway's. A cell set on the device stays if the gateway moves.">Cell</SortHeader>
                 </tr>
               </thead>
               <tbody>
@@ -1144,7 +1145,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         }}
                       >
                         <td>
-                          <strong>{a.asset_name}</strong>
+                          <strong>{breakAfterSeparators(a.asset_name)}</strong>
                           {/* Marked whenever shown, because the toggle that revealed it is a filter
                               and filters are forgotten. The badge answers whether a reading
                               happened, wherever the row is seen. */}
@@ -1158,7 +1159,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                             <ArchivedBadge size="sm" className="cell-tag" />
                           )}
                         </td>
-                        <td>
+                        <td className="fit-id fit-520">
                           <CopyableId value={a.asset_id} label="Device UUID" onNotify={showToast} />
                         </td>
                         <td>
@@ -1197,7 +1198,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                             })()
                           )}
                         </td>
-                        <td>
+                        <td className="fit-700">
                           {(() => {
                             const tags = deviceTagList(a, schemasForDevice(a, schemas))
                             if (tags.length === 0) return '—'
@@ -1210,7 +1211,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                             }))} />
                           })()}
                         </td>
-                        <td style={{ maxWidth: '170px' }}>
+                        <td className="fit-520" style={{ maxWidth: '170px' }}>
                           {(() => {
                             // The resolved cell and how it was resolved: following the gateway and
                             // set-on-device behave differently when the gateway is reassigned.

@@ -7,7 +7,7 @@ import { useOpenGroups } from '../../hooks/useOpenGroups'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { useUrlState } from '../../hooks/useUrlState'
 import { siteVocabularyUrl } from '../../routes'
-import { formatDateTime, plural } from '../../utils/format'
+import { breakAfterSeparators, formatDateTime, plural } from '../../utils/format'
 import {
   vocabularyLabel, conceptTooltip, metricsUsing, SOURCE_FORMAT_LABELS
 } from '../../utils/siteVocabulary'
@@ -209,17 +209,18 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
         {loaded && !loadError && files.length > 0 && (
           <>
             <div className="table-wrap">
-              <table>
+              {/* Fits its card: a column the card has no room for is hidden (App.css). */}
+              <table className="table-fit">
                 <thead>
                   <tr>
                     <SortHeader sort={sort} column="name" title="The file's name.">Vocabulary</SortHeader>
-                    <SortHeader sort={sort} column="label" title="A published standard the site holds a copy of, or the site's own vocabulary.">What it is</SortHeader>
-                    <SortHeader sort={sort} column="version" title="The version the file states.">Version</SortHeader>
-                    <SortHeader sort={sort} column="imported_by" title="Who imported it.">Imported by</SortHeader>
-                    <SortHeader sort={sort} column="imported_at" title="When it was imported.">Imported</SortHeader>
-                    <SortHeader sort={sort} column="concept_count" className="num" title="How many concepts it holds.">Concepts</SortHeader>
-                    <SortHeader sort={sort} column="in_use" className="num" title="How many catalog metrics use one of its concepts or were started from it.">In use</SortHeader>
-                    <SortHeader sort={sort} column="shared" title="Whether an export carries the definitions. Until they are shared it carries the preferred names alone.">Definitions</SortHeader>
+                    <SortHeader sort={sort} column="label" className="fit-700" title="A published standard the site holds a copy of, or the site's own vocabulary.">What it is</SortHeader>
+                    <SortHeader sort={sort} column="version" className="fit-700" title="The version the file states.">Version</SortHeader>
+                    <SortHeader sort={sort} column="imported_by" className="fit-1100" title="Who imported it.">Imported by</SortHeader>
+                    <SortHeader sort={sort} column="imported_at" className="fit-1100" title="When it was imported.">Imported</SortHeader>
+                    <SortHeader sort={sort} column="concept_count" className="num fit-880" title="How many concepts it holds.">Concepts</SortHeader>
+                    <SortHeader sort={sort} column="in_use" className="num fit-880" title="How many catalog metrics use one of its concepts or were started from it.">In use</SortHeader>
+                    <SortHeader sort={sort} column="shared" className="fit-520" title="Whether an export carries the definitions. Until they are shared it carries the preferred names alone.">Definitions</SortHeader>
                     <th className="row-actions">Actions</th>
                   </tr>
                 </thead>
@@ -228,22 +229,22 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
                     <tr key={file.id} aria-current={file.id === focused ? 'true' : undefined}>
                       <td>
                         <Tooltip text={`${SOURCE_FORMAT_LABELS[file.source_format] || file.source_format}. SHA-256 ${file.sha256}.${file.licence_note ? ` Licence: ${file.licence_note}` : ''}`}>
-                          <span>{file.name}</span>
+                          <span>{breakAfterSeparators(file.name)}</span>
                         </Tooltip>
                       </td>
-                      <td>
+                      <td className="fit-700">
                         {vocabularyLabel(file)}
                         {file.kind === 'published_standard' && file.standard_publisher
                           ? <span className="cell-meta">, {file.standard_publisher}</span> : null}
                       </td>
-                      <td className="cell-meta">{file.version || '—'}</td>
-                      <td className="cell-meta">
+                      <td className="cell-meta fit-700">{file.version || '—'}</td>
+                      <td className="cell-meta fit-1100">
                         <PersonName name={names.get(file.imported_by)} id={file.imported_by} emailOnHover fallback="someone" />
                       </td>
-                      <td className="cell-meta">{formatDateTime(file.imported_at)}</td>
-                      <td className="num">{file.concept_count}</td>
-                      <td className="num">{file.in_use}</td>
-                      <td>{file.definitions_shareable ? 'Shared' : 'Not shared'}</td>
+                      <td className="cell-meta fit-1100">{formatDateTime(file.imported_at)}</td>
+                      <td className="num fit-880">{file.concept_count}</td>
+                      <td className="num fit-880">{file.in_use}</td>
+                      <td className="fit-520">{file.definitions_shareable ? 'Shared' : 'Not shared'}</td>
                       <td className="row-actions">
                         {file.definitions_shareable ? (
                           <ActionButton

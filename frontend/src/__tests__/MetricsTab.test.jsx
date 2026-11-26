@@ -2202,7 +2202,9 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
     renderTab()
     await waitForCatalog()
 
-    const cols = (table) => [...table.querySelectorAll(':scope > colgroup > col')].map(c => c.className)
+    // A col's width class; its `fit-N` step is held by tablesFitTheirCards.test.jsx.
+    const cols = (table) => [...table.querySelectorAll(':scope > colgroup > col')]
+      .map(c => [...c.classList].filter(k => !k.startsWith('fit-')).join(' '))
     const catalogCols = cols(catalogTable())
     const deprecatedCols = cols(cardTable('Deprecated Metrics'))
     expect(catalogCols).toHaveLength(7)
