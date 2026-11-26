@@ -303,7 +303,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     return problem(404, `Not found: ${path}`, "404");
   } catch (err) {
-    if (err instanceof ClientMistake) return problem(400, err.message, "400");
+    if (err instanceof ClientMistake) return err.answer;
     // The specification's shape, with the request id as the message's correlationId and in the
     // header; the error itself goes to the log under that id.
     const requestId = requestIdOf(req);

@@ -1,31 +1,23 @@
 """
-IDTA's own test engine against aas-api: what passes, measured, and what is not implemented, named.
+IDTA's own test engine against aas-api: what passes, measured, and why the rest fails.
 
-    pip install aas_test_engines==1.0.3      # the version PINNED names; Python 3.13 or older
+    pip install aas_test_engines==1.0.3      # PINNED; Python 3.13 or older
     python test-harness/aas_conformance.py --server URL --token TOKEN [--report-dir DIR]
 
 URL is aas-api's base, such as http://127.0.0.1:18080/functions/v1/aas-api through a port-forward of
 the gateway, and TOKEN a person's or a machine identity's access token. CI runs it in the stack job.
+It runs the two read profiles of the engine's public package that aas-api declares, the AAS and
+Submodel Repositories'. Its Registry and Discovery suites are for IDTA members only.
 
-WHAT IT RUNS. `aas-test-engines` (admin-shell-io, Apache-2.0) tests a server against IDTA-01002's
-service profiles. Its public package holds four, all read profiles; aas-api declares two of them, the
-AAS Repository's and the Submodel Repository's, and this runs both. The AAS Registry, Submodel
-Registry, Discovery and ConceptDescription Repository suites are for IDTA members only, so aas-api's
-Registry and Discovery are not measured here: `supabase/functions/aas-api/test_a_registry_and_
-discovery_resolve_a_shell.py` reads them on the stack instead.
+The verdict is "Compliant" only when every operation of both profiles passes. Short of that, the run
+holds what was measured: each operation PASSING names must still pass, and a server error (5xx)
+anywhere fails it. An operation that starts to pass is printed and does not fail the run, since what
+the engine finds to test depends on the stack's first shell; record it here and in supabase/README.md,
+"Connecting an AAS client", which states the result.
 
-THE TOKEN GOES IN BY A CLIENT OF OUR OWN. The engine's `check_server --header` stores the header and
-never sends it (`aas_test_engines/http.py`, 1.0.3), so every request reached aas-api without a token
-and answered 401. Its README's own answer for authentication is a client class, which BearerClient is.
-1.0.3 does not import on Python 3.14: its reflection resolves the model's forward references at
-import, which 3.14's deferred annotations break.
-
-THE VERDICT IS "Compliant" ONLY WHEN EVERY OPERATION OF BOTH PROFILES PASSES. Short of that, the
-run holds what was measured: each operation PASSING names must still pass, and a server error (5xx)
-anywhere fails it. An operation that starts to pass is printed, to be recorded here and in the
-README's statement (supabase/README.md, "What is verified, and by what"); it does not fail the run,
-since which elements the engine finds to test depends on the stack's first shell. KNOWN_FAILURES says
-why each other operation fails, for that statement and for whoever fixes one.
+The engine's `check_server --header` stores the header and never sends it (1.0.3), so BearerClient
+sends the token. 1.0.3 does not import on Python 3.14, whose deferred annotations its reflection
+cannot resolve.
 """
 import argparse
 import json

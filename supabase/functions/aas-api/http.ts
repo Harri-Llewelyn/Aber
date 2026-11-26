@@ -27,8 +27,17 @@ export const problem = (status: number, text: string, code = String(status), cor
     }],
   }, status);
 
-/** A request the client got wrong, found below the router: the handler answers it with a 400 and its message. */
-export class ClientMistake extends Error {}
+/**
+ * A request the client got wrong, found below the router. Its answer is a 400 built here, from the
+ * fixed sentence the thrower wrote, which the handler returns as it is.
+ */
+export class ClientMistake extends Error {
+  readonly answer: Response;
+  constructor(sentence: string) {
+    super(sentence);
+    this.answer = problem(400, sentence, "400");
+  }
+}
 
 // Identifiers
 
