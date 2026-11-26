@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { IconChevronDown, IconChevronUp } from './Icons'
+import { OverflowText } from './OverflowText'
 import { Tooltip } from './Tooltip'
 
 /** Names shown before the cell collapses the rest behind a count. */
@@ -24,9 +25,9 @@ export function QuarantinePayloadCell({ metrics, fallbackJson }) {
       // Not the array we expect -- show the raw string rather than nothing.
       return (
         <td style={{ maxWidth: '320px' }}>
-          <Tooltip text={fallbackJson}>
-            <code style={{ fontSize: '11px', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {fallbackJson}
+          <Tooltip text={fallbackJson} describe={false}>
+            <code style={{ fontSize: '11px', display: 'block' }}>
+              <OverflowText>{fallbackJson}</OverflowText>
             </code>
           </Tooltip>
         </td>
@@ -44,19 +45,18 @@ export function QuarantinePayloadCell({ metrics, fallbackJson }) {
   return (
     <td style={{ maxWidth: '320px' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
-        {/* A long name is ellipsed, so the tooltip carries it whole. */}
+        {/* A long name is cut and slides, and the tooltip carries it whole. */}
         {shown.map(name => (
-          <Tooltip key={name} text={name}>
+          <Tooltip key={name} text={name} describe={false}>
             <span
               className="mono"
               style={{
                 fontSize: '11px', padding: '2px 6px', borderRadius: 'var(--radius)',
                 border: '1px solid var(--border)', background: 'var(--bg-glass)',
-                color: 'var(--text-muted)', maxWidth: '100%',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                color: 'var(--text-muted)', maxWidth: '100%'
               }}
             >
-              {name}
+              <OverflowText>{name}</OverflowText>
             </span>
           </Tooltip>
         ))}

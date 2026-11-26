@@ -69,6 +69,28 @@ const PIN_SIZE = { 1: 40, 2: 36, 3: 28 }
 const PIN_ICON = { 1: 20, 2: 16, 3: 12 }
 
 /**
+ * An area card's name: the button that opens its panel, with `tip`, the area's state, as its tooltip.
+ * Cut, the name slides on hover or focus, and while it is cut the tooltip leads with it, since
+ * reduced motion stops the slide.
+ */
+function AreaCardName({ name, tip, selected, onToggle }) {
+  const [cut, setCut] = useState(false)
+  return (
+    <Tooltip text={cut ? `${name}. ${tip}` : tip}>
+      <button
+        type="button"
+        className="zone-name area-card-name"
+        /* Stopped, or the card behind it toggles the panel straight back shut. */
+        onClick={e => { e.stopPropagation(); onToggle() }}
+        aria-pressed={selected}
+      >
+        <OverflowText onMeasure={setCut}>{name}</OverflowText>
+      </button>
+    </Tooltip>
+  )
+}
+
+/**
  * The Site Map, one card: the ISA-95 ladder and the legend, the three lanes that belong to no
  * area, then every live area as its own plan with every one of its cells pinned on it; archived
  * areas are drawn only on request. Read only: assets are filed on their own pages, and cells are
@@ -468,17 +490,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             ? <IconArchive size={12} style={{ color: 'var(--warning-text)', flexShrink: 0 }} aria-hidden="true" />
             : <span className={`tile-dot tile-dot-${state.pin}`} aria-hidden="true" />}
           <AreaGlyph size={14} style={{ flexShrink: 0 }} />
-          <Tooltip text={`${archived ? 'Archived' : STATUS_WORD[state.pin]}. Click for its assets and its plan.`}>
-            <button
-              type="button"
-              className="zone-name area-card-name"
-              /* Stopped, or the card behind it toggles the panel straight back shut. */
-              onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
-              aria-pressed={selectedAreaId === ar.area_id}
-            >
-              {ar.area_name}
-            </button>
-          </Tooltip>
+          <AreaCardName
+            name={ar.area_name}
+            tip={`${archived ? 'Archived' : STATUS_WORD[state.pin]}. Click for its assets and its plan.`}
+            selected={selectedAreaId === ar.area_id}
+            onToggle={() => toggleArea(ar.area_id)}
+          />
           {archived && <ArchivedBadge size="sm" title="Archived: its cells are still filed here and its topics are unchanged" />}
           {/* The area's description, only when it has one. */}
           {ar.description && (
@@ -816,7 +833,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                           {/* No dot on an empty lane: grey next to zero says nothing. */}
                           {holds && <span className={`tile-dot tile-dot-${status}`} aria-hidden="true" />}
                           <LaneIcon size={13} style={{ flexShrink: 0 }} />
-                          <span className="site-lane-name">{lane.title}</span>
+                          <OverflowText className="site-lane-name">{lane.title}</OverflowText>
                           <span className="site-lane-counts mono">
                             {plural(laneGateways.length, 'Gateway')} · {plural(laneAssets.length, 'Device')}
                           </span>

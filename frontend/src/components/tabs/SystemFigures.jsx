@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react'
 import { api } from '../../api'
 import { grafanaPanelUrl } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
+import { OverflowText } from '../common/OverflowText'
 import { SummaryCard, SummaryCards } from '../common/SummaryCard'
 import { formatClockTime } from '../../utils/format'
 import {
@@ -111,14 +112,14 @@ export function SystemFigures({ grafanaOpen }) {
           <span className="system-lost">
             {lost.map(part => (
               <span key={part.label} data-testid={`figure-lost-${part.label}`}>
-                {part.value === null ? <Unobserved /> : formatCount(part.value)}
+                <OverflowText>{part.value === null ? <Unobserved /> : formatCount(part.value)}</OverflowText>
               </span>
             ))}
           </span>
         )}
         detail={(
           <span className="system-lost">
-            {lost.map(part => <span key={part.label}>{part.label}</span>)}
+            {lost.map(part => <span key={part.label}><OverflowText>{part.label}</OverflowText></span>)}
           </span>
         )}
         href={href(FIGURE_PANELS.lost)}

@@ -2090,13 +2090,6 @@ tbody tr.table-group-foot:hover { background: none; }
   color: var(--text-muted);
 }
 
-/* One line, cut off with an ellipsis. Needs a width from its container to cut against. */
-.truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* OverflowText: one line cut with an ellipsis that slides to show its end on hover or keyboard
    focus. The script sets --overflow-shift (how far, negative) and --overflow-ms (how long), and
    keeps the line clipped rather than ellipsised until the text is back at its start. */
@@ -2191,7 +2184,8 @@ td.row-actions, th.row-actions {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   column-gap: 8px;
 }
-.system-lost > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Each holds an OverflowText. */
+.system-lost > span { min-width: 0; }
 
 /* Refresh and its interval as one control (common/RefreshButton.jsx): one filled shape, as a
    .btn-primary .btn-sm is, holding two plain halves with a hairline between them. Hover lights the
@@ -3298,12 +3292,10 @@ main:focus { outline: none; }
   height: 16px;
 }
 
+/* Each line holds an OverflowText, which cuts it to one line. */
 .summary-card-title {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -3327,9 +3319,6 @@ main:focus { outline: none; }
 .summary-card-state {
   display: block;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .summary-card-value {
@@ -3683,7 +3672,7 @@ a.summary-card { text-decoration: none; }
   transition: var(--transition);
 }
 
-.site-lane-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site-lane-name { flex: 1 1 auto; min-width: 0; }
 
 /* In the lane's own text colour: --text-primary on a full lane, --text-muted on an empty one.
    Inherited, over the colour .mono gives the counts. */
@@ -3862,9 +3851,6 @@ a.summary-card { text-decoration: none; }
   color: inherit;
   text-align: left;
   cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .area-card-name:hover { color: var(--accent); }
@@ -4055,10 +4041,7 @@ span.area-plan-pin { cursor: inherit; }
   border-radius: 4px;
   background: var(--bg-card);
   border: 1px solid var(--pin-colour);
-  white-space: nowrap;
   max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   /* Slides sideways just far enough to end inside the frame, the disc staying on its place:
      --pin-x is the place's fraction across, 100cqw the drawing's width, 50% half the label's. */
   translate: clamp(
@@ -4191,11 +4174,6 @@ span.area-plan-pin { cursor: inherit; }
 
 .area-plan-panel-meta { font-size: 11px; color: var(--text-muted); }
 
-.zone-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* Health rollup dot: one per lane and area card, the worst state of the devices resolving to it.
    Never colour alone: the dot carries a `title` naming the state. */
@@ -6232,14 +6210,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .trail-lane-open:focus-visible .trail-lane-unnamed { color: var(--text-primary); }
 .trail-lane-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* The one element allowed to lose characters. Everything else in the label -- the icon, the
-   deleted flag -- is fixed width or must stay whole, so a long asset name is what gives. */
+/* The one element allowed to lose characters, an OverflowText. Everything else in the label -- the
+   icon, the deleted flag -- is fixed width or must stay whole, so a long asset name is what gives. */
 .trail-lane-name {
   color: var(--text-primary);
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* No name resolved anywhere -- not from a live row, not from an audit snapshot. Dimmer than a
@@ -6266,9 +6241,6 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .trail-lane-email {
   flex: 0 3 auto;
   min-width: 4em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 11px;
   color: var(--text-dim);
 }
@@ -6655,12 +6627,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   left: 4px;
   right: 4px;
   bottom: 0;
-  overflow: hidden;
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 16px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   color: var(--danger-text);
 }
 .chart-state-carried {

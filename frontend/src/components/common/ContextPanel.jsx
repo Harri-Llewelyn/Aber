@@ -156,7 +156,7 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, al
                 enough to overrun the drawer is exactly the kind you opened the panel to read. */}
             <div className="context-panel-title-row">
               {icon && <span className="context-panel-icon" aria-hidden="true">{icon}</span>}
-              <Tooltip text={title}><div className="context-panel-title"><OverflowText>{title}</OverflowText></div></Tooltip>
+              <Tooltip text={title} describe={false}><div className="context-panel-title"><OverflowText>{title}</OverflowText></div></Tooltip>
             </div>
             {subtitle && <div className="context-panel-subtitle">{subtitle}</div>}
           </div>
