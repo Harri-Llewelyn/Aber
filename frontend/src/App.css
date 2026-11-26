@@ -2092,7 +2092,8 @@ tbody tr.table-group-foot:hover { background: none; }
 
 /* OverflowText: one line cut with an ellipsis that slides to show its end on hover or keyboard
    focus. The script sets --overflow-shift (how far, negative) and --overflow-ms (how long), and
-   keeps the line clipped rather than ellipsised until the text is back at its start. */
+   keeps the line clipped rather than ellipsised until the text is back at its start. The only rule
+   with the ellipsis: every cut line is an OverflowText (drift check 614). */
 .overflow-text {
   --overflow-shift: 0px;
   --overflow-ms: 250ms;
