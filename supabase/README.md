@@ -10480,10 +10480,20 @@ So a definition an imported vocabulary does not share stays out of both
 - a page of submodels by count. On `/submodels`, `limit` counts devices, and a page holds every
   submodel of each.
 
-**A shell's history link has requirements of its own.** The Time Series submodel carries a
-`LinkedSegment` whose endpoint is PostgREST's `/rest/v1/telemetry` (`AAS_HISTORIAN_ENDPOINT`),
-queried by `asset_id`. That is the REST API, not `aas-api`, so a client following it sends the
-`apikey` as well as a person's or a machine identity's token.
+**A shell's history links have requirements of their own.** Each telemetry submodel's `Segments`
+holds one or two:
+
+- **`LinkedSegment`** points at PostgREST's `/rest/v1/telemetry` (`AAS_HISTORIAN_ENDPOINT`), queried
+  by `asset_id`. That is the REST API, not `aas-api`, so a client following it sends the `apikey` as
+  well as a person's or a machine identity's token.
+- **`I3XLinkedSegment`** points at the i3X server's `/v1/objects/history`
+  (`AAS_I3X_HISTORY_ENDPOINT`), while the chart publishes the server. Its `Query` is the request's
+  JSON body, naming the submodel's own metrics by their i3X elementIds:
+  `{"elementIds": ["<sparkplug_id>/<metric name>", ...]}`. A client adds a `startTime` and an
+  `endTime`, and sends a bearer token and no `apikey`.
+- **Both are in an exported file too.** Each names an address on the site, so only a client there can
+  follow it. The i3X server names this shell in turn, in each device's `metadata.system`
+  ([i3X: Address space](../i3x/README.md#address-space)).
 
 ### What a shell's submodels claim
 

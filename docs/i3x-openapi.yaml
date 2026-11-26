@@ -185,8 +185,9 @@ paths:
         namespace, marked as the i3X guide asks with a `projection` suffix:
         `http://opcfoundation.org/UA/Machinery/?projection=i3X`,
         `http://data.ashrae.org/standard223?projection=i3X`,
-        `http://qudt.org/vocab/quantitykind?projection=i3X`. A namespace no served type
-        belongs to is never listed.
+        `http://qudt.org/vocab/quantitykind?projection=i3X`. A device's Nameplate component is
+        typed in `https://admin-shell.io/idta/nameplate/3/0?projection=i3X`, while a device has
+        one. A namespace no served type belongs to is never listed.
       responses:
         '200':
           description: Namespaces this address space draws on.
@@ -1276,6 +1277,12 @@ components:
             quarantined:
               type: boolean
               description: 'Present in the directory but its telemetry is being dropped. Makes a held value `Uncertain` and no value `Bad`.'
+            aasShellId:
+              type: string
+              description: 'The id of the device''s AAS shell, as `aas-export` and `aas-api` publish it: `<AAS_BASE_IRI><sparkplug_id>/shell`.'
+            aasGlobalAssetId:
+              type: string
+              description: 'The `globalAssetId` of the device''s AAS shell: `<AAS_BASE_IRI><sparkplug_id>`.'
         relationships:
           type: object
           description: |
