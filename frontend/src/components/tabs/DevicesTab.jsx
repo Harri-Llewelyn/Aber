@@ -494,10 +494,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     showToast(`Device '${archiveTarget.asset_name}' archived`, 'success', { to: deviceUrl(archiveTarget.asset_id) })
   }
 
-  const restoreDevice = async (assetId, name) => {
-    await api.post(`/api/v1/devices/${assetId}/restore`, {})
+  // A device archived while it was held goes back to the Quarantine queue, and the toast says so; its
+  // link lands there, as any arrival at a device in the queue does.
+  const restoreDevice = async (device) => {
+    await api.post(`/api/v1/devices/${device.asset_id}/restore`, {})
     setRestoreTarget(null); loadAll()
-    showToast(`Device '${name}' restored to active service`, 'success', { to: deviceUrl(assetId) })
+    const where = device.is_quarantined ? 'to the Quarantine queue' : 'to active service'
+    showToast(`Device '${device.asset_name}' restored ${where}`, 'success', { to: deviceUrl(device.asset_id) })
   }
 
   const canApprove = hasPermission(PERMISSION_UUIDS.QUARANTINE_APPROVE)
@@ -1609,7 +1612,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       {restoreTarget && (
         <RestoreEntityModal
           type="device" name={restoreTarget.asset_name}
-          onConfirm={() => restoreDevice(restoreTarget.asset_id, restoreTarget.asset_name)}
+          onConfirm={() => restoreDevice(restoreTarget)}
           onCancel={() => setRestoreTarget(null)}
         />
       )}

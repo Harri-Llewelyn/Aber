@@ -260,7 +260,10 @@ export function EntitiesTab({ showToast, userRole, hasPermission, unmappedMetric
   const restore = async (item) => {
     await api.post(`/api/v1/${item.entity_type}s/${item.entity_id}/restore`, {})
     setConfirmRestore(null); setSelectedId(''); load(); setVersion(v => v + 1)
-    showToast(`Entity '${item.name}' restored to active service`, 'success', { to: entityUrl(item.entity_type, item.entity_id) })
+    // A device archived while held is back in the Quarantine queue, where its link (deviceUrl) lands.
+    const held = item.entity_type === 'device' && item.variant === 'quarantined'
+    showToast(held ? `Device '${item.name}' restored to the Quarantine queue` : `Entity '${item.name}' restored to active service`,
+      'success', { to: entityUrl(item.entity_type, item.entity_id) })
   }
 
   /**

@@ -7,6 +7,7 @@ import { api } from '../api'
 import { supabase } from '../lib/supabaseClient'
 import { PERMISSION_UUIDS } from '../constants'
 import { HELD_AGAIN_ROW } from '../utils/quarantineHold'
+import { deviceUrl } from '../routes'
 import { tabLink } from '../test/tabBar'
 import { tooltipOf } from '../test/tooltips'
 
@@ -149,5 +150,88 @@ describe('an archived device held again', () => {
     fireEvent.change(await screen.findByLabelText(/Type the .* to confirm/i), { target: { value: 'CNC_01' } })
     fireEvent.click(await screen.findByRole('button', { name: /^Permanently Delete Device/ }))
     await waitFor(() => expect(remove).toHaveBeenCalledWith(`/api/v1/devices/${HELD}`))
+  })
+})
+
+describe('restoring a device archived while it was held', () => {
+  const OTHER = 'eeeeeeee-0000-4000-8000-000000001687'
+  const archivedDevice = (over = {}) => ({
+    asset_id: HELD, asset_name: 'CNC_01', is_quarantined: true, is_archived: true,
+    requarantined_at: '2026-11-24T09:00:00Z', archived_at: '2026-11-26T09:00:00Z', status: 'OFFLINE', schema_ids: [], ...over
+  })
+  const openPanel = () => waitFor(() => {
+    const open = document.querySelector('.context-panel-open')
+    expect(open).not.toBeNull()
+    return open
+  })
+
+  /** The Devices drawer of an archived device, restored from it: the toast it leaves. */
+  async function restoreOnDevices(device) {
+    window.history.replaceState(null, '', `/devices?search=${device.asset_id}`)
+    vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(path.startsWith('/api/v1/devices') ? [device] : []))
+    const post = vi.spyOn(api, 'post').mockResolvedValue({})
+    const showToast = vi.fn()
+    render(<DevicesTab showToast={showToast} onSelectDevice={vi.fn()} hasPermission={() => true} />)
+    fireEvent.click(within(await openPanel()).getByRole('button', { name: /Restore Device/ }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Restore Device' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith(`/api/v1/devices/${device.asset_id}/restore`, {}))
+    await waitFor(() => expect(showToast).toHaveBeenCalled())
+    return showToast
+  }
+
+  /** The Entities drawer of an archived row, restored from it: the toast it leaves. */
+  async function restoreOnEntities(entry) {
+    window.history.replaceState(null, '', '/entities/archived')
+    vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(
+      path.startsWith('/api/v1/archives') && !path.includes('/retired') && !path.includes('/exports') ? [entry] : []))
+    const post = vi.spyOn(api, 'post').mockResolvedValue({})
+    const showToast = vi.fn()
+    render(<EntitiesTab showToast={showToast} hasPermission={() => true} />)
+    const row = await waitFor(() => {
+      const found = [...document.querySelectorAll('tbody tr:not(.table-group-row)')]
+        .find(tr => tr.querySelector('strong')?.textContent === entry.name)
+      expect(found).toBeTruthy()
+      return found
+    })
+    fireEvent.click(row)
+    fireEvent.click(within(await openPanel()).getByRole('button', { name: /^Restore/ }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Restore Device' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith(`/api/v1/devices/${entry.entity_id}/restore`, {}))
+    await waitFor(() => expect(showToast).toHaveBeenCalled())
+    return showToast
+  }
+  const entityRow = (id, name, variant) => ({
+    entity_id: id, name, entity_type: 'device', archived_at: '2026-11-26T09:00:00Z', auto_delete_at: null,
+    directory: { kind: 'devices', id, name, state: 'archived', variant, second_ids: [] }
+  })
+
+  it('says on Devices that it went back to the Quarantine queue, and links to the device', async () => {
+    const showToast = await restoreOnDevices(archivedDevice())
+    expect(showToast).toHaveBeenCalledWith("Device 'CNC_01' restored to the Quarantine queue", 'success', { to: deviceUrl(HELD) })
+  })
+
+  it('says on Devices that any other device is restored to active service, as before', async () => {
+    const showToast = await restoreOnDevices(archivedDevice({ asset_id: OTHER, asset_name: 'Lathe_01', is_quarantined: false, requarantined_at: null }))
+    expect(showToast).toHaveBeenCalledWith("Device 'Lathe_01' restored to active service", 'success', { to: deviceUrl(OTHER) })
+  })
+
+  it('says on Entities that it went back to the Quarantine queue, and links to the device', async () => {
+    const showToast = await restoreOnEntities(entityRow(HELD, 'CNC_01', 'quarantined'))
+    expect(showToast).toHaveBeenCalledWith("Device 'CNC_01' restored to the Quarantine queue", 'success', { to: deviceUrl(HELD) })
+  })
+
+  it('says on Entities that any other entity is restored to active service, as before', async () => {
+    const showToast = await restoreOnEntities(entityRow(OTHER, 'Lathe_01', null))
+    expect(showToast).toHaveBeenCalledWith("Entity 'Lathe_01' restored to active service", 'success', { to: deviceUrl(OTHER) })
+  })
+
+  it('lands its link on the Quarantine tab, where the device waits', async () => {
+    window.history.replaceState(null, '', deviceUrl(HELD))
+    vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(
+      path.startsWith('/api/v1/devices') ? [archivedDevice({ is_archived: false, archived_at: null })]
+        : path.startsWith('/api/v1/quarantine') ? [queued(REGISTERED)] : []))
+    render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
+    await waitFor(() => expect(tabLink(/^Quarantine/)).toHaveAttribute('aria-current', 'page'))
+    expect(await screen.findByRole('button', { name: 'Archive Device' })).toBeInTheDocument()
   })
 })
