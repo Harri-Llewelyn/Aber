@@ -2873,17 +2873,21 @@ main:focus { outline: none; }
 .modal-header-row .modal-title {
   flex: 1 1 12ch;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin: 0;
   min-width: 0;
-  /* As tall as the close button, so a one-line title sits level with it. */
+  /* Each line as tall as the close button, so the first sits level with it however many follow. */
   min-height: 28px;
+  line-height: 28px;
   /* A title is wrapped, never cut: the end of a file name is the part that tells two apart. */
   overflow-wrap: anywhere;
 }
 
 .modal-header-row .modal-title > span { min-width: 0; }
+/* The act's icon keeps its 18px when the title wraps, and stands beside the first line, centred on
+   it: (28px line − 18px icon) / 2. Drift check 612 holds the icon's size to this. */
+.modal-header-row .modal-title > svg { flex-shrink: 0; margin-top: 5px; }
 /* The record a dialog acts on, after the act and a dash (Modal's `subject`). Its monospace is a step
    under the title's size, since a monospace face reads larger, and it wraps with the title. */
 .modal-title .modal-subject { font-size: 0.9em; }

@@ -6,7 +6,8 @@ import { dialogsIn, propAt, propText } from '../lib/jsx-dialogs.mjs';
 // says. Each <Modal> and <ConfirmModal> under frontend/src/components has an icon, sized 18. Its title
 // is the act in Title Case, written as text: the record it acts on is the `subject` prop, which Modal
 // draws after a dash, so no title holds a name in `mono`, a dash, quotes or brackets of its own. An act
-// in the README's table takes the table's icon. A <Modal> with acts of its own (a `footer`) has a `lead`
+// in the README's table takes the table's icon, and App.css keeps the icon at its size beside the title's
+// first line when the title wraps. A <Modal> with acts of its own (a `footer`) has a `lead`
 // saying what it will do; a ConfirmModal's message is its lead. It reads what is written: a title or an
 // icon kept in a variable is not judged.
 // -------------------------------------------------------------------------------------------------
@@ -98,6 +99,18 @@ export default function check() {
   for (const entry of NOT_THE_ACT) {
     if (!used.has(entry)) problems612.push(`${entry[0]} is listed for the title "${entry[1]}", and has no such title: remove it`);
   }
+  // The icon keeps its size when the title wraps, and is centred on the first line.
+  const css = read('frontend/src/App.css').replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = (selector) => {
+    const at = css.indexOf(`\n${selector} {`);
+    return at === -1 ? '' : css.slice(at, css.indexOf('}', at));
+  };
+  const iconRule = rule('.modal-header-row .modal-title > svg');
+  const lineHeight = Number(rule('.modal-header-row .modal-title').match(/\bline-height:\s*(\d+)px/)?.[1]);
+  const iconTop = Number(iconRule.match(/\bmargin-top:\s*(\d+)px/)?.[1]);
+  if (!/\bflex-shrink:\s*0\b/.test(iconRule)) problems612.push('frontend/src/App.css lets a dialog\'s icon shrink when its title wraps: give `.modal-header-row .modal-title > svg` flex-shrink: 0');
+  if (!(iconTop === (lineHeight - SIZE) / 2)) problems612.push(`frontend/src/App.css sets a dialog's icon ${iconTop}px from the top of a ${lineHeight}px line: (${lineHeight} - ${SIZE}) / 2 centres it on the first`);
+
   const modal = read(FRAME[0]);
   if (!/\bsubject = null\b/.test(modal) || !modal.includes('modal-subject')) problems612.push(`${FRAME[0]} no longer draws \`subject\` after the title`);
   if (!read(FRAME[1]).includes('subject={subject}')) problems612.push(`${FRAME[1]} no longer hands \`subject\` to Modal`);

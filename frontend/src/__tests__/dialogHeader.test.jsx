@@ -53,6 +53,36 @@ describe("a dialog's header", () => {
       expect(declaration(APP_CSS, '.modal-title .modal-subject', prop)).toBeNull()
     }
   })
+
+  // jsdom lays nothing out, so the rules a wrapped title rests on are read from App.css.
+  describe('when the title wraps', () => {
+    const px = (selector, prop) => Number(declaration(APP_CSS, selector, prop)?.match(/^(\d+)px$/)?.[1])
+    const TITLE = '.modal-header-row .modal-title'
+    const ICON = '.modal-header-row .modal-title > svg'
+
+    it('keeps the icon at its 18px, beside the first line and centred on it', () => {
+      render(<Modal title="Archive Device" subject="CNC Mill 01" icon={<IconArchive size={18} />} onClose={vi.fn()} />)
+      const icon = heading().firstElementChild
+      expect(icon.matches(ICON)).toBe(true)
+      expect(icon.getAttribute('width')).toBe('18')
+      expect(declaration(APP_CSS, ICON, 'flex-shrink')).toBe('0')
+      // Beside the first line, not the middle of the block: the title's items start at its top.
+      expect(declaration(APP_CSS, TITLE, 'align-items')).toBe('flex-start')
+      expect(px(ICON, 'margin-top')).toBe((px(TITLE, 'line-height') - 18) / 2)
+    })
+
+    it('keeps the close button top right, level with the first line', () => {
+      render(<Modal title="Archive Device" subject="CNC Mill 01" icon={<IconArchive size={18} />} onClose={vi.fn()} />)
+      const row = document.querySelector('.modal-header-row')
+      expect(row.lastElementChild).toHaveClass('modal-header-controls')
+      expect(within(row.lastElementChild).getByRole('button', { name: 'Close' })).toHaveClass('btn-icon')
+      expect(declaration(APP_CSS, '.modal-header-row', 'align-items')).toBe('flex-start')
+      expect(declaration(APP_CSS, '.modal-header-controls', 'flex')).toBe('none')
+      // Each line of the title is as tall as the button, so the first sits level with it.
+      expect(px(TITLE, 'line-height')).toBe(px('.btn-icon', 'height'))
+      expect(px(TITLE, 'min-height')).toBe(px('.btn-icon', 'height'))
+    })
+  })
 })
 
 describe('Archive, Restore and Approve & Onboard name what they act on', () => {

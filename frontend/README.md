@@ -431,7 +431,8 @@ a lead under them. `dialogFooters.test.js` and drift check 612 read every dialog
   none yet, so New Area has no subject.
 - **Every dialog has an icon, sized 18, and it follows the act.** The table below says which. An act
   not in it keeps the icon it has. One with none takes the icon of the button that opens it, such as
-  Set Up Gateway's download arrow, or else its page's.
+  Set Up Gateway's download arrow, or else its page's. When a long name wraps the title, the icon
+  keeps its size beside the first line, which is as tall as the close button and level with it.
 - **Every form has a lead:** one sentence saying what the dialog will do. It is the dialog's
   accessible description, read after the title. A sentence that said it elsewhere, in a callout's
   first line, a hint or a paragraph at the bottom, is the lead instead. A confirmation's message is
