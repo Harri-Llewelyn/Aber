@@ -61,7 +61,7 @@ describe('a Third-party gateway on the Site Map', () => {
 
   it('carries no host flag, which a Host gateway beside it does', async () => {
     renderMap()
-    const lane = await screen.findByText('Site-Wide', { selector: '.site-lane-name' })
+    const lane = await screen.findByText('Site-Wide', { selector: '.site-lane-name *' })
     fireEvent.click(lane.closest('button'))
     await waitFor(() => expect(chipNamed('Vendor_Wide')).toBeTruthy())
 

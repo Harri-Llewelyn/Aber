@@ -113,7 +113,7 @@ describe('Remove Access', () => {
   it('asks for what the dialog names them by, for an account with no email address', async () => {
     const who = person('a0000000-0000-4000-8000-000000000004', null, 'Operator', { display_name: 'Sam Jones' })
     const dialog = await openRemove(who, 'Sam Jones')
-    expect(dialog).toHaveAccessibleName('Remove Access for Sam Jones')
+    expect(dialog).toHaveAccessibleName('Remove Access — Sam Jones')
     await holdsUntilTyped({ dialog, label: 'name', text: 'Sam Jones', button: 'Remove Access', act: api.removePersonAccess })
   })
 
@@ -179,7 +179,7 @@ describe('a stored capture', () => {
       fireEvent.click((await screen.findByText(name, { selector: 'td, td *' })).closest('tr'))
       fireEvent.click(await screen.findByRole('button', { name: 'Delete Capture' }))
 
-      const dialog = await screen.findByRole('dialog', { name: 'Delete Capture' })
+      const dialog = await screen.findByRole('dialog', { name: /^Delete Capture — / })
       expect(dialog).toHaveAccessibleDescription(expect.stringContaining(`Delete the capture of ${name}, recorded `))
       await holdsUntilTyped({ dialog, label: `${kind} name`, text: name, button: 'Delete Capture', act: api.deleteCapture })
       expect(api.deleteCapture).toHaveBeenCalledWith(CAPTURES[kind])
@@ -274,7 +274,7 @@ describe('Delete Automation', () => {
     await screen.findByRole('heading', { name: stored.alias })
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     await holdsUntilTyped({
-      dialog: screen.getByRole('dialog', { name: 'Delete Automation' }),
+      dialog: screen.getByRole('dialog', { name: /^Delete Automation — / }),
       label: 'automation name', text: stored.alias, button: 'Delete Automation', act: api.deleteAutomation,
     })
     expect(api.deleteAutomation).toHaveBeenCalledWith(stored.id)

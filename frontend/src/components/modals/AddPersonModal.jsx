@@ -1,10 +1,11 @@
 import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
-import { IconCheck, IconPlus, IconUser } from '../common/Icons'
+import { IconPlus } from '../common/Icons'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { EMAIL, PERSON_ROLES, personRoleLabel } from '../../utils/people'
 import { PasswordShownOnce } from './PasswordShownOnce'
@@ -57,24 +58,19 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
   if (added) {
     return (
       <Modal
-        title={`${personLabel(added)} Added`}
-        icon={<IconUser size={18} />}
+        title="Person Added"
+        subject={personLabel(added)}
+        icon={<IconPlus size={18} />}
         size="lg"
         onClose={onClose}
         dismiss="Done"
       >
         {added.invited ? (
-          <div className="callout callout-info">
-            <IconCheck size={14} className="callout-icon" />
-            <div>
-              <strong>An invitation was sent to {added.email}.</strong>
-              <div>
-                They choose their own password from the link in it, and then sign in as{' '}
-                {personRoleLabel(added.role)}. If the link has expired, they can use{' '}
-                <em>Forgot your password?</em> on the sign-in page.
-              </div>
-            </div>
-          </div>
+          <Callout tone="success" title={<>An invitation was sent to {added.email}.</>}>
+            They choose their own password from the link in it, and then sign in as{' '}
+            {personRoleLabel(added.role)}. If the link has expired, they can use{' '}
+            <em>Forgot your password?</em> on the sign-in page.
+          </Callout>
         ) : (
           <PasswordShownOnce
             email={added.email}
@@ -93,7 +89,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
   return (
     <Modal
       title="Add a Person"
-      icon={<IconUser size={18} />}
+      icon={<IconPlus size={18} />}
       size="lg"
       busy={busy}
       onClose={onClose}

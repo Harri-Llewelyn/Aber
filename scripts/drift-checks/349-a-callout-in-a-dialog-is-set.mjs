@@ -25,8 +25,8 @@ export default function check() {
   const modal = read('frontend/src/components/modals/AssetConfigModal.jsx');
   for (const [piece, what] of [
     ['isShadowDevice', 'tells a replay lane with isShadowDevice()'],
-    ['callout callout-info', 'draws a replay lane an info callout'],
-    ['callout callout-warning', 'keeps the warning for a machine'],
+    ['<Callout tone="info"', 'draws a replay lane an info callout'],
+    ['<Callout tone="warning"', 'keeps the warning for a machine'],
   ]) {
     if (!modal.includes(piece)) problems349.push(`AssetConfigModal.jsx no longer ${what} (${piece})`);
   }

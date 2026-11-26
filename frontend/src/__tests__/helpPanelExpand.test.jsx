@@ -205,7 +205,7 @@ describe('expanded help replaces a page’s drawer at every width', () => {
     expect(hidden()).toBe(true)
     press('Select Line 2')
     expect(help()).not.toHaveClass('context-panel-open')
-    expect(screen.getByText('Line 2 Gateway', { selector: '.content .context-panel-title' })).toBeInTheDocument()
+    expect(screen.getByText('Line 2 Gateway', { selector: '.content .context-panel-title *' })).toBeInTheDocument()
   })
 
   it('stays open beside the details on a wide screen while docked', () => {

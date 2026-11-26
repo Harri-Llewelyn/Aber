@@ -95,6 +95,8 @@ A few things to know:
 
 **An alert's acknowledgements have a lane of their own**, under **Alerts** in the plant's section. The lane is named after the alert and the device or gateway it is about. Each row says who acknowledged it or withdrew it, the reason and the note. An alert about a machine identity is the exception: its acknowledgements are in that identity's lane, which only an Administrator or an Auditor can read.
 
+**A metric's further semantic IDs are in the metric's lane**, under **Metric catalog**. Each one added, changed or removed is a marker there. Its marker and the drawer say so in words: **Further semantic id added**, **Further semantic id changed** or **Further semantic id removed**. To see them alone, tick **Metric semantic IDs** in the kind filter.
+
 **A suppression window's acts are in the lane of the device, gateway or cell it covers.** Each row says who scheduled, changed, ended or cancelled the window, when it starts and ends, and why. The action filter lists them under **Alerts**. Each is **Operational**, by the last rule below.
 
 **Aber decides each event's class, not the page.** The first rule that fits decides:

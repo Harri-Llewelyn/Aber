@@ -203,7 +203,7 @@ describe('useFormCheck', () => {
  */
 const DIALOGS = [
   {
-    name: 'Acknowledge Alert',
+    name: 'Acknowledge Alert — Device Offline',
     render: (spy) => <AcknowledgeAlertModal alert={{ alert_name: 'Device Offline' }} onConfirm={spy} onCancel={vi.fn()} />,
     confirm: 'Acknowledge Alert',
     says: ['Choose a reason'],
@@ -245,7 +245,7 @@ const DIALOGS = [
     sends: () => api.startFactorEnrolment,
   },
   {
-    name: 'Remove Phone',
+    name: 'Remove Authenticator — Phone',
     render: () => <RemoveSecondFactorModal factor={{ id: 'f1', friendly_name: 'Phone' }} needsCode onClose={vi.fn()} />,
     confirm: 'Remove Authenticator',
     says: ['Enter the 6-digit code Phone shows'],
@@ -287,7 +287,7 @@ const DIALOGS = [
     sends: () => window.open,
   },
   {
-    name: /Approve Discovered Device/,
+    name: /^Approve & Onboard — /,
     render: (spy) => (
       <ApproveQuarantineModal
         item={{ asset_id: 'd1', asset_name: 'CNC_9', entity_type: 'DEVICE', reported_identity: 'cnc9' }}

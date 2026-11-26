@@ -540,8 +540,8 @@ describe('the Location row in the context panel', () => {
   it('is one row: the area and the cell, marked as from the gateway when inherited', async () => {
     const value = await location()
     expect(value.textContent).toBe('North Shop›Assembly(from gateway)')
-    expect(within(value).getByRole('link', { name: /North Shop/ })).toHaveAccessibleDescription('Open this area on the Areas page')
-    expect(within(value).getByRole('link', { name: /Assembly/ })).toHaveAccessibleDescription('Open this cell on the Cells page')
+    expect(within(value).getByRole('link', { name: /North Shop/ })).toHaveAccessibleDescription('Open North Shop on the Areas page')
+    expect(within(value).getByRole('link', { name: /Assembly/ })).toHaveAccessibleDescription('Open Assembly on the Cells page')
     const labels = [...document.querySelectorAll('.context-panel .context-field-label')].map(l => l.textContent)
     expect(labels).not.toContain('Area (resolved)')
     expect(labels).not.toContain('Location Source')
@@ -640,7 +640,7 @@ describe('approving a quarantined device', () => {
   const openApproval = async (options = {}) => {
     await show([], { quarantine: [quarantined], expect: 'Unknown_Robot', tab: /^Quarantine/, ...options })
     fireEvent.click(screen.getAllByRole('button', { name: /Approve/i })[0])
-    await waitFor(() => expect(screen.getByText(/Approve Discovered Device/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Approve & Onboard — / })).toBeTruthy())
   }
 
   it('offers the four choices as the Devices form does, defaulting to Follow Gateway with no cell picker', async () => {
@@ -695,7 +695,7 @@ describe('approving a quarantined device', () => {
     fireEvent.click(tabLink(/^Quarantine/))
     await waitFor(() => expect(screen.getByText('Unknown_Robot')).toBeTruthy())
     fireEvent.click(screen.getAllByRole('button', { name: /Approve/i })[0])
-    await waitFor(() => expect(screen.getByText(/Approve Discovered Device/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Approve & Onboard — / })).toBeTruthy())
 
     fireEvent.click(screen.getByRole('radio', { name: /Area-Wide/i }))
     pressHeld(screen.getByRole('dialog'), /Approve & Onboard/, 'Choose which area the device serves')

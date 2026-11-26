@@ -1712,8 +1712,9 @@ describe('Audit Trail — removed tag filter', () => {
     const rule = APP_CSS.match(/\n\.trail-lane-qualifier \{([\s\S]*?)\n\}/)?.[1]
     expect(rule, '.trail-lane-qualifier has no rule in App.css').toBeTruthy()
     expect(rule).toMatch(/flex-shrink:\s*0/)
-    expect(APP_CSS.match(/\n\.trail-lane-name \{([\s\S]*?)\n\}/)?.[1])
-      .toMatch(/text-overflow:\s*ellipsis/)
+    expect(APP_CSS.match(/\n\.trail-lane-name \{([\s\S]*?)\n\}/)?.[1]).toBeTruthy()
+    // The name is an OverflowText, whose own rule ends it in an ellipsis.
+    expect(APP_CSS.match(/\n\.overflow-text \{([\s\S]*?)\n\}/)?.[1]).toMatch(/text-overflow:\s*ellipsis/)
   })
 
   it('still filters by name, which was sharing the id-restriction path with tags', async () => {

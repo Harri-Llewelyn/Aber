@@ -2,9 +2,10 @@ import React, { useState } from 'react'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { CredentialField, useCredential } from '../common/CredentialField'
 import { Modal } from '../common/Modal'
-import { IconAlertTriangle, IconHardDrive, IconTrash } from '../common/Icons'
+import { IconHardDrive, IconTrash } from '../common/Icons'
 import { ConfirmModal } from './ConfirmModal'
 
 const FIELDS = [
@@ -77,15 +78,12 @@ export function BackupDestinationModal({ destination, credentialSet, onSave, wri
         </>
       )}
     >
-      <div className="callout callout-warning" data-testid="offsite-circularity">
-        <IconAlertTriangle size={14} className="callout-icon" />
-        <div>
-          <strong>Keep the bucket credentials and the decryption key outside this stack.</strong>{' '}
-          The secret key is stored in the Vault, and the Vault is inside every backup: after losing
-          the site, a restore starts from the bucket without it. Only the recipient (the public
-          key) is entered here; the identity that decrypts must be somewhere a rebuild can reach.
-        </div>
-      </div>
+      <Callout tone="warning" data-testid="offsite-circularity">
+        <strong>Keep the bucket credentials and the decryption key outside this stack.</strong>{' '}
+        The secret key is stored in the Vault, and the Vault is inside every backup: after losing
+        the site, a restore starts from the bucket without it. Only the recipient (the public
+        key) is entered here; the identity that decrypts must be somewhere a rebuild can reach.
+      </Callout>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0 16px', marginTop: '16px' }}>
         {FIELDS.map(f => (

@@ -2,8 +2,8 @@ import React from 'react'
 import { IconRefreshCw } from '../common/Icons'
 import { ConfirmModal } from './ConfirmModal'
 
-/** The title's and the confirming button's word for each type, so they repeat the drawer's action. */
-const TYPE_WORD = { area: 'Area', cell: 'Cell', gateway: 'Gateway', device: 'Device' }
+/** The title's and the confirming button's word for each type, so they repeat the drawer's action. Archive's title names it too. */
+export const TYPE_WORD = { area: 'Area', cell: 'Cell', gateway: 'Gateway', device: 'Device' }
 
 /**
  * The question Restore asks, from an entity's drawer on its own page or on Entities' Archived tab, so
@@ -18,6 +18,7 @@ export function RestoreEntityModal({ type, name, credentialRevoked = false, forg
   return (
     <ConfirmModal
       title={`Restore ${TYPE_WORD[type] || ''}`.trim()}
+      subject={name}
       icon={<IconRefreshCw size={18} />}
       message={
         `Restore the ${type} '${name}' to active service? ` +

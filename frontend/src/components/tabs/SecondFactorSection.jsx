@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
+import { Callout } from '../common/Callout'
 import { EmptyState } from '../common/EmptyState'
-import { IconPlus, IconShieldAlert } from '../common/Icons'
+import { IconPlus } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { ColumnHeader } from '../common/SortHeader'
 import { AddSecondFactorModal } from '../modals/AddSecondFactorModal'
@@ -79,10 +80,7 @@ export function SecondFactorSection({ isPerson = true, showToast }) {
         <EmptyState message="A machine identity signs in with a token, so it has no MFA." />
       ) : error ? (
         <div className="card-body">
-          <div className="callout callout-danger" role="status">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>{error}</div>
-          </div>
+          <Callout tone="danger" role="status">{error}</Callout>
         </div>
       ) : factors === undefined ? (
         <LoadingState label="authenticators" />

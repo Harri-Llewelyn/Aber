@@ -2,8 +2,9 @@ import React, { useState } from 'react'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { Modal } from '../common/Modal'
-import { IconAlertTriangle, IconMail } from '../common/Icons'
+import { IconMail } from '../common/Icons'
 import { PERSON_ROLES } from '../../utils/people'
 
 /**
@@ -57,10 +58,7 @@ export function EmailModal({ roles, relay, saveRoles, onSaved, onClose }) {
       )}
     >
       {relay && !relay.available && (
-        <div className="callout callout-warning" data-testid="email-relay-unavailable">
-          <IconAlertTriangle size={14} className="callout-icon" />
-          <div>Email cannot be sent yet. {relay.reason}</div>
-        </div>
+        <Callout tone="warning" data-testid="email-relay-unavailable">Email cannot be sent yet. {relay.reason}</Callout>
       )}
 
       <fieldset className="form-group" disabled={pending} style={{ border: 0, padding: 0, margin: 0 }}>

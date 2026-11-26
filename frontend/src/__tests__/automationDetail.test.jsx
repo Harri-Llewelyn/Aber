@@ -486,7 +486,7 @@ describe('Upload', () => {
     const d = dialog()
     expect(d.getByText('1 new, 1 changed, 1 unchanged')).toBeInTheDocument()
     expect(d.getByText('changes alias')).toBeInTheDocument()
-    expect(d.getByRole('heading', { name: /Apply automations\.yaml/ })).toBeInTheDocument()
+    expect(d.getByRole('heading', { name: /Apply Automations — automations\.yaml/ })).toBeInTheDocument()
     // The confirm repeats the act and the count of what it writes.
     expect(d.getByRole('button', { name: 'Apply 2 Automations' })).toBeEnabled()
   })

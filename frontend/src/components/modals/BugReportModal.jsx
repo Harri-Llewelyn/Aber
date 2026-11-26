@@ -48,6 +48,7 @@ ${desc || 'No detailed steps provided.'}
       title="Report Platform Bug / Create GitHub Issue"
       icon={<IconBug size={18} style={{ color: 'var(--danger)' }} />}
       onClose={onClose}
+      lead="Opens a new GitHub issue in another tab, filled in with what you write here and the page you are on."
       problem={check.problem}
       dismiss="Cancel"
       footer={

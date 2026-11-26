@@ -127,7 +127,7 @@ describe('naming the person a role assignment is about', () => {
     const name = await screen.findByText('Morgan Manager')
     const label = name.closest('.trail-lane-label')
     // Both in view: two people can share a name, and anyone can type any name.
-    expect(within(label).getByText('manager@aber.local')).toHaveClass('trail-lane-email')
+    expect(within(label).getByText('manager@aber.local').closest('.overflow-text')).toHaveClass('trail-lane-email')
     expect(label.textContent.indexOf('Morgan Manager')).toBeLessThan(label.textContent.indexOf('manager@aber.local'))
   })
 

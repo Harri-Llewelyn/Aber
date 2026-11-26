@@ -140,7 +140,7 @@ describe('proposing a change from a device', () => {
     openPanel()
     clickAction('Propose a Change')
 
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
     // The same fields a manager gets, seeded from the same row.
     expect(screen.getByDisplayValue('CNC_01')).toBeInTheDocument()
   })
@@ -149,7 +149,7 @@ describe('proposing a change from a device', () => {
     await show(asOperator)
     openPanel()
     clickAction('Propose a Change')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
 
     // The footer is the only thing that differs between the two readers. Scoped to
     // `.modal-actions` because the drawer action standing behind the dialog says the same words.
@@ -162,7 +162,7 @@ describe('proposing a change from a device', () => {
     await show(asManager)
     openPanel()
     clickAction('Edit Details')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
 
     const footer = within(document.querySelector('.modal-actions'))
     expect(footer.getByRole('button', { name: /save device/i })).toBeInTheDocument()
@@ -175,7 +175,7 @@ describe('proposing a change from a device', () => {
     await show(asOperator)
     openPanel()
     clickAction('Propose a Change')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
 
     // By its name alone, as the device drawer names it.
     expect(fixedField('Serving Gateway').querySelector('.form-static')).toHaveTextContent(/^Line_A_Gateway$/)
@@ -210,7 +210,7 @@ describe('proposing a change from a device', () => {
     await show(asOperator)
     openPanel()
     clickAction('Propose a Change')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
 
     const reasons = ['Serving Gateway', 'Schemas', 'Schema Conformance'].map(label => fixedField(label).querySelector('dd.form-hint'))
     for (const reason of reasons) expect(reason.textContent).toMatch(/^A proposal can’t change this\. /)
@@ -229,7 +229,7 @@ describe('proposing a change from a device', () => {
     await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeTruthy())
     fireEvent.click(within(document.querySelector('.page-main')).getByText('CNC_01 (replay)'))
     clickAction('Propose a Change')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
 
     // Fixed for everyone, so the lane's reason and not the proposer's; the other withheld fields say theirs.
     expect(document.querySelector('#device-gateway')).toBeNull()

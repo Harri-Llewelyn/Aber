@@ -40,6 +40,7 @@ import {
 } from '../../utils/ashrae223'
 import { fieldByName, fieldByType, fieldType, vda5050Prefill, vda5050Sections } from '../../utils/vda5050'
 import { importedStandardOptions, sitePrefill, withSiteStandards, siteVocabularyLabel } from '../../utils/siteVocabulary'
+import { Callout } from '../common/Callout'
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { Modal } from '../common/Modal'
@@ -67,7 +68,7 @@ import {
   parsePermittedValues, permittedValuesApply, permittedValuesText
 } from '../../utils/schemaProperty'
 import {
-  IconPlus, IconAlertTriangle, IconArchive, IconRefreshCw,
+  IconPlus, IconArchive, IconRefreshCw,
   IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck, IconHistory, IconChartLine, IconDownload, IconUpload
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
@@ -1363,10 +1364,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               )}
 
               {uncataloguedError ? (
-                <div className="callout callout-danger">
-                  <IconAlertTriangle size={13} className="callout-icon" />
-                  <span>The uncatalogued metrics could not be read: {uncataloguedError}</span>
-                </div>
+                <Callout tone="danger">The uncatalogued metrics could not be read: {uncataloguedError}</Callout>
               ) : !uncatalogued ? <LoadingState label="uncatalogued metrics" /> : shownUncatalogued.length === 0 ? (
                 <EmptyState
                   icon={uncatalogued.length === 0 ? <IconCheck size={36} /> : <IconTag size={36} />}
@@ -1418,7 +1416,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                                     title={`Open ${d.name} on the Devices page${d.quarantined ? '. It is in quarantine, awaiting approval.' : ''}`}
                                   >
                                     <IconCpu size={11} />
-                                    <span className="chip-name">{d.name}</span>
+                                    <OverflowText className="chip-name">{d.name}</OverflowText>
                                     {d.quarantined && <span className="cell-meta">quarantined</span>}
                                   </RouteLink>
                                 ))}
@@ -1545,6 +1543,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           size="xl"
           busy={adding}
           onClose={closeAddMetric}
+          lead="Adds a metric to this site's catalog, named from the parts below."
           problem={addCheck.problem}
           error={addError}
           dismiss="Cancel"
@@ -1937,45 +1936,33 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           {/* The database enforces the same format (metric_catalog_name_format), but a 400 after
               pressing Add is a poor way to learn it, and the name is immutable. */}
           {nameError && (
-            <div className="callout callout-danger">
-              <IconAlertTriangle size={13} className="callout-icon" />
-              <span>{nameError}</span>
-            </div>
+            <Callout tone="danger">{nameError}</Callout>
           )}
 
           {!datatypeChosen && (
-            <div className="callout callout-warning">
-              <IconAlertTriangle size={13} className="callout-icon" />
-              <span>
-                Choose a Sparkplug datatype.{' '}
-                {cataloguing
-                  ? catalogueDatatypeNote(cataloguing)
-                  : 'The vocabulary entry does not say how this value is encoded.'}
-                {' '}The datatype cannot be changed once the metric exists.
-              </span>
-            </div>
+            <Callout tone="warning">
+              Choose a Sparkplug datatype.{' '}
+              {cataloguing
+                ? catalogueDatatypeNote(cataloguing)
+                : 'The vocabulary entry does not say how this value is encoded.'}
+              {' '}The datatype cannot be changed once the metric exists.
+            </Callout>
           )}
 
           {/* Catalogue's point is the name the devices already publish; anything else is a new
               metric they do not send. */}
           {cataloguing && composedName !== cataloguing.metric_name && (
-            <div className="callout callout-warning">
-              <IconAlertTriangle size={13} className="callout-icon" />
-              <span>
-                The devices declare <span className="mono">{cataloguing.metric_name}</span>. This adds{' '}
-                <span className="mono">{composedName || '…'}</span>, which they do not publish.
-              </span>
-            </div>
+            <Callout tone="warning">
+              The devices declare <span className="mono">{cataloguing.metric_name}</span>. This adds{' '}
+              <span className="mono">{composedName || '…'}</span>, which they do not publish.
+            </Callout>
           )}
 
           {groupCaseCollision && (
-            <div className="callout callout-warning">
-              <IconAlertTriangle size={13} className="callout-icon" />
-              <span>
-                Group <span className="mono">{newMetric.newGroup.trim()}</span> already exists as{' '}
-                <span className="mono">{effectiveGroup}</span> — that spelling will be used, so the two do not fork.
-              </span>
-            </div>
+            <Callout tone="warning">
+              Group <span className="mono">{newMetric.newGroup.trim()}</span> already exists as{' '}
+              <span className="mono">{effectiveGroup}</span> — that spelling will be used, so the two do not fork.
+            </Callout>
           )}
         </Modal>
       )}

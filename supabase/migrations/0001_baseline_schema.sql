@@ -17164,7 +17164,7 @@ ALTER TABLE public.asset_exports ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.asset_exports', 'asset_exports_select_privileged', $ddl$
 CREATE POLICY asset_exports_select_privileged ON public.asset_exports FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0338_every_read_policy_checks_the_caller_once.sql');
 COMMIT;
 
 --
@@ -17199,7 +17199,7 @@ ALTER TABLE public.backup_jobs ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.backup_jobs', 'backup_jobs_select_administrator', $ddl$
 CREATE POLICY backup_jobs_select_administrator ON public.backup_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0338_every_read_policy_checks_the_caller_once.sql');
 COMMIT;
 
 --
@@ -17227,7 +17227,7 @@ ALTER TABLE public.capture_jobs ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.capture_jobs', 'capture_jobs_select_privileged', $ddl$
 CREATE POLICY capture_jobs_select_privileged ON public.capture_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0338_every_read_policy_checks_the_caller_once.sql');
 COMMIT;
 
 --
@@ -17721,7 +17721,7 @@ ALTER TABLE public.playback_jobs ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.playback_jobs', 'playback_jobs_select_privileged', $ddl$
 CREATE POLICY playback_jobs_select_privileged ON public.playback_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0338_every_read_policy_checks_the_caller_once.sql');
 COMMIT;
 
 --
@@ -17735,7 +17735,7 @@ ALTER TABLE public.playback_worker_status ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.playback_worker_status', 'playback_worker_status_select_privileged', $ddl$
 CREATE POLICY playback_worker_status_select_privileged ON public.playback_worker_status FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0338_every_read_policy_checks_the_caller_once.sql');
 COMMIT;
 
 --
@@ -17763,7 +17763,7 @@ ALTER TABLE public.rebirth_requests ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.rebirth_requests', 'rebirth_requests_select_privileged', $ddl$
 CREATE POLICY rebirth_requests_select_privileged ON public.rebirth_requests FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0338_every_read_policy_checks_the_caller_once.sql');
 COMMIT;
 
 --
@@ -17791,7 +17791,7 @@ ALTER TABLE public.revoked_service_principals ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.revoked_service_principals', 'revoked_service_principals_select_privileged', $ddl$
 CREATE POLICY revoked_service_principals_select_privileged ON public.revoked_service_principals FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0338_every_read_policy_checks_the_caller_once.sql');
 COMMIT;
 
 --
@@ -17805,7 +17805,7 @@ ALTER TABLE public.revoked_service_tokens ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.revoked_service_tokens', 'revoked_service_tokens_select_privileged', $ddl$
 CREATE POLICY revoked_service_tokens_select_privileged ON public.revoked_service_tokens FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0338_every_read_policy_checks_the_caller_once.sql');
 COMMIT;
 
 --
@@ -17929,7 +17929,7 @@ ALTER TABLE public.webhook_endpoints ENABLE ROW LEVEL SECURITY;
 BEGIN;
 SELECT public.replay_policy('public.webhook_endpoints', 'webhook_endpoints_select_privileged', $ddl$
 CREATE POLICY webhook_endpoints_select_privileged ON public.webhook_endpoints FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
-$ddl$);
+$ddl$, p_stated_by => '0338_every_read_policy_checks_the_caller_once.sql');
 COMMIT;
 
 --

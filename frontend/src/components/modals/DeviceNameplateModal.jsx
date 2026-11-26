@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { api } from '../../api'
-import { IconLock, IconTag, IconCheck } from '../common/Icons'
+import { Callout } from '../common/Callout'
+import { IconLock, IconTag } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { HelpTip } from '../common/HelpTip'
@@ -323,7 +324,8 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
 
   return (
     <Modal
-      title={<>Digital Nameplate — <span className="mono">{asset.asset_name}</span></>}
+      title="Digital Nameplate"
+      subject={asset.asset_name}
       icon={<IconTag size={18} />}
       size="xl"
       busy={saving}
@@ -369,14 +371,11 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
         {!loading && !unread && (
           <div ref={body}>
             {Object.keys(published).length > 0 && (
-              <div className="callout callout-info nameplate-published">
-                <IconCheck size={13} className="callout-icon" />
-                <span>
-                  This device publishes {Object.keys(published).length} of these itself at DBIRTH.
-                  Those fields are shown as the device reports them and cannot be edited here — the
-                  exported shell always uses the device's own answer.
-                </span>
-              </div>
+              <Callout tone="info" className="nameplate-published">
+                This device publishes {Object.keys(published).length} of these itself at DBIRTH.
+                Those fields are shown as the device reports them and cannot be edited here — the
+                exported shell always uses the device's own answer.
+              </Callout>
             )}
 
             <div className="nameplate-fields">

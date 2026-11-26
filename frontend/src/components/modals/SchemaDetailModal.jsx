@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import {
-  IconGitBranch, IconLock, IconHistory, IconAlertTriangle, IconCheck, IconTrash
+  IconGitBranch, IconLock, IconHistory, IconAlertTriangle, IconCheck, IconPencil, IconTrash
 } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
 import { useFormCheck } from '../../hooks/useFormCheck'
@@ -331,8 +331,10 @@ export function SchemaDetailModal({
 
   return (
     <Modal
-      title={<>{schema?.schema_name} <VersionBadge schema={schema} /></>}
-      icon={editing ? <IconGitBranch size={18} /> : <IconLock size={18} />}
+      title={editing ? 'Edit Draft' : 'Schema'}
+      subject={<>{schema?.schema_name} <VersionBadge schema={schema} /></>}
+      icon={editing ? <IconPencil size={18} /> : <IconLock size={18} />}
+      lead={editing ? 'Changes this draft. Save Draft keeps the changes, and Publish puts the version in force.' : null}
       size="wide"
       className="schema-detail-modal"
       fill

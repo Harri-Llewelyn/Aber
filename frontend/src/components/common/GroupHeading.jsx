@@ -12,7 +12,8 @@ import { Tooltip } from './Tooltip'
  *
  * @param {boolean} open Whether the group's rows are shown.
  * @param {Function} onToggle Called on a press, to open a closed group or close an open one.
- * @param {string} label The group's name.
+ * @param {string} label The group's name. Cut, it slides on hover or focus, and while it is cut the
+ *   tooltip carries it whole, with `detail`.
  * @param {number} [count] How many rows the group holds, drawn after the name.
  * @param {string} [countLabel] The count as a screen reader hears it ("12 lanes"); the number alone
  *   without it.
@@ -33,9 +34,11 @@ import { Tooltip } from './Tooltip'
  */
 export function GroupHeading({ open, onToggle, label, count, countLabel, detail, title = null, muted = false, icon = null, controls, className = '' }) {
   const Chevron = open ? IconChevronUp : IconChevronDown
-  // Whether `detail` was cut when OverflowText last measured it, as the pointer or focus arrived.
+  // Whether `detail` and the name were cut when OverflowText last measured them, as the pointer or
+  // focus arrived.
   const [cut, setCut] = useState(false)
-  const whole = detail && cut ? detail : null
+  const [nameCut, setNameCut] = useState(false)
+  const whole = nameCut ? [label, detail].filter(Boolean).join(' · ') : detail && cut ? detail : null
   return (
     // The cut words are no description: the sr-only words below already give a screen reader the whole value.
     <Tooltip text={whole || title} describe={!whole}>
@@ -48,7 +51,7 @@ export function GroupHeading({ open, onToggle, label, count, countLabel, detail,
       >
         <Chevron size={12} className="group-heading-chevron" aria-hidden="true" />
         {icon && <span className="group-heading-icon" aria-hidden="true">{icon}</span>}
-        <span className={`table-group-label group-heading-label${muted ? ' table-group-label-muted' : ''}`}>{label}</span>
+        <OverflowText className={`table-group-label group-heading-label${muted ? ' table-group-label-muted' : ''}`} onMeasure={setNameCut}>{label}</OverflowText>
         {count !== undefined && count !== null && (
           <span className="group-heading-count">
             <span aria-hidden="true">· {count}</span>

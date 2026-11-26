@@ -1,10 +1,11 @@
 import React, { useId, useMemo, useState } from 'react'
 import { api } from '../../api'
+import { Callout } from '../common/Callout'
 import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { ApplyResults } from '../common/ApplyResults'
 import { DropZone } from '../common/DropZone'
-import { IconAlertTriangle, IconClipboardList } from '../common/Icons'
+import { IconClipboardList, IconUpload } from '../common/Icons'
 import { RequiredMark } from '../common/RequiredMark'
 import { describeApply, useApplyPreview } from '../../hooks/useApplyPreview'
 import { useFormCheck } from '../../hooks/useFormCheck'
@@ -66,8 +67,9 @@ export function ApplySchemasModal({ showToast, onApplied, onClose }) {
 
   return (
     <Modal
-      title={source ? `Apply ${source}` : 'Upload Schemas'}
-      icon={<IconClipboardList size={18} />}
+      title={source ? 'Apply Schemas' : 'Upload Schemas'}
+      subject={source}
+      icon={source ? <IconClipboardList size={18} /> : <IconUpload size={18} />}
       size="lg"
       lead="Applies the whole file, all of it or none. A schema that exists is never edited: a changed one becomes a new draft version to publish when you are ready. It deletes nothing."
       problem={problem ?? check.problem}
@@ -124,18 +126,15 @@ export function ApplySchemasModal({ showToast, onApplied, onClose }) {
             <p className="apply-note">Every schema here is already as the file says. Nothing would change.</p>
           )}
           {removed && (
-            <div className="callout callout-warning" role="status">
-              <IconAlertTriangle size={13} className="callout-icon" />
-              <div>
-                This file removes {plural(removed.count, 'derived metric')}. Once the drafts are published, the devices bound to them
-                no longer have {removed.count === 1 ? 'it' : 'them'}. A file says what is saved, and a file exported before Aber 1.10 names none.
-                <ul className="apply-removed">
-                  {removed.schemas.map(s => (
-                    <li key={s.name}><strong className="mono">{s.name}</strong>: <span className="mono">{s.metrics.join(', ')}</span></li>
-                  ))}
-                </ul>
-              </div>
-            </div>
+            <Callout tone="warning" role="status">
+              This file removes {plural(removed.count, 'derived metric')}. Once the drafts are published, the devices bound to them
+              no longer have {removed.count === 1 ? 'it' : 'them'}. A file says what is saved, and a file exported before Aber 1.10 names none.
+              <ul className="apply-removed">
+                {removed.schemas.map(s => (
+                  <li key={s.name}><strong className="mono">{s.name}</strong>: <span className="mono">{s.metrics.join(', ')}</span></li>
+                ))}
+              </ul>
+            </Callout>
           )}
           <ApplyResults
             results={results}

@@ -4,11 +4,12 @@ import { playbackWorkerDeployed } from '../../config'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { StaticField } from '../common/StaticField'
-import { IconPlay, IconShieldAlert } from '../common/Icons'
+import { IconPlay } from '../common/Icons'
 import { plural } from '../../utils/format'
 import { deviceIdKey } from '../../utils/sparkplugId'
 import { replayLanesUrl } from '../../routes'
@@ -207,7 +208,8 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
 
   return (
     <Modal
-      title={`Play Back Capture${capture.note ? ` — ${capture.note}` : ''}`}
+      title="Play Back Capture"
+      subject={capture.note}
       icon={<IconPlay size={18} />}
       size="wide"
       busy={pending}
@@ -230,54 +232,42 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
     >
       {/* First, because nothing below matters until it is fixed. */}
       {!deployed && (
-        <div className="callout callout-danger">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            <strong>Turn on the playback worker first.</strong> Set{' '}
-            <code>playback.enabled: true</code> in this site’s Helm values, then upgrade the
-            release. The worker is not deployed here, so a playback would never start.
-          </div>
-        </div>
+        <Callout tone="danger">
+          <strong>Turn on the playback worker first.</strong> Set{' '}
+          <code>playback.enabled: true</code> in this site’s Helm values, then upgrade the
+          release. The worker is not deployed here, so a playback would never start.
+        </Callout>
       )}
 
       {/* A replay opens with the edge node's NBIRTH, so the worker refuses a capture without one
           (capture.plan_playback()). */}
       {capture.manifest?.birth_captured === false && (
-        <div className="callout callout-warning">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            This capture contains no <code>NBIRTH</code>, so a playback refuses it: a replay
-            opens with the edge node’s birth certificate. Record it again.
-            The recorder asks the edge node for its birth certificate when it starts.
-          </div>
-        </div>
+        <Callout tone="warning">
+          This capture contains no <code>NBIRTH</code>, so a playback refuses it: a replay
+          opens with the edge node’s birth certificate. Record it again.
+          The recorder asks the edge node for its birth certificate when it starts.
+        </Callout>
       )}
 
       {/* The device list is the manifest's: the dialog does not read the file, which would record a
           download nobody asked for. Play a file… stores the file again with its list. */}
       {capturedDevices === null && (
-        <div className="callout callout-warning">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            This capture was stored without the list of devices it holds, so they cannot be mapped
-            here. Download it, then play the file with <strong>Play a File…</strong>. That stores it
-            again with its list of devices.
-          </div>
-        </div>
+        <Callout tone="warning">
+          This capture was stored without the list of devices it holds, so they cannot be mapped
+          here. Download it, then play the file with <strong>Play a File…</strong>. That stores it
+          again with its list of devices.
+        </Callout>
       )}
 
       <div className="form-group">
         {!only && <label className="form-label" htmlFor="playback-target">Playback Gateway <RequiredMark /></label>}
         {targets === null && <p className="form-hint">Loading the Playback gateway…</p>}
         {targets !== null && targets.length === 0 && (
-          <div className="callout callout-warning">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>
-              The <strong>Playback gateway</strong> could not be found, and a capture can be played
-              back only there. Close this dialog and open it again. If it is still missing, upgrade
-              the release: the upgrade creates it again.
-            </div>
-          </div>
+          <Callout tone="warning">
+            The <strong>Playback gateway</strong> could not be found, and a capture can be played
+            back only there. Close this dialog and open it again. If it is still missing, upgrade
+            the release: the upgrade creates it again.
+          </Callout>
         )}
         {only && (
           <StaticField
@@ -322,50 +312,41 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
       {/* The credential check, shown before the click. Not `status = ONLINE`: the Playback gateway
           is legitimately OFFLINE until a playback runs. */}
       {target && !target.gateway_has_broker_credential && (
-        <div className="callout callout-danger">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            <strong>{target.name}</strong> holds no broker credential, so nothing can authenticate
-            as it. Issue one from the Access Control page. The platform then delivers the password
-            to the playback worker itself.
-          </div>
-        </div>
+        <Callout tone="danger">
+          <strong>{target.name}</strong> holds no broker credential, so nothing can authenticate
+          as it. Issue one from the Access Control page. The platform then delivers the password
+          to the playback worker itself.
+        </Callout>
       )}
 
       {/* The re-issue case, which is the ordinary one: the broker keeps one password per gateway,
           so every mint after the first replaces one and the worker holds the previous password
           until delivery reaches it. */}
       {target && workerLive && workerHolds(target) && !workerHoldsCurrent(target) && (
-        <div className="callout callout-warning">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            <strong>{target.name}</strong>&apos;s broker credential was re-issued after the playback
-            worker last picked one up, so the worker still holds the previous password and the
-            broker would refuse it.
-            <br />
-            Delivery is automatic and takes about a minute. Reopen this dialog then — nothing needs
-            doing here.
-          </div>
-        </div>
+        <Callout tone="warning">
+          <strong>{target.name}</strong>&apos;s broker credential was re-issued after the playback
+          worker last picked one up, so the worker still holds the previous password and the
+          broker would refuse it.
+          <br />
+          Delivery is automatic and takes about a minute. Reopen this dialog then — nothing needs
+          doing here.
+        </Callout>
       )}
 
       {/* Issued and held are different facts, and only the worker knows the second, which it
           reports on a heartbeat. */}
       {target && target.gateway_has_broker_credential && workerLive && !workerHolds(target) && (
-        <div className="callout callout-danger">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            <strong>{target.name}</strong> has a credential, but the playback worker was not given
-            its password, so it cannot authenticate as this gateway.
-            <br />
-            Issuing a credential delivers the password to the worker automatically, within about a
-            minute. To supply one yourself, set the Helm value{' '}
-            <code>secrets.mqttPlaybackCredentials</code> to{' '}
-            <code>{`{"${target.sparkplug_id}":"<password>"}`}</code> and upgrade the release. The
-            password is shown only when the credential is issued, so issue a new one from Access
-            Control if it was not kept.
-          </div>
-        </div>
+        <Callout tone="danger">
+          <strong>{target.name}</strong> has a credential, but the playback worker was not given
+          its password, so it cannot authenticate as this gateway.
+          <br />
+          Issuing a credential delivers the password to the worker automatically, within about a
+          minute. To supply one yourself, set the Helm value{' '}
+          <code>secrets.mqttPlaybackCredentials</code> to{' '}
+          <code>{`{"${target.sparkplug_id}":"<password>"}`}</code> and upgrade the release. The
+          password is shown only when the credential is issued, so issue a new one from Access
+          Control if it was not kept.
+        </Callout>
       )}
 
       {/* Something is already publishing as this gateway, which makes it the wrong target rather
@@ -373,30 +354,24 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
           daemon reports message loss for both. A warning, not a refusal, because re-recording onto
           a deliberately quiesced machine is legitimate. */}
       {target && isLive(target) && (
-        <div className="callout callout-warning">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            <strong>{target.name}</strong> is publishing right now. A playback would be a second
-            publisher on the same edge node, so the two sets of Sparkplug sequence numbers
-            interleave and the daemon reports both as losing messages.
-            <br />
-            The Playback gateway is meant to have no other publisher. Stop whatever is publishing
-            as it before starting a playback.
-          </div>
-        </div>
+        <Callout tone="warning">
+          <strong>{target.name}</strong> is publishing right now. A playback would be a second
+          publisher on the same edge node, so the two sets of Sparkplug sequence numbers
+          interleave and the daemon reports both as losing messages.
+          <br />
+          The Playback gateway is meant to have no other publisher. Stop whatever is publishing
+          as it before starting a playback.
+        </Callout>
       )}
 
       {/* "Holds nothing" and "is not running" are different problems; the heartbeat tells them
           apart. */}
       {deployed && worker !== undefined && !workerLive && (
-        <div className="callout callout-warning">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div>
-            The playback worker has not reported recently, so which gateways it can publish as is
-            unknown. A job started now will queue and wait. Check that the <code>playback</code>
-            {' '}service is running.
-          </div>
-        </div>
+        <Callout tone="warning">
+          The playback worker has not reported recently, so which gateways it can publish as is
+          unknown. A job started now will queue and wait. Check that the <code>playback</code>
+          {' '}service is running.
+        </Callout>
       )}
 
       {target && capturedDevices !== null && capturedDevices.length > 0 && (
@@ -409,15 +384,12 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
           {/* The button writes: it creates one replay lane per captured device and returns the map
               the playback job needs. Reused on the next run. */}
           {unknown.length > 0 && (
-            <div className="callout callout-danger">
-              <IconShieldAlert size={14} className="callout-icon" />
-              <div>
-                This capture records {plural(unknown.length, 'device')} this site does not have:{' '}
-                <span className="mono">{unknown.join(', ')}</span>. Every recorded device must exist
-                here to be played back, so this capture cannot be. It was recorded on another site,
-                or the device has since been deleted.
-              </div>
-            </div>
+            <Callout tone="danger">
+              This capture records {plural(unknown.length, 'device')} this site does not have:{' '}
+              <span className="mono">{unknown.join(', ')}</span>. Every recorded device must exist
+              here to be played back, so this capture cannot be. It was recorded on another site,
+              or the device has since been deleted.
+            </Callout>
           )}
           {unmapped.length > 0 && unknown.length === 0 && (
             <div className="form-group">
@@ -436,13 +408,10 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
           {/* Every captured device is mapped and the gateway lists no device: the lanes were made
               and the re-read of the gateway's devices did not return them. */}
           {target.devices.length === 0 && unmapped.length === 0 && (
-            <div className="callout callout-danger">
-              <IconShieldAlert size={14} className="callout-icon" />
-              <div>
-                {target.name}&apos;s replay lanes could not be read, so there is nothing to map
-                onto. Close this dialog and open it again.
-              </div>
-            </div>
+            <Callout tone="danger">
+              {target.name}&apos;s replay lanes could not be read, so there is nothing to map
+              onto. Close this dialog and open it again.
+            </Callout>
           )}
           {target.devices.length > 0 && (
             <div className="table-wrap">

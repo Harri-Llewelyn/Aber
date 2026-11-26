@@ -1,11 +1,12 @@
 import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { Callout } from '../common/Callout'
 import { CopyField } from '../common/CopyField'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
-import { IconCheck, IconGlobe, IconPlus, IconShieldAlert } from '../common/Icons'
+import { IconPlus } from '../common/Icons'
 import { appUrl } from '../../routes'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import {
@@ -63,31 +64,22 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
     const issuer = authUrl.replace(/\/+$/, '')
     return (
       <Modal
-        title={`${registered.name} Is Registered`}
-        icon={<IconGlobe size={18} />}
+        title="App Registered"
+        subject={registered.name}
+        icon={<IconPlus size={18} />}
         size="lg"
         onClose={onClose}
         dismiss="Done"
       >
         {registered.client_secret ? (
-          <div className="callout callout-warning">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>
-              <strong>Copy the client secret now — it is not shown again.</strong>
-              <div>
-                Closing this dialog discards it, and nothing in Aber keeps a copy. Give it to the person who
-                builds the app, by a channel you trust. If it is lost, remove the app and register it again.
-              </div>
-            </div>
-          </div>
+          <Callout tone="warning" title="Copy the client secret now — it is not shown again.">
+            Closing this dialog discards it, and nothing in Aber keeps a copy. Give it to the person who
+            builds the app, by a channel you trust. If it is lost, remove the app and register it again.
+          </Callout>
         ) : (
-          <div className="callout callout-info">
-            <IconCheck size={14} className="callout-icon" />
-            <div>
-              <strong>It is a public app, so it has no secret.</strong>
-              <div>It signs people in with PKCE alone.</div>
-            </div>
-          </div>
+          <Callout tone="info" title="It is a public app, so it has no secret.">
+            It signs people in with PKCE alone.
+          </Callout>
         )}
 
         <CopyField id="registered-client-id" label="Client ID" value={registered.id} copyLabel="client ID" />
@@ -119,7 +111,7 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
   return (
     <Modal
       title="Register an App"
-      icon={<IconGlobe size={18} />}
+      icon={<IconPlus size={18} />}
       size="lg"
       busy={busy}
       onClose={onClose}

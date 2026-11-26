@@ -36,7 +36,7 @@ beforeEach(() => vi.clearAllMocks())
 describe('DeviceExportModal', () => {
   it('names the device and offers the three formats as one choice', () => {
     const { dialog } = open()
-    expect(screen.getByRole('dialog', { name: 'Export CNC_01' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Export Device — CNC_01' })).toBeInTheDocument()
     expect(dialog.getByRole('radiogroup', { name: 'Format' })).toBeInTheDocument()
     expect(dialog.getAllByRole('radio').map(r => r.value)).toEqual(['json', 'aasx', 'bundle'])
     expect(radio(dialog, /AAS JSON/)).toBeChecked()

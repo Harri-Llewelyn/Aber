@@ -43,7 +43,8 @@ export function DisplayNameModal({ person, onClose, onSaved, showToast }) {
 
   return (
     <Modal
-      title={`Change the Name for ${person.email}`}
+      title="Change the Name"
+      subject={person.email}
       icon={<IconUser size={18} />}
       busy={busy}
       onClose={onClose}

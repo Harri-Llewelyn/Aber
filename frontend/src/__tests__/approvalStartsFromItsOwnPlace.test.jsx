@@ -181,7 +181,7 @@ describe('the Devices page', () => {
     render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
     fireEvent.click(tabLink('Quarantine'))
     fireEvent.click(await screen.findByRole('button', { name: /Approve & Onboard/ }))
-    const dialog = await screen.findByRole('dialog', { name: /Approve Discovered Device/ })
+    const dialog = await screen.findByRole('dialog', { name: /^Approve & Onboard — / })
     fireEvent.click(within(dialog).getByRole('button', { name: /Approve & Onboard/ }))
     return dialog
   }

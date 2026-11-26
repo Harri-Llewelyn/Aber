@@ -179,7 +179,7 @@ describe('the list of runs', () => {
     serveRuns([{ ...FAILED, error: reason }])
     renderTab()
     const failed = await screen.findByTestId('run-j-3')
-    expect(within(failed).getByText(reason)).toHaveClass('truncate')
+    expect(within(failed).getByText(reason).closest('.backup-run-outcome > .overflow-text')).not.toBeNull()
     fireEvent.click(within(failed).getAllByRole('cell')[2])
     expect(within(panel()).getByText(reason)).toBeInTheDocument()
   })
@@ -189,7 +189,7 @@ describe('the list of runs', () => {
     const cells = within(await screen.findByTestId('run-j-1')).getAllByRole('cell')
     // When, Origin, Size, Retention and Off site; Holds cuts to a line like the reason.
     for (const i of [0, 2, 4, 6, 7]) expect(cells[i]).toHaveClass('backup-run-short')
-    expect(cells[5].firstElementChild).toHaveClass('truncate')
+    expect(cells[5].querySelector('.backup-run-holds > .overflow-text')).not.toBeNull()
   })
 
   it('lists a cancelled run as cancelled, with no backup', async () => {
@@ -616,7 +616,7 @@ describe('the row of cards', () => {
     await screen.findByTestId('backup-summary')
     expect(cardState('runs')).toHaveTextContent('Up to date')
     const succeeded = within(card('runs')).getByText('29 of 30 succeeded in 30 days')
-    expect(succeeded).toHaveClass('summary-card-flagged')
+    expect(succeeded.closest('.summary-card-detail')).toHaveClass('summary-card-flagged')
     expect(succeeded.querySelector('svg')).not.toBeNull()
   })
 

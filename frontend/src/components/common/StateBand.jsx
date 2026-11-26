@@ -91,7 +91,7 @@ export function StateBand({ runs, marks = [], start, end, flag = false, alerts =
                 className={`chart-alert${b.startsInside ? ' chart-alert-starts' : ''}${b.endsInside ? ' chart-alert-ends' : ''}`}
                 style={{ left: `${left}%`, width: `${width}%` }}
               >
-                {named && <span className="chart-alert-name">{b.name}</span>}
+                {named && <OverflowText className="chart-alert-name">{b.name}</OverflowText>}
               </div>
             )
           })}
