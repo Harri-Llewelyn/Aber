@@ -4,8 +4,8 @@ import { allFiles, fail, pass, read } from './lib.mjs';
 // 566. docs/architecture.md lists the words for a kind that the code and the migrations use, no more and no
 // fewer. The Audit Trail's are the `table` of each AUDIT_TRAIL_ENTITY_TYPES entry, and the kinds of the
 // last audit_trail_action_kinds(); the two agree or the trail has a kind nobody can filter. The other
-// columns' words are in their CHECK constraints, read from the last migration that states each. `links`
-// has no CHECK, so its words are what the dashboard opens EntityLinksModal with. A word no
+// columns' words are in their CHECK constraints, read from the last migration that states each. `links`'
+// are also what the dashboard opens EntityLinksModal with, or a link is on no page. A word no
 // `CREATE TABLE public.<word>` makes is one a reader would look for, so its row has to say so.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
@@ -69,6 +69,7 @@ export default function check() {
     'retired_entities.entity_type': 'retired_entities_type_known',
     'asset_exports.entity_type': 'asset_exports_type_known',
     'platform_alerts.entity_type': 'platform_alerts_entity_type_valid',
+    'links.entity_type': 'links_entity_type_known',
     'captures.subject_kind': 'captures_subject_kind_valid',
     'capture_jobs.subject_kind': 'capture_jobs_subject_kind_valid',
     'capture_uploads.subject_kind': 'capture_uploads_subject_kind_valid',
@@ -87,10 +88,10 @@ export default function check() {
     const [column] = codes(first);
     listedColumns.add(column);
     if (column === 'links.entity_type') compare('the dashboard\'s EntityLinksModal', sorted(codes(words)), links);
-    else if (CHECKS[column]) compare(`${CHECKS[column]} (${column})`, sorted(codes(words)), admitted(CHECKS[column]));
+    if (CHECKS[column]) compare(`${CHECKS[column]} (${column})`, sorted(codes(words)), admitted(CHECKS[column]));
     else problems566.push(`docs/architecture.md lists ${column}, which check 566 has no source for: name its CHECK here`);
   }
-  for (const column of [...Object.keys(CHECKS), 'links.entity_type']) {
+  for (const column of Object.keys(CHECKS)) {
     if (!listedColumns.has(column)) problems566.push(`docs/architecture.md does not list ${column}`);
   }
 
