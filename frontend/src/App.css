@@ -5555,6 +5555,8 @@ a.chip { text-decoration: none; }
   gap: 4px;
   margin-top: 4px;
 }
+/* The rest of a long list, "and N more", a link centred on its row of chips. */
+.context-device-list > .count-link { align-self: center; }
 
 /* A gateway's device list once the devices' last readings are read: a row for each device, its chip
    at the start and the time of its last reading at the end, the muted words of an empty field when
