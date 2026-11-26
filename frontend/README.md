@@ -3784,7 +3784,8 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
     below 520px a table with no group rows wraps its header labels.
   - **A table with a grid of its own** (the Metrics tables' colgroup) hides its `<col>` with the
     column and narrows the columns left in the same steps (`.metric-col-*`), so its tabs still line up.
-    The Entities tables keep their own query (`@container entities`).
+    The Entities tables keep their own query (`@container entities`), and below 520px they too send
+    the UUID to the drawer.
   - `tablesFitTheirCards.test.jsx` holds each list page's table to the table below: its header and
     every cell of a column carry the same step, and the steps are App.css's. Whether a table fits is
     measured in a browser; jsdom lays nothing out.

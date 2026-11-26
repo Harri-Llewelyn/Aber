@@ -1992,6 +1992,17 @@ tbody tr.table-group-foot:hover { background: none; }
   .table-entities-retired th:nth-child(3) { width: 19%; }
   .table-entities-retired th:nth-child(5) { width: 23%; }
 }
+/* Narrower still, the UUID goes to the drawer, as a list page's does below 520px: it would show a few
+   characters, and the columns left need its room for their headers and badges. */
+@container entities (max-width: 519px) {
+  .table-entities tr > :nth-child(2) { display: none; }
+  .table-entities th:nth-child(1) { width: 34%; }
+  .table-entities-archived th:nth-child(1) { width: 30%; }
+  .table-entities-archived th:nth-child(3) { width: 26%; }
+  .table-entities-retired th:nth-child(1) { width: 28%; }
+  .table-entities-retired th:nth-child(3) { width: 22%; }
+  .table-entities-retired th:nth-child(5) { width: 32%; }
+}
 
 /* A list page's table fits its card at every width (`.table-fit`), by a query on its scroller, so a drawer
    opening or the rail closing is a narrower card. A column marked `fit-N` needs a card of N px: below
