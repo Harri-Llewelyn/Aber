@@ -42,17 +42,17 @@ const UPLOADS = [
   {
     what: 'schemas', Dialog: ApplySchemasModal, more: {}, check: () => api.applyDeviceSchemas, testId: 'schemas-file',
     title: 'Upload Schemas', act: 'Apply Schemas', prompt: 'Drop a file of schemas here, or click to choose one',
-    limit: 8, after: 'Apply a.yaml', applies: 'Apply 1 Schema',
+    limit: 8, after: 'Apply Schemas — a.yaml', applies: 'Apply 1 Schema', file: 'Apply Schemas',
   },
   {
     what: 'automations', Dialog: ApplyAutomationsModal, more: {}, check: () => api.applyAutomations, testId: 'automations-file',
     title: 'Upload Automations', act: 'Apply Automations', prompt: 'Drop a file of automations here, or click to choose one',
-    limit: 2, after: 'Apply a.yaml', applies: 'Apply 1 Automation',
+    limit: 2, after: 'Apply Automations — a.yaml', applies: 'Apply 1 Automation', file: 'Apply Automations',
   },
   {
     what: 'derived metrics', Dialog: DerivedMetricsEditorModal, more: { uploads: true, catalog: [] }, check: () => api.applyDerivedMetrics,
     testId: 'derived-metrics-file', title: 'Upload Derived Metrics', act: 'Apply Derived Metrics',
-    prompt: 'Drop a file of derived metrics here, or click to choose one', limit: 8, after: 'Edit a.yaml',
+    prompt: 'Drop a file of derived metrics here, or click to choose one', limit: 8, after: 'Edit Derived Metrics — a.yaml',
   },
 ]
 
@@ -160,7 +160,7 @@ describe.each(UPLOADS.filter(u => u.applies))('another file of $what', (upload) 
     expect(await checked('second_one')).toBeInTheDocument()
     expect(within(dialog()).queryByText('first_one', { exact: false })).toBeNull()
     expect(dialog()).toBe(before)
-    expect(screen.getByRole('dialog', { name: 'Apply b.yaml' })).toBe(before)
+    expect(screen.getByRole('dialog', { name: `${upload.file} — b.yaml` })).toBe(before)
     expect(upload.check().mock.calls.map(([, dry]) => dry)).toEqual([true, true])
   })
 
@@ -196,7 +196,7 @@ describe('another file of derived metrics', () => {
     expect(text()).toContain('# typed')
     await choose('derived-metrics-file', yaml('b.yaml', '- name: B/TWO\n'))
     expect(text()).toBe('- name: B/TWO\n')
-    expect(screen.getByRole('dialog', { name: 'Edit b.yaml' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Edit Derived Metrics — b.yaml' })).toBeInTheDocument()
     // The first file's text is not an undo away from the second's.
     act(() => { undo(view()) })
     expect(text()).toBe('- name: B/TWO\n')
@@ -209,7 +209,7 @@ describe('another file of derived metrics', () => {
     await act(async () => { fireEvent.click(within(dialog()).getByRole('button', { name: 'Apply Derived Metrics' })) })
     const preview = screen.getAllByRole('dialog')[1]
     expect(within(preview).getByText('No such metric.')).toBeInTheDocument()
-    expect(within(preview).getByRole('heading', { name: 'Apply a.yaml' })).toBeInTheDocument()
+    expect(within(preview).getByRole('heading', { name: 'Apply Derived Metrics — a.yaml' })).toBeInTheDocument()
     expect(api.applyDerivedMetrics.mock.calls[0][0]).toEqual([{ name: 'A/ONE', kind: 'sum' }])
     fireEvent.click(within(preview).getByRole('button', { name: 'Cancel' }))
     await choose('derived-metrics-file', yaml('b.yaml', '- name: B/TWO\n  kind: sum\n'))

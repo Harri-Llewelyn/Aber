@@ -123,7 +123,7 @@ describe('the Quarantine tab', () => {
     const dialog = await open()
     expect(screen.getByText('Possible match: CNC_02')).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Accept Match' }))
-    const question = screen.getByRole('dialog', { name: 'Accept Match' })
+    const question = screen.getByRole('dialog', { name: /^Accept Match — / })
     fireEvent.click(within(question).getByRole('button', { name: 'Accept Match' }))
     expect(await within(question).findByRole('alert')).toHaveTextContent(refusal)
     expect(question).toBeInTheDocument()

@@ -55,7 +55,7 @@ beforeEach(() => {
 describe('Model3DUploader', () => {
   it('is one window-sized dialog, titled with the device', () => {
     render(<Model3DUploader device={device()} canManage showToast={vi.fn()} />)
-    const dialog = screen.getByRole('dialog', { name: 'CNC_01' })
+    const dialog = screen.getByRole('dialog', { name: '3D Model — CNC_01' })
     expect(dialog.querySelector('.modal')).toHaveClass('modal-full')
   })
 
@@ -136,9 +136,9 @@ describe('Model3DUploader', () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} {...props} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
       fireEvent.click(getByTooltip(/Detach this model/i))
-      return screen.getByRole('dialog', { name: 'Remove 3D Model' })
+      return screen.getByRole('dialog', { name: /^Remove 3D Model — / })
     }
-    const confirmDialog = () => screen.queryByRole('dialog', { name: 'Remove 3D Model' })
+    const confirmDialog = () => screen.queryByRole('dialog', { name: /^Remove 3D Model — / })
 
     it('asks first, naming the device and saying the file is deleted', async () => {
       const dialog = await openRemove()
@@ -158,7 +158,7 @@ describe('Model3DUploader', () => {
 
       expect(confirmDialog()).toBeNull()
       // The model's own dialog is still open beneath.
-      expect(screen.getByRole('dialog', { name: 'CNC_01' })).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: '3D Model — CNC_01' })).toBeInTheDocument()
       expect(api.removeDeviceModel).not.toHaveBeenCalled()
       expect(onChange).not.toHaveBeenCalled()
       expect(onClose).not.toHaveBeenCalled()
@@ -268,7 +268,7 @@ describe('Model3DUploader', () => {
     rerender(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
 
     expect(await screen.findByTestId('model-3d-viewer')).toBeInTheDocument()
-    expect(screen.getByRole('dialog', { name: 'CNC_01' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '3D Model — CNC_01' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Upload a 3D model/i })).toBeNull()
   })
 

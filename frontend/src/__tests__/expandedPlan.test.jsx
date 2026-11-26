@@ -110,7 +110,7 @@ describe('the Site Map', () => {
     const open = dialog()
     expect(open).not.toBeNull()
     expect(open.querySelector('.modal')).toHaveClass('modal-full')
-    expect(within(open).getByRole('heading', { name: 'North Shop' })).toBeInTheDocument()
+    expect(within(open).getByRole('heading', { name: 'Area Plan — North Shop' })).toBeInTheDocument()
     // The legend, repeated in the header.
     expect(open.querySelector('.modal-header-controls .shopfloor-legend')).not.toBeNull()
     // The pins are live, coloured from the same data as the card.
@@ -195,7 +195,7 @@ describe('the Areas panel', () => {
     expect(screen.queryByRole('link')).toBeNull()
     press(expand)
 
-    expect(within(dialog()).getByRole('heading', { name: 'North Shop' })).toBeInTheDocument()
+    expect(within(dialog()).getByRole('heading', { name: 'Area Plan — North Shop' })).toBeInTheDocument()
     const pins = dialog().querySelectorAll('.area-plan-pin')
     expect(pins).toHaveLength(2)
     for (const pin of pins) expect(pin.tagName).toBe('SPAN')

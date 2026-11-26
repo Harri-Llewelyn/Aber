@@ -137,7 +137,7 @@ describe('proposing a change from a device', () => {
     openPanel()
     clickAction('Propose a Change')
 
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
     // The same fields a manager gets, seeded from the same row.
     expect(screen.getByDisplayValue('CNC_01')).toBeInTheDocument()
   })
@@ -146,7 +146,7 @@ describe('proposing a change from a device', () => {
     await show(asOperator)
     openPanel()
     clickAction('Propose a Change')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
 
     // The footer is the only thing that differs between the two readers. Scoped to
     // `.modal-actions` because the drawer action standing behind the dialog says the same words.
@@ -159,7 +159,7 @@ describe('proposing a change from a device', () => {
     await show(asManager)
     openPanel()
     clickAction('Edit Details')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
 
     const footer = within(document.querySelector('.modal-actions'))
     expect(footer.getByRole('button', { name: /save device/i })).toBeInTheDocument()
@@ -172,7 +172,7 @@ describe('proposing a change from a device', () => {
     await show(asOperator)
     openPanel()
     clickAction('Propose a Change')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
 
     const locked = [...document.querySelectorAll('.form-hint-locked')].map(n => n.textContent)
     expect(locked.some(t => /data path/i.test(t)), 'the gateway note').toBe(true)
@@ -186,7 +186,7 @@ describe('proposing a change from a device', () => {
     await show(asOperator)
     openPanel()
     clickAction('Propose a Change')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
 
     const locked = [...document.querySelectorAll('.form-hint-locked')]
     expect(locked).toHaveLength(3)
@@ -206,7 +206,7 @@ describe('proposing a change from a device', () => {
     await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeTruthy())
     fireEvent.click(within(document.querySelector('.page-main')).getByText('CNC_01 (replay)'))
     clickAction('Propose a Change')
-    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /^Edit Device Configuration — / })).toBeInTheDocument())
 
     // Fixed for everyone, so a label and not a greyed select; the other withheld fields stay controls.
     expect(document.querySelector('#device-gateway')).toBeNull()

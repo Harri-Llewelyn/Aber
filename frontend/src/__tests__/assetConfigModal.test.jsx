@@ -306,7 +306,7 @@ describe('Configuration Parameters: what the dialog names, and how it says a dev
       const dialog = screen.getByRole('dialog', { name: 'Device Configuration Parameters — Assembly Device (replay)' })
       expect(dialog).toBeInTheDocument()
       expect(dialog.querySelector('.modal-title')).not.toHaveTextContent(DEVICE_UUID)
-      expect(dialog.querySelector('.modal-title .mono')).toBeNull()
+      expect(dialog.querySelector('.modal-title .modal-subject')).toHaveTextContent(/^Assembly Device \(replay\)$/)
     })
 
     it('shows no UUID of the device anywhere in the dialog', async () => {

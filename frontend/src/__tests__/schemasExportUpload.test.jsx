@@ -183,7 +183,7 @@ describe('Upload', () => {
     expect(api.applyDeviceSchemas.mock.calls[0][1]).toBe(true)
     expect(api.applyDeviceSchemas.mock.calls[0][0].map(s => s.name)).toEqual(['Robot_Arm_Schema', 'Conveyor_Schema', 'Press_Schema'])
     const d = dialog()
-    expect(d.getByRole('heading', { name: /Apply device-schemas\.yaml/ })).toBeInTheDocument()
+    expect(d.getByRole('heading', { name: /Apply Schemas — device-schemas\.yaml/ })).toBeInTheDocument()
     expect(d.getByText('1 new, 1 changed, 1 unchanged')).toBeInTheDocument()
     expect(d.getByText('version 1, in force')).toBeInTheDocument()
     expect(d.getByText('a new draft, v2 (Robot_Arm_Schema_v2): adds Spindle/LOAD; removes Belt/OLD; changes the range of Spindle/TEMPERATURE; changes the description')).toBeInTheDocument()
