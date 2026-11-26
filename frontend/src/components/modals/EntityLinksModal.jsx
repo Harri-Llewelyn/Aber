@@ -14,6 +14,7 @@ import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ConfirmModal } from './ConfirmModal'
+import { OverflowText } from '../common/OverflowText'
 import { Tooltip } from '../common/Tooltip'
 import {
   IconBookOpen,
@@ -263,8 +264,8 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
                        </Badge>
                        {getDomainBadgeIcon(d.url)}
                      </div>
-                     <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                       {d.url}
+                     <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                       <OverflowText>{d.url}</OverflowText>
                      </div>
                    </div>
 

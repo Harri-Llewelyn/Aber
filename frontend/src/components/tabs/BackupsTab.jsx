@@ -23,6 +23,7 @@ import { cronIntervalSeconds } from '../../utils/cronInterval'
 import { formatBytes, formatClockTime, formatDateTime, formatDuration, formatRelative, NO_VALUE, plural } from '../../utils/format'
 import { nextHistorianBackup } from '../../utils/historianBackupSchedule'
 import { readFlag, readSetting } from '../../config'
+import { OverflowText } from '../common/OverflowText'
 import { Tooltip } from '../common/Tooltip'
 import { ColumnHeader } from '../common/SortHeader'
 import { PERMISSION_UUIDS } from '../../constants'
@@ -841,9 +842,9 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
         <Badge tone={badge.tone} size="sm">{badge.label}</Badge>
         {/* Cut to one line; the tooltip, and the run's panel, give the whole of it. */}
         {outcome && (
-          <Tooltip text={outcome}>
-            <div className={`cell-meta truncate backup-run-outcome${run.status === 'FAILED' ? ' backup-run-failed' : ''}`}>
-              {outcome}
+          <Tooltip text={outcome} describe={false}>
+            <div className={`cell-meta backup-run-outcome${run.status === 'FAILED' ? ' backup-run-failed' : ''}`}>
+              <OverflowText>{outcome}</OverflowText>
             </div>
           </Tooltip>
         )}
@@ -853,7 +854,7 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
       {b ? (
         <>
           <td className="backup-run-short">{formatBytes(b.size_bytes)}</td>
-          <td><Tooltip text={componentSummary(b.components)}><div className="truncate backup-run-holds">{componentSummary(b.components)}</div></Tooltip></td>
+          <td><Tooltip text={componentSummary(b.components)} describe={false}><div className="backup-run-holds"><OverflowText>{componentSummary(b.components)}</OverflowText></div></Tooltip></td>
           <td className="backup-run-short"><RetentionCell backup={b} kept={keptBecause(b, { inFloor, retentionDays })} retentionDays={retentionDays} /></td>
           <td className="backup-run-short"><OffsiteCell backup={b} base={base} /></td>
         </>

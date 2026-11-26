@@ -537,8 +537,8 @@ describe('the Location row in the context panel', () => {
   it('is one row: the area and the cell, marked as from the gateway when inherited', async () => {
     const value = await location()
     expect(value.textContent).toBe('North Shop›Assembly(from gateway)')
-    expect(within(value).getByRole('link', { name: /North Shop/ })).toHaveAccessibleDescription('Open this area on the Areas page')
-    expect(within(value).getByRole('link', { name: /Assembly/ })).toHaveAccessibleDescription('Open this cell on the Cells page')
+    expect(within(value).getByRole('link', { name: /North Shop/ })).toHaveAccessibleDescription('Open North Shop on the Areas page')
+    expect(within(value).getByRole('link', { name: /Assembly/ })).toHaveAccessibleDescription('Open Assembly on the Cells page')
     const labels = [...document.querySelectorAll('.context-panel .context-field-label')].map(l => l.textContent)
     expect(labels).not.toContain('Area (resolved)')
     expect(labels).not.toContain('Location Source')

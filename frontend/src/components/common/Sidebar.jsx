@@ -3,6 +3,7 @@ import { currentTabOf, groupedNav, tabHref } from '../../navigation'
 import { useHoverIntent } from '../../hooks/useHoverIntent'
 import { useUrl } from '../../hooks/useUrlState'
 import { IconChevronDown, IconChevronUp, IconChevronsDownUp } from './Icons'
+import { OverflowText } from './OverflowText'
 import { RouteLink } from './RouteLink'
 import { Tooltip } from './Tooltip'
 import { signalFromParts } from '../../utils/navSignal'
@@ -200,7 +201,8 @@ function PageLink({ page, href, current, signal, onNavigate, expanded, ariaCurre
  * links, so Tab reaches the link, the chevron, then each tab, and no arrow keys are involved. The
  * list shows while the page is open and the rail is wide; the collapsed rail has no room for it,
  * and the page's own tab bar is one click away. The tabs carry no tooltips: one on every entry
- * would flash as the pointer moves down the rail.
+ * would flash as the pointer moves down the rail. A label too long for the rail slides on hover or
+ * focus, and wraps under reduced motion (App.css).
  *
  * While the list is on screen each of the page's signals moves to the tab it is about (`signalTabs`),
  * with the tab's words ("Quarantine, 3 waiting"), so no number shows twice. A page with two signals
@@ -254,7 +256,7 @@ function SidebarPage({ page, href, current, signal, onNavigate, currentTabId, op
                 aria-current={here ? 'page' : undefined}
                 aria-label={part ? `${tab.label}, ${part.tabNote ?? part.note}` : undefined}
               >
-                <span className="sidebar-tab-label">{tab.label}</span>
+                <OverflowText className="sidebar-tab-label">{tab.label}</OverflowText>
                 {part && <span className={`sidebar-tab-count sidebar-tab-count-${part.tone}`} aria-hidden="true">{countText(part.count)}</span>}
               </RouteLink>
             </li>

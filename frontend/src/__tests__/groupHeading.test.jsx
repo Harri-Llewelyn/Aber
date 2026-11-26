@@ -27,7 +27,7 @@ describe('GroupHeading', () => {
     const count = document.querySelector('.group-heading-count')
     expect(count.querySelector('[aria-hidden="true"]')).toHaveTextContent('· 12')
     expect(count.querySelector('.sr-only')).toHaveTextContent(', 12 lanes')
-    expect(screen.getByText('Devices')).toHaveClass('table-group-label')
+    expect(screen.getByText('Devices').closest('.overflow-text')).toHaveClass('table-group-label')
   })
 
   it('speaks the bare number without a countLabel, and draws no count without a count', () => {

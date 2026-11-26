@@ -11,6 +11,7 @@ import { ArchivedBadge, Badge } from '../common/Badge'
 import { ContextPanel } from '../common/ContextPanel'
 import { gatewayRepositoryUrl } from '../common/GatewayRepositoryPanel'
 import { PersonName } from '../common/PersonName'
+import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
 import { Tooltip } from '../common/Tooltip'
 import {
@@ -22,7 +23,7 @@ import {
 function PlaceChip({ to, icon, name, page }) {
   return (
     <RouteLink className="chip chip-link" to={to} title={`Open ${name} on the ${page} page`}>
-      {icon}<span className="chip-name">{name}</span>
+      {icon}<OverflowText className="chip-name">{name}</OverflowText>
     </RouteLink>
   )
 }

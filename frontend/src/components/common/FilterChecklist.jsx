@@ -2,6 +2,7 @@ import React, { useId, useLayoutEffect, useRef, useState } from 'react'
 import { PANEL_LIST, ToolbarPopover } from './FiltersPopover'
 import { SearchInput } from './SearchInput'
 import { HelpTip } from './HelpTip'
+import { OverflowText } from './OverflowText'
 // Renamed here: GroupHeading below is a checklist group's checkbox heading.
 import { GroupHeading as SectionHeading } from './GroupHeading'
 
@@ -158,7 +159,8 @@ export function filterWords({ value, options, noun, plural, words, everyIsAny = 
  * is chosen (filterWords) and opens the checklist, with Clear in its foot. Clear returns the filter
  * to `defaultValue`, as the toolbar's Clear filters does. The button keeps the select's width
  * (`width`: sm, md or lg), so the toolbar keeps its shape whatever is chosen; words too long for it
- * are cut, and `tip` is its tooltip.
+ * are cut and slide on hover or focus, and while they are cut the tooltip says them whole, before
+ * `tip`, since reduced motion stops the slide.
  *
  *   <FilterDropdown label="Status" noun="status" plural="statuses" options={STATUSES}
  *     value={status} onChange={setStatus} counts={counts.status} width="md" />
@@ -168,13 +170,16 @@ export function FilterDropdown({
   defaultValue = NONE, width = 'md', tip,
 }) {
   const text = filterWords({ value, options, noun, plural, words, everyIsAny })
+  // Whether the words were cut when OverflowText last measured them, as the pointer or focus arrived.
+  const [cut, setCut] = useState(false)
+  const name = `${label}: ${text}`
   return (
     <ToolbarPopover
       label={label}
-      button={<span className="filter-dropdown-words">{text}</span>}
-      buttonLabel={`${label}: ${text}`}
+      button={<OverflowText className="filter-dropdown-words" onMeasure={setCut}>{text}</OverflowText>}
+      buttonLabel={name}
       buttonClass={`btn btn-sm btn-ghost filter-dropdown control-${width}`}
-      tip={tip}
+      tip={cut ? (tip ? `${name}. ${tip}` : name) : tip}
       foot={(
         <button type="button" className="btn btn-sm btn-ghost" disabled={sameSet(value, defaultValue)} onClick={() => onChange(defaultValue)}>
           Clear

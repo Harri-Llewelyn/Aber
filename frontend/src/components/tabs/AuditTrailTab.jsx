@@ -2184,7 +2184,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                 onClick={() => setChangedBy([])}
                 aria-label={`Changed by ${changedByWords}. Show everyone's changes`}
               >
-                <span className="chip-name">Changed by {changedByWords}</span>
+                <OverflowText className="chip-name">Changed by {changedByWords}</OverflowText>
                 <IconX size={11} aria-hidden="true" />
               </button>
             </Tooltip>
@@ -2395,7 +2395,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                                       ? <OverflowText className="trail-lane-name">{lane.name}</OverflowText>
                                       /* Neither the join nor a snapshot could name it: the shortened
                                          id, monospaced. */
-                                      : <span className="trail-lane-name trail-lane-unnamed mono">{shortId(lane.entityId)}</span>}
+                                      : <OverflowText className="trail-lane-name trail-lane-unnamed mono">{shortId(lane.entityId)}</OverflowText>}
                                     {/* Must survive truncation: each version of a schema has a name of
                                         its own, and they differ only at the end, which is what a long
                                         name loses. */}
@@ -2404,7 +2404,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                                     )}
                                     {/* A person's email beside their display name: the name alone is
                                         not enough to tell who it was. */}
-                                    {lane.email && <span className="trail-lane-email">{lane.email}</span>}
+                                    {lane.email && <OverflowText className="trail-lane-email">{lane.email}</OverflowText>}
                                     {/* `gone`, not `fromSnapshot`: a name from a snapshot says where
                                         the label came from, and a settings or backup lane is named
                                         that way while existing perfectly well. */}

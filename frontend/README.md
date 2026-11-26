@@ -144,9 +144,10 @@ Only what acts looks clickable. `.mono` is a typeface and takes the text colour;
 means a real link (the System page's open chip, a `.count-link`). An id that copies is a
 `CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A value a
 dialog hands over is a `CopyField` ([A value to copy](#a-value-to-copy)). A long
-id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`). The copy and the aria
-label always carry the full value. The tooltip carries it whenever the chip is cut, measured as the
-tooltip opens, and otherwise says "Click to copy this {label}". A read-only or disabled `.form-control` takes the page background and muted
+id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`). A cut value slides on
+hover or focus (`OverflowText`); with `truncate="start"` the cut part slides towards the end it keeps.
+The copy and the aria label always carry the full value. The tooltip carries it whenever the chip is
+cut, measured as the pointer or focus arrives, and otherwise says "Click to copy this {label}". A read-only or disabled `.form-control` takes the page background and muted
 text, and `.btn-warning` is the amber button for a risky action that is not destructive.
 
 ### The rail opens when the pointer rests on it
@@ -360,16 +361,27 @@ slides back when they leave. A label's focus is its checkbox's. An option highli
 elsewhere, as in the top bar's search, passes `active`, which slides it as focus does.
 
 - It never moves by itself, and under `prefers-reduced-motion` it does not move at all, so the
-  control's tooltip must carry the whole text, or the text must wrap there (a list picker's rows).
-- It measures as it activates (`scrollWidth` against `clientWidth`), as `CopyableId` does, so a
-  drawer opening needs no listener. `onMeasure(cut)` hears each measurement.
-- A section heading's `detail` (`GroupHeading`) is its button's tooltip while it is cut, and only
-  then, through `onMeasure`. The tooltip does not describe the button (`describe={false}`): the
-  heading's sr-only words already give a screen reader the whole value.
+  control's tooltip must carry the whole text, or the text must wrap there (a list picker's rows,
+  and the rail's tabs, which carry no tooltips).
+- A tap slides nothing. The mouse events and the focus a tap raises are ignored, and a tooltip
+  carries the whole text there too.
+- The control is the nearest button, link, label or element a keyboard reaches. A dialog or a
+  panel that takes the focus by script (`tabindex="-1"`) is not one, so a line with no control of
+  its own reacts to the pointer on itself. `host`, a ref, names the control where the line sits
+  beside it: `SearchInput`'s placeholder over its field, and a plan's pin inside a card that takes
+  the focus.
+- It measures as it activates (`scrollWidth` against `clientWidth`), so a drawer opening needs no
+  listener. `onMeasure(cut)` hears each measurement.
+- Where a tooltip does not already say the whole text, it says it while the text is cut, through
+  `onMeasure`: a group's name and `detail` (`GroupHeading`), a list filter's chosen values, a copy
+  chip's value, an area card's name and a plan pin's label. Where the words are the control's
+  name, the tooltip does not describe it again (`describe={false}`).
+- `SearchInput` draws its placeholder through it, over the empty field. The field keeps its native
+  `placeholder`, transparent, for a screen reader.
 - The whole text is always in the DOM, so a screen reader hears all of it.
 
-The Audit Trail's lane names use it first. The dashboard's other cut lines move onto it with
-[#1219](https://github.com/Harri-Llewelyn/Aber/issues/1219).
+Every line the dashboard cuts is one. Drift check 614 refuses `text-overflow: ellipsis` outside
+OverflowText's own rule, an inline `textOverflow`, and a chip's name (`.chip-name`) on anything else.
 
 ### A unit is a symbol where it is read, and a code where it is exchanged
 
@@ -3044,6 +3056,12 @@ in "building management system".
 - **Colour is never the only signal.** Tabs, sidebar flags, warning buttons and the Audit Trail
   markers each carry an icon, a shape or a number as well (WCAG 2.2 SC 1.4.1).
 - **The sidebar** colours an icon only when the viewer can act on what it flags, and shows how many.
+- **Cut text.** A line too long for its place ends in an ellipsis. On hover or keyboard focus it
+  slides to show the rest, and back when they leave. It never moves on its own or for a tap, and
+  only text that is really cut moves. Every such line is a `common/OverflowText`, a search box's
+  placeholder included, and its rule is the only one in `App.css` with the ellipsis (drift check 614).
+  Under reduced motion nothing moves, so the tooltip carries the whole text while it is cut, or the
+  line wraps ([Cut text slides on hover or focus](#cut-text-slides-on-hover-or-focus)).
 - **Archived things are hidden by default**, in every list and on the Site Map. A list opens on
   Active, archived rows are one filter away, and Entities' Archived tab lists them all.
 - **Sizes** use binary units labelled KiB and MiB. There is one relative-time style and one absolute
