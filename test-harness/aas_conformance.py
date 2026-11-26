@@ -3,6 +3,7 @@ IDTA's own test engine against aas-api: what passes, measured, and why the rest 
 
     pip install aas_test_engines==1.0.3      # PINNED; Python 3.13 or older
     python test-harness/aas_conformance.py --server URL --token TOKEN [--report-dir DIR]
+        [--provision GATEWAY_URL --apikey KEY]
 
 URL is aas-api's base, such as http://127.0.0.1:18080/functions/v1/aas-api through a port-forward of
 the gateway, and TOKEN a person's or a machine identity's access token. CI runs it in the stack job.
@@ -24,6 +25,9 @@ import json
 import sys
 from importlib import metadata
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import aas_fixture  # noqa: E402  -- after sys.path, by necessity
 
 PINNED = "1.0.3"
 
@@ -178,6 +182,9 @@ def main(argv=None):
     parser.add_argument("--server", required=True, help="aas-api's base URL")
     parser.add_argument("--token", required=True, help="a person's or a machine identity's access token")
     parser.add_argument("--report-dir", type=Path, help="where to write each profile's JSON and HTML report")
+    parser.add_argument("--provision", metavar="GATEWAY_URL",
+                        help="make the AAS fixture through this gateway first, and remove it after")
+    parser.add_argument("--apikey", default="", help="the publishable key, for --provision")
     args = parser.parse_args(argv)
 
     try:
@@ -187,12 +194,20 @@ def main(argv=None):
         return 2
     if installed != PINNED:
         print(f"aas_test_engines {installed} is installed, and this is written for {PINNED}. Read its "
-              "changes, run this against the dev stack, and move PINNED, NOT_IMPLEMENTED and the README together.")
+              "changes, run this against the dev stack, and move PINNED, PASSING and the README together.")
         return 2
 
     if args.report_dir:
         args.report_dir.mkdir(parents=True, exist_ok=True)
-    verdict, problems, lines = judge(run(args.server, args.token, args.report_dir))
+    # The engine tests the first shell /shells lists, and a stack whose suites removed their devices
+    # has none. The fixture is the AAS suites' own subject, and its teardown names its own rows alone.
+    if args.provision:
+        aas_fixture.ensure(args.provision, args.token, args.apikey)
+    try:
+        verdict, problems, lines = judge(run(args.server, args.token, args.report_dir))
+    finally:
+        if args.provision:
+            aas_fixture.teardown(args.provision, args.token, args.apikey)
     print(f"IDTA aas-test-engines {PINNED} against {args.server}")
     for line in lines:
         print(f"  {line}")

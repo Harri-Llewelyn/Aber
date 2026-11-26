@@ -3,7 +3,8 @@
 #   why: The verdict CI states about aas-api against IDTA's test engine, read from the engine's own
 #     result tree. A recorded pass that fails, or a server error anywhere, must fail the run, and an
 #     operation that starts to pass must be named rather than fail it, or the README's statement of
-#     what passes goes stale. Runs without the engine: it judges the JSON the engine writes.
+#     what passes goes stale. The fixture the engine reads is made first and removed after, even when
+#     the engine fails. Runs without the engine: it judges the JSON the engine writes.
 
 """
 aas_conformance.py judges the engine's results as the README states them.
@@ -13,6 +14,7 @@ aas_conformance.py judges the engine's results as the README states them.
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aas_conformance  # noqa: E402  -- after sys.path, by necessity
@@ -91,6 +93,57 @@ class TestTheVerdict(unittest.TestCase):
         verdict, problems, _ = judge(reached=False)
         self.assertEqual(verdict, "Regressed")
         self.assertIn("did not reach the server", problems[0])
+
+
+class TestTheSubject(unittest.TestCase):
+    """--provision makes the AAS fixture before the engine runs and removes it after, whatever happens."""
+
+    def setUp(self):
+        self.calls = []
+        fixture = mock.Mock()
+        fixture.ensure.side_effect = lambda *a: self.calls.append(("ensure", a))
+        fixture.teardown.side_effect = lambda *a: self.calls.append(("teardown", a))
+        patches = [
+            mock.patch.object(aas_conformance, "aas_fixture", fixture),
+            mock.patch.object(aas_conformance.metadata, "version", return_value=aas_conformance.PINNED),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def main(self, *extra):
+        return aas_conformance.main(["--server", "http://gw.test/functions/v1/aas-api", "--token", "a-token", *extra])
+
+    def test_the_fixture_is_made_first_and_removed_after(self):
+        def run(*_):
+            self.calls.append(("run",))
+            return {"aas-repository": profile(op("GetDescription"), op("GetAssetInformation"))}
+
+        with mock.patch.object(aas_conformance, "run", side_effect=run), \
+                mock.patch.object(aas_conformance, "PASSING", PASSING), mock.patch("builtins.print"):
+            status = self.main("--provision", "http://gw.test", "--apikey", "not-a-real-key")
+        self.assertEqual(status, 0)
+        self.assertEqual([c[0] for c in self.calls], ["ensure", "run", "teardown"])
+        self.assertEqual(self.calls[0][1], ("http://gw.test", "a-token", "not-a-real-key"))
+
+    def test_the_fixture_is_removed_when_the_engine_fails(self):
+        with mock.patch.object(aas_conformance, "run", side_effect=RuntimeError("engine")):
+            with self.assertRaises(RuntimeError):
+                self.main("--provision", "http://gw.test")
+        self.assertEqual([c[0] for c in self.calls], ["ensure", "teardown"])
+
+    def test_without_provision_nothing_is_made(self):
+        with mock.patch.object(aas_conformance, "run", return_value={"aas-repository": profile(op("GetDescription"))}), \
+                mock.patch("builtins.print"):
+            self.main()
+        self.assertEqual(self.calls, [])
+
+    def test_another_engine_version_makes_nothing_and_runs_nothing(self):
+        with mock.patch.object(aas_conformance.metadata, "version", return_value="9.9.9"), \
+                mock.patch.object(aas_conformance, "run") as run, mock.patch("builtins.print"):
+            self.assertEqual(self.main("--provision", "http://gw.test"), 2)
+        run.assert_not_called()
+        self.assertEqual(self.calls, [])
 
 
 class TestTheRecord(unittest.TestCase):
