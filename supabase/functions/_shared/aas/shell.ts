@@ -39,6 +39,18 @@ export const MODEL_PUBLIC_BASE = (
 export const MODEL_BUCKET = Deno.env.get("STORAGE_MODEL_BUCKET") ?? "asset-3d-models";
 
 /**
+ * Where a device's live readings can be read, for the Asset Interfaces Description. main/index.ts
+ * gives these to aas-api alone, so no file aas-export writes names them. Each is blank while what it
+ * names is off: the UNS bridge's broker as a consumer dials it, and the i3X server's origin.
+ */
+export const LIVE_ENDPOINTS: LiveEndpoints = {
+  unsBroker: (Deno.env.get("AAS_UNS_BROKER_URL") ?? "").trim().replace(/\/+$/, ""),
+  // Trimmed as the bridge trims UNS_MQTT_TOPIC_ROOT, so the two name one topic.
+  unsTopicRoot: (Deno.env.get("AAS_UNS_TOPIC_ROOT") ?? "").trim().replace(/^\/+|\/+$/g, "") || "uns",
+  i3x: (Deno.env.get("AAS_I3X_URL") ?? "").trim().replace(/\/+$/, ""),
+};
+
+/**
  * The IDTA Digital Nameplate template whose element semanticIds this mapping attaches. It selects
  * rows from `idta_submodel_templates` and `idta_template_elements`, and is the semanticId of a nameplate
  * that holds every element the template asks for. The version is part of the identifier: 2.0 lives
@@ -49,6 +61,10 @@ export const NAMEPLATE_TEMPLATE_ID = "https://admin-shell.io/idta/nameplate/3/0/
 /** IDTA Contact Information, which defines the elements of the nameplate's AddressInformation. */
 export const CONTACT_INFORMATION_TEMPLATE_ID =
   "https://admin-shell.io/zvei/nameplate/1/0/ContactInformations";
+
+/** IDTA Asset Interfaces Description, which says where an asset's live data can be read. */
+export const INTERFACES_TEMPLATE_ID =
+  "https://admin-shell.io/idta/AssetInterfacesDescription/1/0/Submodel";
 
 /** The collection of Contact Information whose elements AddressInformation takes. */
 const CONTACT_INFORMATION_PATH = "ContactInformation";
@@ -262,6 +278,14 @@ export function modelledMetrics(definition: Record<string, unknown> | null): str
     for (const key of required) if (typeof key === "string") names.add(key);
   }
   return [...names].sort();
+}
+
+/**
+ * The elementId the i3X server gives a device, or one of its metrics: `<sparkplug_id>/<metric name>`.
+ * i3x/address_space.py mints the same and splits it at the first `/`, since a sparkplug_id has none.
+ */
+export function i3xElementId(sparkplugId: string, metricName?: string): string {
+  return metricName === undefined ? sparkplugId : `${sparkplugId}/${metricName}`;
 }
 
 /**
@@ -701,6 +725,8 @@ export interface DeviceRecord {
   siteConcepts?: SiteConcept[];
   /** The files the catalog's metrics link to (`metric_catalog.site_vocabulary_id`), for the KPI split. */
   siteVocabularies?: SiteVocabularyRef[];
+  /** Where the device's live readings can be read. Only a worker given LIVE_ENDPOINTS loads it. */
+  interfaces?: LiveInterfaces;
 }
 
 /** A file in `site_vocabularies`: what the exporter needs to say where a concept came from. */
@@ -733,6 +759,7 @@ export interface TemplateElement {
   model_type: string;
   value_type?: string | null;
   semantic_id?: string | null;
+  supplemental_semantic_ids?: string[] | null;
   cardinality?: string | null;
 }
 
@@ -758,9 +785,56 @@ export interface ConceptSource {
   source: string;
 }
 
+/** The addresses LIVE_ENDPOINTS reads, each blank while what it names is off. */
+export interface LiveEndpoints {
+  unsBroker: string;
+  unsTopicRoot: string;
+  i3x: string;
+}
+
+/** What an Asset Interfaces Description is built from: the template's rows and each live surface. */
+export interface LiveInterfaces {
+  /** The Asset Interfaces Description template's rows in `idta_template_elements`. */
+  elements: TemplateElement[];
+  /** The UNS bridge's broker and the device's topic under it, while the bridge publishes the device. */
+  uns?: { broker: string; topic: string };
+  /** The i3X server's origin, while the chart publishes one. */
+  i3x?: { origin: string };
+}
+
 /** Any Supabase client. Deliberately structural: the authority is the caller's to choose. */
 // deno-lint-ignore no-explicit-any
 type Client = any;
+
+/**
+ * What an Asset Interfaces Description of the device is built from, or undefined where `endpoints`
+ * names no live surface. The UNS topic is the device's `device_uns_paths` row under the bridge's root,
+ * as the bridge and the dashboard read it. A device the bridge skips has none, and so no UNS entry.
+ */
+export async function loadLiveInterfaces(
+  client: Client,
+  device: Record<string, unknown>,
+  endpoints: LiveEndpoints = LIVE_ENDPOINTS,
+): Promise<LiveInterfaces | undefined> {
+  if (!endpoints.unsBroker && !endpoints.i3x) return undefined;
+  const [{ data: elementRows }, { data: pathRows }] = await Promise.all([
+    // Without rows (an error, or a database that lacks the table) no description is built.
+    client.from("idta_template_elements")
+      .select("template_id, template_name, template_number, path, parent_path, ordinal, id_short, model_type, value_type, semantic_id, supplemental_semantic_ids, cardinality")
+      .eq("template_id", INTERFACES_TEMPLATE_ID),
+    endpoints.unsBroker
+      ? client.from("device_uns_paths").select("uns_path").eq("device_id", device.id)
+      : Promise.resolve({ data: [] }),
+  ]);
+  const unsPath = pathRows?.[0]?.uns_path;
+  return {
+    elements: elementRows ?? [],
+    ...(endpoints.unsBroker && unsPath
+      ? { uns: { broker: endpoints.unsBroker, topic: `${endpoints.unsTopicRoot}/${unsPath}` } }
+      : {}),
+    ...(endpoints.i3x ? { i3x: { origin: endpoints.i3x } } : {}),
+  };
+}
 
 /**
  * Read every row one device's shell is composed from, or null when there is no such device. The eight
@@ -780,6 +854,9 @@ export async function loadDeviceRecord(
 
   const device = deviceRows?.[0];
   if (!device) return null;
+
+  // Started first, so it runs beside the reads below. Nothing is read where this worker has no live endpoint.
+  const interfacesRequest = loadLiveInterfaces(client, device);
 
   // asset_config is keyed by sparkplug_id, written by ingestion from the DBIRTH payload.
   // `device_schemas` is one row per device_submodels row: every schema attached to the device.
@@ -856,6 +933,7 @@ export async function loadDeviceRecord(
   const { data: siteVocabularyRows } = linked.length > 0
     ? await client.from("site_vocabularies").select("id, name, kind, standard_name, standard_edition").in("id", linked)
     : { data: [] };
+  const interfaces = await interfacesRequest;
 
   return {
     device,
@@ -873,6 +951,7 @@ export async function loadDeviceRecord(
     sources: sourceRows ?? [],
     siteConcepts: siteConceptRows ?? [],
     siteVocabularies: siteVocabularyRows ?? [],
+    ...(interfaces ? { interfaces } : {}),
   };
 }
 
@@ -947,6 +1026,206 @@ export function mandatoryNameplatePaths(elements: readonly TemplateElement[] | u
         ? MANDATORY_ADDRESS_ELEMENTS.map((name) => `${ADDRESS_INFORMATION}.${name}`)
         : [e.path]
     );
+}
+
+/**
+ * The template's interface collections, by the binding each describes. Every element below is built
+ * from the row at its template path, which gives its idShort, type and ids; mirror check 179 holds each
+ * path named here to the seeded rows.
+ */
+export const INTERFACE_TEMPLATES = { http: "InterfaceTemplateForHTTP", mqtt: "InterfaceTemplateForMQTT" } as const;
+type Binding = keyof typeof INTERFACE_TEMPLATES;
+
+/** The WoT `type` of a Sparkplug datatype's value, as i3X serves it (SPARKPLUG_SCALARS in i3x/address_space.py). */
+export function wotType(code: unknown): string | undefined {
+  const n = Number(code);
+  if ((n >= 1 && n <= 8) || n === 13) return "integer";
+  if (n === 9 || n === 10) return "number";
+  if (n === 11) return "boolean";
+  return n === 12 || n === 14 || n === 15 ? "string" : undefined;
+}
+
+/** An idShort for each name, in order, each once: a name that cleans to a taken one gets `_2`, `_3`. */
+function distinctIdShorts(names: readonly string[], taken = new Set<string>()): string[] {
+  return names.map((name) => {
+    const base = toIdShort(name, "Metric");
+    let idShort = base;
+    for (let n = 2; taken.has(idShort); n += 1) idShort = `${base}_${n}`;
+    taken.add(idShort);
+    return idShort;
+  });
+}
+
+/**
+ * The Asset Interfaces Description (IDTA 02017) of a device: an interface for each live surface it
+ * can be read on, or undefined where there is none, or where a template row it needs is missing. The
+ * i3X server (HTTP) has the device and each modelled metric, each by its elementId. The UNS bridge
+ * (MQTT) has each modelled metric by its topic, which is the bridge's: a name with `+` or `#` is never
+ * published. Each states its security scheme, never a credential. AID 1.0 gives a property one form,
+ * so i3X's is the value route; `observable` says its subscriptions push changes.
+ */
+export function buildInterfacesDescription(
+  id: string,
+  device: Record<string, unknown>,
+  metrics: readonly { name: string; datatype?: unknown }[],
+  live: LiveInterfaces,
+): Record<string, unknown> | undefined {
+  const rows = new Map(
+    live.elements.filter((e) => e.template_id === INTERFACES_TEMPLATE_ID).map((e) => [e.path, e]),
+  );
+  let incomplete = false;
+  const row = (binding: Binding, path: string) => {
+    const found = rows.get(path ? `${INTERFACE_TEMPLATES[binding]}.${path}` : INTERFACE_TEMPLATES[binding]);
+    if (!found) incomplete = true;
+    return found;
+  };
+  const ids = (found: TemplateElement | undefined) => ({
+    semanticId: semanticReference(found?.semantic_id),
+    supplementalSemanticIds: found?.semantic_id
+      ? supplementalReferences(found.supplemental_semantic_ids, found.semantic_id)
+      : undefined,
+  });
+  const prop = (binding: Binding, path: string, value: unknown) => {
+    const found = row(binding, path);
+    return property(String(found?.id_short), found?.value_type ?? "xs:string", value, {
+      semanticId: found?.semantic_id,
+      supplementalSemanticIds: found?.supplemental_semantic_ids,
+    });
+  };
+  const smc = (binding: Binding, path: string, value: unknown[], idShort?: string) => {
+    const found = row(binding, path);
+    return { modelType: "SubmodelElementCollection", idShort: idShort ?? found?.id_short, ...ids(found), value };
+  };
+  // A list of one reference, to the interface's one security scheme.
+  const security = (binding: Binding, path: string, scheme: string[]) => {
+    const found = row(binding, path);
+    return {
+      modelType: "SubmodelElementList",
+      idShort: found?.id_short,
+      ...ids(found),
+      typeValueListElement: found?.value_type ?? "ReferenceElement",
+      value: [{
+        modelType: "ReferenceElement",
+        value: {
+          type: "ModelReference",
+          keys: [
+            { type: "Submodel", value: id },
+            ...scheme.map((idShort) => ({ type: "SubmodelElementCollection", value: idShort })),
+          ],
+        },
+      }],
+    };
+  };
+
+  // One interface. `scheme` is its one security scheme's collection and elements; `form` adds the
+  // binding's own elements to each property's form.
+  const describe = (
+    binding: Binding,
+    spec: {
+      idShort: string;
+      title: string;
+      base: string;
+      scheme: [string, () => unknown[]];
+      properties: { idShort: string; key: string; type?: string; href: string }[];
+      form: () => unknown[];
+    },
+  ) => {
+    const [schemeName, schemeElements] = spec.scheme;
+    const scheme = [spec.idShort, "EndpointMetadata", "securityDefinitions", schemeName];
+    return smc(binding, "", [
+      prop(binding, "title", spec.title),
+      smc(binding, "EndpointMetadata", [
+        prop(binding, "EndpointMetadata.base", spec.base),
+        prop(binding, "EndpointMetadata.contentType", "application/json"),
+        security(binding, "EndpointMetadata.security", scheme),
+        smc(binding, "EndpointMetadata.securityDefinitions", schemeElements()),
+      ]),
+      smc(binding, "InteractionMetadata", [
+        smc(binding, "InteractionMetadata.properties", spec.properties.map((p) =>
+          smc(binding, "InteractionMetadata.properties.property_name", [
+            prop(binding, "InteractionMetadata.properties.property_name.key", p.key),
+            ...(p.type ? [prop(binding, "InteractionMetadata.properties.property_name.type", p.type)] : []),
+            prop(binding, "InteractionMetadata.properties.property_name.observable", true),
+            smc(binding, "InteractionMetadata.properties.property_name.forms", [
+              prop(binding, "InteractionMetadata.properties.property_name.forms.href", p.href),
+              prop(binding, "InteractionMetadata.properties.property_name.forms.contentType", "application/json"),
+              security(binding, "InteractionMetadata.properties.property_name.forms.security", scheme),
+              ...spec.form(),
+            ]),
+          ], p.idShort)
+        )),
+      ]),
+    ], spec.idShort);
+  };
+
+  const sparkplugId = String(device.sparkplug_id);
+  const idShorts = distinctIdShorts(metrics.map((m) => m.name));
+  const interfaces: unknown[] = [];
+
+  if (live.i3x) {
+    // The device's own property reads its map of every metric in one request.
+    const [deviceIdShort] = distinctIdShorts([String(device.name ?? "")], new Set(idShorts));
+    interfaces.push(describe("http", {
+      idShort: "I3X",
+      title: "i3X",
+      base: live.i3x.origin,
+      scheme: ["bearer_sc", () => [
+        smc("http", "EndpointMetadata.securityDefinitions.bearer_sc", [
+          prop("http", "EndpointMetadata.securityDefinitions.bearer_sc.scheme", "bearer"),
+          prop("http", "EndpointMetadata.securityDefinitions.bearer_sc.in", "header"),
+          prop("http", "EndpointMetadata.securityDefinitions.bearer_sc.name", "Authorization"),
+        ]),
+      ]],
+      properties: [
+        { idShort: deviceIdShort, key: i3xElementId(sparkplugId), type: "object", href: "/v1/objects/value" },
+        ...metrics.map((m, i) => ({
+          idShort: idShorts[i],
+          key: i3xElementId(sparkplugId, m.name),
+          type: wotType(m.datatype),
+          href: "/v1/objects/value",
+        })),
+      ],
+      form: () => [prop("http", "InteractionMetadata.properties.property_name.forms.htv_methodName", "POST")],
+    }));
+  }
+
+  // The bridge publishes each reading as a JSON object (ingestion/uns_publish.py, payload_for()),
+  // retained, at QoS 0. Each level of a topic is percent-encoded, as a URI's path must be.
+  const published = metrics.flatMap((m, i) => (/[+#]/.test(m.name) ? [] : [{ name: m.name, idShort: idShorts[i] }]));
+  if (live.uns && published.length > 0) {
+    const { broker, topic } = live.uns;
+    interfaces.push(describe("mqtt", {
+      idShort: "UnifiedNamespace",
+      title: "Unified Namespace",
+      base: broker,
+      scheme: ["basic_sc", () => [
+        smc("mqtt", "EndpointMetadata.securityDefinitions.basic_sc", [
+          prop("mqtt", "EndpointMetadata.securityDefinitions.basic_sc.scheme", "basic"),
+        ]),
+      ]],
+      properties: published.map((m) => ({
+        idShort: m.idShort,
+        key: m.name,
+        type: "object",
+        href: `/${`${topic}/${m.name}`.split("/").map(encodeURIComponent).join("/")}`,
+      })),
+      form: () => [
+        prop("mqtt", "InteractionMetadata.properties.property_name.forms.mqv_controlPacket", "subscribe"),
+        prop("mqtt", "InteractionMetadata.properties.property_name.forms.mqv_retain", "true"),
+        prop("mqtt", "InteractionMetadata.properties.property_name.forms.mqv_qos", "0"),
+      ],
+    }));
+  }
+
+  if (interfaces.length === 0 || incomplete) return undefined;
+  return {
+    modelType: "Submodel",
+    id,
+    idShort: "AssetInterfacesDescription",
+    kind: "Instance",
+    semanticId: semanticReference(INTERFACES_TEMPLATE_ID),
+    submodelElements: interfaces,
+  };
 }
 
 /**
@@ -1309,6 +1588,21 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     });
   }
 
+  // Submodel: AssetInterfacesDescription, where the device's live readings can be read. Only a record
+  // aas-api loaded has `interfaces`, so no exported file names a live endpoint.
+  if (record.interfaces) {
+    const modelled = [...new Set(schemas.flatMap((schema) =>
+      modelledMetrics((schema.schema_definition as Record<string, unknown> | null) ?? null)
+    ))].sort();
+    const described = buildInterfacesDescription(
+      submodelId("AssetInterfacesDescription"),
+      device,
+      modelled.map((name) => ({ name, datatype: catalogByName.get(name)?.datatype })),
+      record.interfaces,
+    );
+    if (described) submodels.push(described);
+  }
+
   // The serial number and the product URI are what the Nameplate exports, with its semantic ids,
   // so the shell names them once. A replay lane is a recording of an asset, not a second asset,
   // and its DBIRTH repeats the original's serial number: it names none.
@@ -1349,7 +1643,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     siteConcepts: record.siteConcepts,
     catalog,
     templates,
-    elements: record.elements,
+    elements: [...(record.elements ?? []), ...(record.interfaces?.elements ?? [])],
     schemas,
     definitions,
     sources: record.sources,
