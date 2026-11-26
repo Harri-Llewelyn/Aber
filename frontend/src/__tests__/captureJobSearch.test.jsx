@@ -264,7 +264,7 @@ describe('a search reads on through the older jobs', () => {
     await waitFor(() => expect(bodyRows()).toHaveLength(1))
     typeSearch('Search captures', '')
     await waitFor(() => expect(bodyRows()).toHaveLength(HISTORY_PAGE + 1))
-    expect(screen.getByText('All 21 shown.')).toBeInTheDocument()
+    expect(screen.getByText('All 21 recordings shown.')).toBeInTheDocument()
   })
 })
 

@@ -45,9 +45,9 @@ If a playback completes but loses readings whose timestamps were too old or too 
 
 **Captures** lists every recording that has finished, newest first. **Playbacks** lists every playback that has finished, newest first. A row says when it was started, what it was about, how it ended and how long it ran. It also says who started it. A failed row says why it failed. The strips above the list show a failure for fifteen minutes; these tabs keep it.
 
-Each tab shows the newest 20. **Show more**, at the foot of the table, loads the next 20. The columns do not sort.
+Each tab shows the newest 20. The button at the foot of the table loads the next 20: **Show 20 More Recordings** on Captures, and **Show 20 More Playbacks** on Playbacks. The columns do not sort.
 
-**Search**, first in the toolbar, narrows the list. Press **/** to reach it. It matches the note or the file name, the subject's name and Sparkplug ID, who started the job, how it ended, why it failed, and the job's ID. It also looks through older jobs that **Show more** has not loaded, up to the newest 1,000. The address keeps the search, so a link can carry it.
+**Search**, first in the toolbar, narrows the list. Press **/** to reach it. It matches the note or the file name, the subject's name and Sparkplug ID, who started the job, how it ended, why it failed, and the job's ID. It also looks through older jobs that the foot's button has not loaded, up to the newest 1,000. The address keeps the search, so a link can carry it.
 
 A message about a recording or a playback opens its tab with only that job listed, under **Showing one recording** or **Showing one playback**. Select **Show all** to see the rest. A job that is still running is not listed until it ends. The strip above the table shows it meanwhile.
 
