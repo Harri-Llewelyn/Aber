@@ -7,7 +7,12 @@ import { fail, pass, read, supabaseReadme } from './lib.mjs';
 // main/index.ts forwards a worker only what its entry names: aas-api's entry names each of them and
 // aas-export's none. The chart sets each on the functions Deployment, and supabase/README.md names each.
 // -------------------------------------------------------------------------------------------------
-const entryOf = (registry, name) => registry.match(new RegExp(`\\n  "${name}": \\[([\\s\\S]*?)\\n  \\],`))?.[1];
+/** A function's entry in main/index.ts's registry, from its name to the line that closes it. */
+const entryOf = (registry, name) => {
+  const start = registry.indexOf(`\n  "${name}": [`);
+  const end = start < 0 ? -1 : registry.indexOf('\n  ],', start);
+  return end < 0 ? undefined : registry.slice(start, end);
+};
 
 export default function check() {
   const problems627 = [];
