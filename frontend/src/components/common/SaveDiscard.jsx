@@ -3,7 +3,8 @@ import { IconX } from './Icons'
 import { Tooltip } from './Tooltip'
 
 /**
- * Save and Discard for an unsaved choice, as the Settings page shows them; nothing otherwise.
+ * Save and Discard for an unsaved choice, as the Profile page and an area's plan show them; nothing
+ * otherwise.
  * `disabled` holds both while a save runs, and Save alone while `saveBlocked` says why. `saveLabel`
  * names the act where plain Save would not say what is kept. `buttonClassName` is added to both
  * buttons: `context-action` in a drawer section, whose grid then takes them as two buttons.
