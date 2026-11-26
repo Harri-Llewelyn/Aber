@@ -2852,6 +2852,9 @@ main:focus { outline: none; }
 .schema-derived-choice > .schema-derived-list { flex: none; min-height: 0; max-height: 104px; }
 .modal-body-fill:has(> .schema-asides > .schema-derived[open]) > .schema-editor-metrics { min-height: 142px; }
 .modal-body-fill:has(> .schema-asides > .schema-derived[open]) > .schema-editor-metrics > .list-picker-list { min-height: 92px; }
+/* Template Elements (SchemaTemplateElements) is one of them: the elements nothing fills, up to three rows. */
+.schema-template-list { max-height: 112px; }
+.schema-template-list .badge { flex-shrink: 0; }
 
 /* A numeric metric's range, beside its row: the two bounds and the dash between them. */
 .property-range {
@@ -8782,6 +8785,9 @@ ol.gateway-steps {
   font-size: 11px;
   color: var(--success-text);
 }
+
+/* A section's own act, such as a template's Build Schema: at the end of its heading. */
+.vocab-section-head > .vocab-section-action { margin-left: auto; }
 
 .vocab-section-body { padding: 12px 16px; }
 

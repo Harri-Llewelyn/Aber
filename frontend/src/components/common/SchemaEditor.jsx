@@ -1,20 +1,31 @@
 import React, { useState } from 'react'
 import { FieldError, fieldErrorProps } from './FieldError'
+import { HelpTip } from './HelpTip'
 import { IconCheck } from './Icons'
 import { MetricPicker } from './MetricPicker'
 import { PropertyRange } from './PropertyRange'
 import { RequiredMark } from './RequiredMark'
+import { RouteLink } from './RouteLink'
 import { SchemaDerivedMetrics } from './SchemaDerivedMetrics'
+import { SchemaTemplateElements } from './SchemaTemplateElements'
 import { SemanticIdField } from './SemanticIdField'
 import { StaticEmpty, StaticField } from './StaticField'
 import { Tooltip } from './Tooltip'
 import { derivedOffered, derivedProblems } from '../../utils/derivedMetric'
 import { modelledMetrics } from '../../utils/deviceTags'
+import {
+  fillableElements, requiredTemplatePaths, templateElementFill, templateProblems
+} from '../../utils/idtaTemplates'
 import { rangeError } from '../../utils/schemaProperty'
+import { templatesUrl } from '../../routes'
 
 const REQUIRED = 'Required: the schema cannot be saved without it'
 
-const BLANK = { name: '', description: '', changeDescription: '', semanticId: '', semanticIdType: '', ranges: {} }
+const BLANK = { name: '', description: '', changeDescription: '', semanticId: '', semanticIdType: '', templateId: '', ranges: {} }
+
+const TEMPLATE_HELP = 'The IDTA submodel template the schema is built from. Its id is the schema\'s semantic id, and '
+  + 'each metric whose semantic id, or a further id, is an element\'s fills that element. The AAS export gives the '
+  + 'metric the element\'s id.'
 
 /**
  * What a schema's editor holds: its fields, the names of the ticked metrics (`picked`, a Set), the range
@@ -45,14 +56,46 @@ export function schemaDerived({ form, catalog, definition, kept = [] }) {
 }
 
 /**
+ * What a schema built from the template `form.templateId` names (null for none): the template's `title`, the
+ * element each metric `fills` or would fill, what the ticked ones have `filled`, the elements a metric can
+ * fill (`fillable`), those nothing fills (`unfilled`), the paths the template `required`, and why the save
+ * would be refused (`problems`). `elements` are the templates' rows. `stored` is what a version holds,
+ * which stands while its metrics are as stored, as the database keeps it. The database says the same on the
+ * save (0342), in the same words.
+ */
+export function schemaTemplate({ form, elements, catalog, stored = null }) {
+  const id = form.templateId
+  if (!id) return null
+  const head = (elements || []).find(e => e.template_id === id)
+  const title = head ? `${head.template_name} ${head.template_version}` : null
+  const fills = stored ?? templateElementFill(elements, id, catalog)
+  const filled = Object.fromEntries(Object.entries(fills).filter(([name]) => form.picked.has(name)))
+  const required = requiredTemplatePaths(elements, id)
+  const fillable = fillableElements(elements, id)
+  const paths = new Set(Object.values(filled).map(f => f.path))
+  return {
+    id, title, number: head?.template_number ?? null, fills, filled, required, fillable,
+    unfilled: fillable.filter(e => !paths.has(e.path)),
+    problems: templateProblems({ templateId: id, title, semanticId: (form.semanticId || '').trim(), required, filled })
+  }
+}
+
+/**
  * What the editor's fields still need, for useFormCheck(), in the order they appear. `takesRange(name)`
  * says whether a range is typed beside a metric; a version's name is not its editor's to give. `derived` is
  * schemaDerived()'s.
  */
-export function schemaFields(idPrefix, { form, catalog, takesRange, derived, named = false }) {
+export function schemaFields(idPrefix, { form, catalog, takesRange, derived, named = false, fromTemplate = false, template = null }) {
   const bad = catalog.filter(m => form.picked.has(m.name) && takesRange(m.name) && rangeError(form.ranges[m.name]))
   return {
     ...(!named && { name: { id: `${idPrefix}-name`, missing: !form.name.trim() && 'Give the schema a name' } }),
+    // A schema built from a template: which one, and every element it requires filled (schemaTemplate()).
+    ...(fromTemplate && {
+      template: {
+        id: `${idPrefix}-template`,
+        missing: !form.templateId ? 'Choose the template the schema is built from' : (template?.problems.join(' ') || false),
+      },
+    }),
     // A schema with no metrics constrains nothing, so the list is required.
     metrics: {
       id: `${idPrefix}-metrics`,
@@ -92,15 +135,25 @@ export function schemaFields(idPrefix, { form, catalog, takesRange, derived, nam
  * @param {React.ReactNode} [above] Drawn over the metric list, and `below` under it.
  * @param {{ offered: object[], counts?: React.ReactNode }} [derived] The derived metrics on offer
  * (schemaDerived()), and what is drawn after their count.
+ * @param {{ options?: object[], chosen: object|null, onChoose?: Function }} [template] A schema built from a
+ * submodel template: `options` are the templates to choose from (templateList()), and without them the
+ * template is shown as text; `chosen` is schemaTemplate()'s. Its semantic id is the template's, shown as
+ * text, a metric's row says which element it fills, and Template Elements lists those nothing fills.
  * @param {React.ReactNode} [children] Drawn beside the derived metrics: each is a closed `<details>`, so the
  * two share a line until one is opened.
  */
 export function SchemaEditor({
   idPrefix, readOnly = false, form, onChange, errors = {}, catalog, rangeOf, version = null,
-  noteOf, rangeTextOf, counts = null, above = null, below = null, derived, children
+  noteOf, rangeTextOf, counts = null, above = null, below = null, derived, template = null, children
 }) {
   const id = (part) => `${idPrefix}-${part}`
   const names = [...form.picked]
+  const chosen = template?.chosen ?? null
+  // What a metric's row says after its name: the caller's note, then the element it fills.
+  const fills = (name) => chosen?.fills[name] && (
+    <span className="metric-picker-fact schema-template-fills">fills <span className="mono">{chosen.fills[name].path}</span></span>
+  )
+  const note = (name) => (noteOf || chosen) && <>{noteOf?.(name)}{fills(name)}</>
 
   const toggle = (name) => onChange(f => {
     const picked = new Set(f.picked)
@@ -169,12 +222,46 @@ export function SchemaEditor({
             </Tooltip>
           </div>
         ))}
+
+        {template && (template.options && !readOnly ? (
+          <div className="form-group">
+            <div className="semantic-id-label">
+              <label className="form-label" htmlFor={id('template')}>Template <RequiredMark title={REQUIRED} /></label>
+              <HelpTip text={TEMPLATE_HELP} label="What the template does" />
+            </div>
+            <select
+              id={id('template')}
+              className="form-control"
+              aria-required="true"
+              value={form.templateId}
+              onChange={e => template.onChoose(e.target.value)}
+              {...fieldErrorProps(errors.template, id('template-error'))}
+            >
+              <option value="">Choose a template…</option>
+              {template.options.map(t => <option key={t.id} value={t.id}>{`${t.title} (${t.number})`}</option>)}
+            </select>
+            <FieldError id={id('template-error')} error={errors.template} />
+          </div>
+        ) : (
+          <StaticField
+            label="Template"
+            value={chosen && (
+              <RouteLink to={templatesUrl()} title="Open the submodel templates on the Vocabulary page">
+                {chosen.title ?? form.templateId}{chosen.number ? ` (${chosen.number})` : ''}
+              </RouteLink>
+            )}
+            help={TEMPLATE_HELP}
+            helpLabel="What the template does"
+          >
+            {errors.template && <FieldError id={id('template-error')} error={errors.template} />}
+          </StaticField>
+        ))}
       </div>
 
       <SemanticIdField
         idPrefix={idPrefix}
         subject="schema"
-        readOnly={readOnly}
+        readOnly={readOnly || !!template}
         semanticId={form.semanticId}
         semanticIdType={form.semanticIdType}
         onChange={onChange}
@@ -206,7 +293,7 @@ export function SchemaEditor({
                 <li key={name}>
                   <IconCheck size={12} />
                   <span className="mono metric-picker-name">{name}</span>
-                  {noteOf?.(name)}
+                  {note(name)}
                   {rangeTextOf?.(name) && <span className="schema-editor-range">{rangeTextOf(name)}</span>}
                 </li>
               ))}
@@ -219,7 +306,7 @@ export function SchemaEditor({
             metrics={catalog}
             isPicked={m => form.picked.has(m.name)}
             onPick={m => toggle(m.name)}
-            renderNote={noteOf && (m => noteOf(m.name))}
+            renderNote={(noteOf || chosen) && (m => note(m.name))}
             renderExtra={(m, ticked) => {
               const range = ticked ? rangeOf(m.name) : null
               return range && (
@@ -252,6 +339,7 @@ export function SchemaEditor({
             return { derived: next }
           })}
         />
+        <SchemaTemplateElements id={id('template-elements')} template={chosen} />
         {children}
       </div>
     </>

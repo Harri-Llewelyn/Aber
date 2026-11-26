@@ -59,11 +59,11 @@ beforeEach(() => {
 })
 
 describe('Export', () => {
-  it('has Upload, Export and the builder in the toolbar, filled, as the Automations page has them', async () => {
+  it('has Upload, Export and the builders in the toolbar, filled, as the Automations page has them', async () => {
     renderTab()
     await ready()
     const buttons = [...toolbar().querySelectorAll('button')].filter(b => b.textContent.trim())
-    expect(buttons.map(b => b.textContent.trim())).toEqual(['Upload', 'Export', 'Build Schema from Catalog'])
+    expect(buttons.map(b => b.textContent.trim())).toEqual(['Upload', 'Export', 'Build Schema from Catalog', 'Build Schema from Template'])
     for (const b of buttons) expect(b).toHaveClass('btn-primary')
   })
 

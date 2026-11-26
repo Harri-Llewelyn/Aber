@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { deviceUrl, devicesForSchemaUrl, metricUrl, schemaUrl, trailUrl } from '../../routes'
+import { deviceUrl, devicesForSchemaUrl, metricUrl, schemaUrl, templatesUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -27,7 +27,7 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import {
-  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconTag, IconUpload, IconTrash, IconHistory
+  IconCheck, IconClipboardList, IconCpu, IconFileCode, IconLock, IconGitBranch, IconPencil, IconDownload, IconTag, IconUpload, IconTrash, IconHistory
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
@@ -39,6 +39,7 @@ import { breakAfterSeparators, plural } from '../../utils/format'
 import { schemaIdsForDevice } from '../../utils/deviceTags'
 import { isDeviceInService } from '../../utils/inService'
 import { isShadowDevice } from '../../utils/fleetCounts'
+import { templateList } from '../../utils/idtaTemplates'
 
 /**
  * The devices a schema's count counts: those in service, quarantined ones aside. So the count is
@@ -71,7 +72,8 @@ const statusWords = (value) => (sameSet(value, CURRENT) ? 'Current' : null)
  *
  * @param {Function} onSelectDevice Opens one device on the Devices page.
  *
- * A device drawer's Schema chip arrives as `?search=<uuid>`, which opens that schema's drawer.
+ * A device drawer's Schema chip arrives as `?search=<uuid>`, which opens that schema's drawer. The Vocabulary
+ * page's Templates tab arrives as `?template=<id>`, which opens Build Schema from Template with it chosen.
  */
 export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectDevice }) {
   const [schemas, setSchemas]         = useState([])
@@ -81,6 +83,11 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   const [loaded, setLoaded]           = useState(false)
   const [showValidateModal, setShowValidateModal] = useState(false)
   const [showBuilderModal, setShowBuilderModal] = useState(false)
+  // The rows of the submodel templates, and Build Schema from Template: null shut, '' open with none
+  // chosen, or the id of the template it opened with.
+  const [templateElements, setTemplateElements] = useState([])
+  const [templateBuilder, setTemplateBuilder] = useState(null)
+  const [arrivingTemplate, setArrivingTemplate] = useUrlState('template')
   // `selectedId` is the row whose drawer is open, an id rather than the object because the list
   // reloads after every version created, publish and discard. `detailSchema` is the version being
   // read or edited; `forkTarget` the one a new version is created from, reachable from the drawer
@@ -105,13 +112,15 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   const load = useCallback(async () => {
     try {
       // The catalog feeds the schema builder and the detail dialog's metric picker. Devices are for
-      // the per-schema counts.
-      const [sch, cat, dev] = await Promise.all([
+      // the per-schema counts. The templates' rows are for a schema built from one; without them such a
+      // schema still opens, with its template named by id.
+      const [sch, cat, dev, tpl] = await Promise.all([
         api.get('/api/v1/schemas'),
         api.get('/api/v1/metric-catalog'),
         api.get('/api/v1/devices'),
+        api.get('/api/v1/idta-template-elements').catch(() => []),
       ])
-      setSchemas(sch); setCatalog(cat); setDevices(dev)
+      setSchemas(sch); setCatalog(cat); setDevices(dev); setTemplateElements(tpl || [])
     } finally { setLoaded(true) }
   }, [])
 
@@ -138,6 +147,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     const created = await api.post('/api/v1/schemas', schemaPayload)
     showToast(`Schema '${schemaPayload.schema_name}' saved`, 'success', { to: schemaUrl(created?.schema_uuid) })
     setShowBuilderModal(false)
+    setTemplateBuilder(null)
     load()
   }
 
@@ -233,6 +243,15 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
 
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
   const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
+
+  // Arriving from the Templates tab: the builder opens once the rows are here, with the template chosen
+  // where the rows hold it, and the address forgets it. A role that may not build a schema stays on the list.
+  useEffect(() => {
+    if (!loaded || !arrivingTemplate) return
+    if (canManageSchema) setTemplateBuilder(arrivingTemplate)
+    setArrivingTemplate('')
+  }, [loaded, arrivingTemplate, canManageSchema, setArrivingTemplate])
+  const templateOf = (sc) => (sc?.template_id ? templateList(templateElements).find(t => t.id === sc.template_id) : null)
 
   /**
    * Narrows the registry by name, UUID and change description, all columns of this table, so a hit
@@ -380,6 +399,16 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               >
                 <IconClipboardList size={14} /> Build Schema from Catalog
               </ActionButton>
+              {/* The same form, which first asks for an IDTA submodel template and ticks the metrics that fill it. */}
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                permitted={canManageSchema}
+                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
+                title="Compose a schema that implements an IDTA submodel template, from the catalog metrics that fill its elements"
+                onClick={() => setTemplateBuilder('')}
+              >
+                <IconFileCode size={14} /> Build Schema from Template
+              </ActionButton>
             </div>
           </div>
 
@@ -492,6 +521,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           schema={detailSchema}
           schemas={schemas}
           catalog={catalog}
+          templates={templateElements}
           deviceCount={attachedTo(detailSchema.schema_uuid).length}
           canManage={canManageSchema}
           showToast={showToast}
@@ -556,6 +586,16 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         />
       )}
       {showBuilderModal && <SchemaBuilderModal catalog={catalog} onSubmit={handleBuilderSubmit} onCancel={() => setShowBuilderModal(false)} />}
+      {templateBuilder !== null && (
+        <SchemaBuilderModal
+          fromTemplate
+          catalog={catalog}
+          templates={templateElements}
+          initialTemplate={templateBuilder}
+          onSubmit={handleBuilderSubmit}
+          onCancel={() => setTemplateBuilder(null)}
+        />
+      )}
       </div>
 
       <ContextPanel
@@ -584,6 +624,17 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               : 'Published or archived, and therefore immutable. Create a version to make changes.'
           },
           { label: 'Change Description', value: selectedSchema.change_description || null, full: true },
+          {
+            // A link to the templates, as the template is reference data with no drawer of its own.
+            label: 'Template',
+            value: selectedSchema.template_id ? (
+              <RouteLink to={templatesUrl()} title="Open the submodel templates on the Vocabulary page">
+                {templateOf(selectedSchema)?.title ?? selectedSchema.template_id}
+              </RouteLink>
+            ) : null,
+            full: true,
+            help: 'The IDTA submodel template this version is built from. Each metric that fills one of its elements exports with the element\'s semantic id.'
+          },
           {
             label: 'Parent Schema',
             value: selectedSchema.parent_schema_id

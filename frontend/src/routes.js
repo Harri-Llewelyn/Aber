@@ -17,6 +17,12 @@ export const cellUrl = (id, archived = false) => pageUrl('cells', { search: id, 
 export const areaUrl = (id, archived = false) => pageUrl('areas', { search: id, lifecycle: archived && 'archived' })
 export const schemaUrl = (uuid) => pageUrl('schemas', { search: uuid })
 
+/** Build Schema from Template on the Schemas page, with one template chosen, by its id. */
+export const schemaFromTemplateUrl = (templateId) => pageUrl('schemas', { template: templateId })
+
+/** The submodel templates, on the Vocabulary page's Templates tab. */
+export const templatesUrl = () => pageUrl('vocabulary', {}, 'templates')
+
 /** One device's readings over time on the History page, at the window it opens on. */
 export const deviceHistoryUrl = (id) => `/history/device/${encodeURIComponent(id)}`
 

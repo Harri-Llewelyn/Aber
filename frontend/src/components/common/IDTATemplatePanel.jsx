@@ -4,6 +4,10 @@ import {
   elementTooltip, elementType, templateSections
 } from '../../utils/idtaTemplates'
 import CopyableId from './CopyableId'
+import { ActionButton } from './ActionButton'
+import { IconFileCode } from './Icons'
+import { RouteLink } from './RouteLink'
+import { schemaFromTemplateUrl } from '../../routes'
 
 /**
  * A template's elements, a row each, in the template's order: the name stepped in under the element it is
@@ -51,12 +55,33 @@ function TemplateElements({ template, items, onNotify }) {
 }
 
 /**
+ * A template's act, at the end of its heading: Build Schema, a link to Build Schema from Template on the
+ * Schemas page with the template chosen. A role that may not build a schema sees it greyed, with why.
+ */
+function BuildSchemaAction({ template, deniedTitle }) {
+  const label = <><IconFileCode size={12} /> Build Schema</>
+  if (deniedTitle) {
+    return <ActionButton className="btn btn-ghost btn-sm vocab-section-action" permitted={false} deniedTitle={deniedTitle}>{label}</ActionButton>
+  }
+  return (
+    <RouteLink
+      className="btn btn-ghost btn-sm vocab-section-action"
+      to={schemaFromTemplateUrl(template.id)}
+      title={`Open Build Schema from Template on the Schemas page, with ${template.name} ${template.version} chosen`}
+    >
+      {label}
+    </RouteLink>
+  )
+}
+
+/**
  * The Templates tab of the Vocabulary page: the IDTA submodel templates Aber seeds, one section each, with
  * every element under the one it is inside. It is for looking up: nothing here starts a metric or is edited.
- * A search keeps what a matching element is inside, so it is shown where it belongs. The tab credits IDTA
- * under CC BY 4.0, as the licence asks.
+ * A template's Build Schema opens Build Schema from Template with it chosen, where Use on another tab starts a
+ * catalog metric; `deniedTitle` says why a role may not. A search keeps what a matching element is inside, so
+ * it is shown where it belongs. The tab credits IDTA under CC BY 4.0, as the licence asks.
  */
-export function idtaTemplateTab({ elements, onNotify }) {
+export function idtaTemplateTab({ elements, onNotify, deniedTitle = null }) {
   const sections = templateSections(elements).map(s => ({
     ...s,
     items: s.entries.map(element => ({
@@ -77,6 +102,7 @@ export function idtaTemplateTab({ elements, onNotify }) {
     searchTextFor: item => [...(item.element.supplemental_semantic_ids || []), elementType(item.element)].join(' '),
     parentOf: item => items.get(elementKey(item.element.template_id, item.element.parent_path)),
     renderItems: section => <TemplateElements template={section.template} items={section.items} onNotify={onNotify} />,
+    actionFor: section => <BuildSchemaAction template={section.template} deniedTitle={deniedTitle} />,
     notice: (
       <>
         {IDTA_ATTRIBUTION}{' '}

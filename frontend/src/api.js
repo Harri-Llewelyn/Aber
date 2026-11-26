@@ -4023,6 +4023,9 @@ const apiMethods = {
         schema_definition: s.schema_definition,
         // The derived metrics its devices get (0336).
         derived_metrics: s.derived_metrics ?? [],
+        // The submodel template it is built from, and the element each metric fills (0342), or null.
+        template_id: s.template_id ?? null,
+        template_elements: s.template_elements ?? null,
         semantic_id: s.semantic_id ?? null,
         semantic_id_type: s.semantic_id_type ?? null,
         // Defaulted here as well as in the column, so a client against a database that has not
@@ -4510,6 +4513,8 @@ const apiMethods = {
         schema_definition: body.schema_definition,
         ...('derived_metrics' in body && { derived_metrics: body.derived_metrics }),
         ...semanticIdPair(body),
+        // The template it is built from: the database works out which element each metric fills.
+        ...(body.template_id && { template_id: body.template_id }),
         // A newly built schema is v1 and in force immediately; `version` and `status` are left to their
         // column defaults because sending them is what the provenance trigger refuses.
         change_description: emptyToNull(body.change_description) || 'Initial release'
