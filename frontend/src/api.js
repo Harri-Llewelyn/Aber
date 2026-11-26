@@ -2554,13 +2554,16 @@ const apiMethods = {
   /**
    * One page of finished backup runs (`backup_jobs`), newest first. Each carries the backup it
    * produced as `backup`, null for a failed or cancelled run and for one the retention window has
-   * pruned. `total` is every run matching `statuses`, not only the page returned.
+   * pruned. `total` is every run matching `statuses`, not only the page returned. `id` asks for that
+   * one run alone (backupRun).
    */
-  listBackupRuns: async ({ statuses = ['COMPLETED', 'FAILED', 'CANCELLED'], limit = 30 } = {}) => {
-    const { data, error, count } = await supabase
+  listBackupRuns: async ({ statuses = ['COMPLETED', 'FAILED', 'CANCELLED'], limit = 30, id = null } = {}) => {
+    let query = supabase
       .from('backup_jobs')
       .select('*, backups(*)', { count: 'exact' })
-      .in('status', statuses)
+      .in('status', statuses);
+    if (id) query = query.eq('id', id);
+    const { data, error, count } = await query
       .order('finished_at', { ascending: false })
       .limit(limit);
     if (error) throw new Error(error.message || 'Could not list backup runs');
@@ -2569,6 +2572,16 @@ const apiMethods = {
       ...job, backup: (Array.isArray(backups) ? backups[0] : backups) || null
     }));
     return { runs: rows, total: count ?? rows.length };
+  },
+
+  /**
+   * One finished run by its id, as listBackupRuns gives it, or null when no finished run has it. A
+   * link can name a run older than every page the list has loaded, or one its filter leaves out.
+   */
+  backupRun: async (id) => {
+    if (!isUuid(id)) return null;
+    const { runs } = await api.listBackupRuns({ id, limit: 1 });
+    return runs[0] || null;
   },
 
   /**
