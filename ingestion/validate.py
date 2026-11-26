@@ -505,6 +505,16 @@ def cleanup_validation_data():
             except Exception as e:
                 failures.append(f"reading the devices' sparkplug_ids: {e}")
 
+        # A registered device held in Quarantine again is not deleted while it is held (0337): release
+        # the hold first, as a person approves it before deleting it.
+        if rows["devices"]:
+            try:
+                supabase_client.table("devices").update({"is_quarantined": False}).in_(
+                    "id", sorted(rows["devices"])).not_.is_("requarantined_at", "null").eq(
+                    "is_quarantined", True).execute()
+            except Exception as e:
+                failures.append(f"releasing held devices before their delete: {e}")
+
         for table in CLEANUP_ORDER:
             if rows[table]:
                 try:
