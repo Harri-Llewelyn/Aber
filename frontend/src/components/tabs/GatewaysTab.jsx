@@ -823,7 +823,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                    {!compact && <SortHeader sort={sort} column="uuid" title="The id to quote in a query, a ticket or an API call. The Sparkplug edge node id is derived from it.">Gateway UUID</SortHeader>}
                    <SortHeader sort={sort} column="type" title={"Remote: an appliance on the plant network. Third-party: an edge node Aber does not manage. Host: inside this stack. Simulated: generated readings. Playback: republished captures."}>Type</SortHeader>
                    <SortHeader sort={sort} column="location" title="The cell, area or site it serves; a dash for a simulated or playback one. Devices set to Follow Gateway take it.">Location</SortHeader>
-                   <SortHeader sort={sort} column="status" title="What the gateway last reported, shown as Stale once its heartbeat is over 90 seconds old, and any alert on it. Sorts by the alert, then the status.">Gateway Status</SortHeader>
+                   <SortHeader sort={sort} column="status" title="What the gateway last reported, shown as Stale once its heartbeat is over 90 seconds old">Gateway Status</SortHeader>
                    <SortHeader sort={sort} column="last_heartbeat" title="How long since the edge node's last Sparkplug B node message: its birth, data or death.">Last Heartbeat</SortHeader>
                    {!compact && <SortHeader sort={sort} column="devices" title="The devices this gateway serves. The summary counts them by state; archived ones are listed, not counted.">Devices</SortHeader>}
                  </tr>
