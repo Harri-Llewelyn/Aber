@@ -7,7 +7,12 @@ import { fail, pass, read, supabaseReadme } from './lib.mjs';
 // sets it. The i3X server names each device's shell under AAS_BASE_IRI, which the chart must give it
 // from the value aas-export is given, or the two would name different shells. The README names both.
 // -------------------------------------------------------------------------------------------------
-const entryOf = (registry, name) => registry.match(new RegExp(`\\n  "${name}": \\[([\\s\\S]*?)\\n  \\],`))?.[1];
+/** A function's entry in main/index.ts's registry, from its name to the line that closes it. */
+const entryOf = (registry, name) => {
+  const start = registry.indexOf(`\n  "${name}": [`);
+  const end = start < 0 ? -1 : registry.indexOf('\n  ],', start);
+  return end < 0 ? undefined : registry.slice(start, end);
+};
 
 export default function check() {
   const problems628 = [];
