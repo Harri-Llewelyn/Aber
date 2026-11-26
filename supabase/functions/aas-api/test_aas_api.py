@@ -1,10 +1,11 @@
 # suite:
 #   lanes: unit, stack
-#   why: The IDTA-01002 (AAS Part 2) read surface. Nine of its forty-six checks run offline and
+#   why: The IDTA-01002 (AAS Part 2) read surface. Nine of its forty-seven checks run offline and
 #     guard what is true of the SOURCE regardless of a stack -- above all that this function is
 #     never granted the service-role key, which is the entire security argument for it being a
 #     separate function. THE TEST THAT MATTERS MOST needs the stack: TestExportAgreement fetches the
-#     same asset through aas-export and through aas-api and asserts the two describe it identically.
+#     same asset through aas-export and through aas-api and asserts the two describe it identically,
+#     but for the Asset Interfaces Description, which aas-api alone carries.
 #     That agreement is the whole reason the mapping lives in _shared/aas/shell.ts, and it is the
 #     property that would rot silently -- an ERP reading a live submodel and a partner reading a
 #     shipped .aasx would disagree, with both endpoints reporting success. The live layer also reads
@@ -24,10 +25,10 @@ Two layers, deliberately in one file, matching test_aas_export.py:
     comes back against the vendored IDTA metamodel schema. They skip when no stack is reachable.
 
 THE TEST THAT MATTERS MOST is TestExportAgreement: it fetches the same asset through aas-export and
-through aas-api and asserts the two describe it identically. That agreement is the whole reason the
-mapping lives in _shared/aas/shell.ts, and it is the property that would rot silently -- an ERP
-reading a live submodel and a partner reading a shipped .aasx would disagree, with both endpoints
-reporting success.
+through aas-api and asserts the two describe it identically, but for the Asset Interfaces Description,
+which aas-api alone carries. That agreement is the whole reason the mapping lives in
+_shared/aas/shell.ts, and it is the property that would rot silently -- an ERP reading a live
+submodel and a partner reading a shipped .aasx would disagree, with both endpoints reporting success.
 
 Run:  python supabase/functions/aas-api/test_aas_api.py
 """
@@ -726,9 +727,18 @@ class TestExportAgreement(unittest.TestCase):
                 for sm in cls.exported["submodels"]
             )
         }
+        # The one difference by design: aas-api alone carries the Asset Interfaces Description, which
+        # names the site's broker and i3X server, and an exported file leaves the site.
+        cls.interfaces_id = shell_id.removesuffix("/shell") + "/submodel/AssetInterfacesDescription"
 
     def test_the_shell_is_identical(self):
-        self.assertEqual(self.api_shell, self.exported["assetAdministrationShells"][0])
+        served = dict(self.api_shell, submodels=[
+            ref for ref in self.api_shell["submodels"] if ref["keys"][0]["value"] != self.interfaces_id
+        ])
+        self.assertEqual(served, self.exported["assetAdministrationShells"][0])
+
+    def test_the_export_never_carries_the_interfaces_description(self):
+        self.assertNotIn(self.interfaces_id, {s["id"] for s in self.exported["submodels"]})
 
     def test_every_exported_submodel_is_served_identically(self):
         for exported in self.exported["submodels"]:
@@ -738,7 +748,7 @@ class TestExportAgreement(unittest.TestCase):
 
     def test_neither_side_publishes_a_submodel_the_other_does_not(self):
         _, refs = get(f"/shells/{b64url(self.api_shell['id'])}/submodel-refs", TOKEN)
-        served = {r["keys"][0]["value"] for r in refs["result"]}
+        served = {r["keys"][0]["value"] for r in refs["result"]} - {self.interfaces_id}
         exported = {s["id"] for s in self.exported["submodels"]}
         self.assertEqual(served, exported)
 
