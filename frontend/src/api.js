@@ -3711,9 +3711,11 @@ const apiMethods = {
         .select('*, gateways(id, name, cell_id, location_scope, is_simulated, is_shadow)')
         .eq('is_quarantined', true);
       if (error) throw error;
+      // An archived device is not in the queue: its births are dropped, not held, and Entities lists it.
+      const held = (data || []).filter(d => !d.is_archived);
 
       // asset_config is keyed by sparkplug_id, which is derivable from the UUID we already have.
-      const keys = (data || []).map(d => d.sparkplug_id || deviceSparkplugId(d.id)).filter(Boolean);
+      const keys = held.map(d => d.sparkplug_id || deviceSparkplugId(d.id)).filter(Boolean);
       let metricsByKey = new Map();
       if (keys.length > 0) {
         const { data: configRows, error: configError } = await supabase
@@ -3729,7 +3731,7 @@ const apiMethods = {
         }, new Map());
       }
 
-      return (data || []).map(d => {
+      return held.map(d => {
         const sparkplugId = d.sparkplug_id || deviceSparkplugId(d.id);
         const reportedMetrics = metricsByKey.get(sparkplugId) || [];
         return {

@@ -73,7 +73,7 @@ import {
 } from '../../utils/deviceTags'
 import { oldDevicesLinkChanges, STATUS_OUT_OF_VOCABULARY, STATUS_UNMODELLED } from '../../utils/devicesAddress'
 import { assignableSchemas, isAssignableSchema } from '../../utils/schemaVersion'
-import { HELD_AGAIN_ROW, isHeldAgain } from '../../utils/quarantineHold'
+import { HELD_AGAIN_ROW, isHeldAgain, isInQueue } from '../../utils/quarantineHold'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
@@ -618,7 +618,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // (24h+), carrying a finding (unmodelled metrics, a value out of vocabulary), or with a location
   // finding. No device resolves to an archived cell: the database refuses the archive while one does.
   const needsAttention = (a) =>
-    a.is_quarantined || isProvisioningOverdue(a) || findingsFor(a).length > 0 ||
+    isInQueue(a) || isProvisioningOverdue(a) || findingsFor(a).length > 0 ||
     // Location findings. Unassigned is the work queue that should drain; a mismatch is "this
     // resolved to something, but look at it".
     needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) ||
@@ -666,9 +666,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     { key: 'cell', chosen: cellFilter, values: cellLanesOf },
     { key: 'status', chosen: statusFilter, values: statusesOf },
   ], (a) => {
-    // Quarantined devices belong to the Quarantine queue card and nowhere else. The two lists come
-    // from different sources, so this is the only place the separation is enforced.
-    if (a.is_quarantined) return false
+    // A device in the Quarantine queue belongs to its tab and nowhere else; an archived one is listed
+    // with the archived. The two lists come from different sources, so the separation is enforced here.
+    if (isInQueue(a)) return false
     // Replay lanes are out by default: `ensure_shadow_devices()` mints one per captured device when
     // a playback starts, which would otherwise double the list. Not a lifecycle, which is the
     // archived axis; a shadow can be archived or not.
@@ -718,13 +718,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // Quarantine queue instead. `needsAttention` is rebuilt every render, so its inputs are the
   // dependencies.
   const attentionCount = useMemo(
-    () => assets.filter(a => !a.is_quarantined && needsAttention(a)).length,
+    () => assets.filter(a => !isInQueue(a) && needsAttention(a)).length,
     [assets, gatewayById, cellById, findingsFor]
   )
   // Counted across every device, not the filtered list: it is the number the toggle reveals.
   // Quarantined lanes are excluded as attentionCount excludes them.
   const shadowCount = useMemo(
-    () => assets.filter(a => !a.is_quarantined && a.shadow_of).length,
+    () => assets.filter(a => !isInQueue(a) && a.shadow_of).length,
     [assets]
   )
   // Walks every device's schemas for the Metric groups filter.
@@ -735,7 +735,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // The roster's own rows: everything but the queue, and the replay lanes unless they are shown.
   // The empty state reads it to tell none yet from none matching.
   const roster = useMemo(
-    () => assets.filter(a => !a.is_quarantined && (showShadows || !a.shadow_of)),
+    () => assets.filter(a => !isInQueue(a) && (showShadows || !a.shadow_of)),
     [assets, showShadows]
   )
   // The filters inside the Filters popover, which its button counts; the bar's Clear counts all.
@@ -762,7 +762,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const chooseView = (next) => { setView(next); setSelectedId(null) }
 
   // Arriving from a chip, an alert row or the Site Map with one device named: open it rather than
-  // leave a one-row table. A quarantined device has no panel; it lands on the Quarantine tab.
+  // leave a one-row table. A device in the Quarantine queue has no panel; it lands on that tab.
   // Identifier equality only; see the hook.
   useArrivalSelection(
     searchQuery,
@@ -770,7 +770,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     (a, term) => deviceIdentifiers(a).includes(term),
     (a) => {
       // Replaced, not pushed: Back from here should leave the page, not land on the arrival again.
-      if (a.is_quarantined) { setView('quarantine', { replace: true }); return }
+      if (isInQueue(a)) { setView('quarantine', { replace: true }); return }
       // An archived device is off the default list, so the list shows it as well as the drawer.
       if (a.is_archived && lifecycle.length > 0 && !lifecycle.includes('archived')) setLifecycle(v => [...v, 'archived'])
       if (view !== 'registered') setView('registered', { replace: true })
@@ -832,7 +832,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     selectedDevice.is_quarantined && {
       id: 'quarantined',
       tone: 'warning',
-      text: isHeldAgain(selectedDevice)
+      text: selectedDevice.is_archived
+        ? 'Held in quarantine when it was archived. Restore returns it to the Quarantine tab.'
+        : isHeldAgain(selectedDevice)
         ? 'In quarantine: this device is registered, and is held again. The Quarantine tab says why. Its readings are dropped until it is approved there.'
         : 'In quarantine: Aber could not match it to a registered device. Its readings are dropped until it is approved on the Quarantine tab.'
     },
@@ -961,7 +963,19 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                       >
                         Approve &amp; Onboard
                       </ActionButton>
-                      {/* A registered device held again has none: it would take what is set on it. */}
+                      {/* A registered device held again has Archive Device for Reject, which would take
+                          what is set on it. Archived, it leaves the queue, and Entities deletes it. */}
+                      {isHeldAgain(q) && (
+                        <ActionButton
+                          className="btn btn-danger btn-sm"
+                          permitted={canArchive}
+                          deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)}
+                          onClick={() => setArchiveTarget(q)}
+                          title="Archive this device: take it out of commission"
+                        >
+                          Archive Device
+                        </ActionButton>
+                      )}
                       {!isHeldAgain(q) && (
                         <ActionButton
                           className="btn btn-danger btn-sm"
