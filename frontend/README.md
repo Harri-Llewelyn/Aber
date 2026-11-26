@@ -3957,7 +3957,7 @@ shows it in the dialog's error slot, as it was worded. Nothing is toasted behind
 
 ## Testing
 
-Vitest with globals enabled and a jsdom environment. **7,742 tests across 462 files** at the last count (2026-11-26).
+Vitest with globals enabled and a jsdom environment. **462 test files** at the last count (2026-11-26).
 
 The suite treats an unhandled promise rejection as a defect, not noise — Vitest reports them
 separately and they can mask real failures.
