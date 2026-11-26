@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -6,18 +7,21 @@ import { useDisplayNames } from '../../hooks/useDisplayNames'
 import { useOpenGroups } from '../../hooks/useOpenGroups'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { useUrlState } from '../../hooks/useUrlState'
-import { siteVocabularyUrl } from '../../routes'
+import { metricUrl, siteVocabularyUrl } from '../../routes'
 import { breakAfterSeparators, formatDateTime, plural } from '../../utils/format'
 import {
   vocabularyLabel, conceptTooltip, metricsUsing, SOURCE_FORMAT_LABELS
 } from '../../utils/siteVocabulary'
 import { STANDARDS } from '../../utils/standards'
 import { ActionButton } from './ActionButton'
+import { ContextPanel, rowSelectHandler } from './ContextPanel'
 import { EmptyState } from './EmptyState'
 import { ExpandAllToggle } from './ExpandAllToggle'
-import { IconBookOpen, IconFileCode, IconTrash, IconUpload } from './Icons'
+import { IconBookOpen, IconFileCode, IconTag, IconTrash, IconUpload } from './Icons'
 import { LoadingState } from './LoadingState'
+import { OverflowText } from './OverflowText'
 import { PersonName } from './PersonName'
+import { RouteLink } from './RouteLink'
 import { SearchInput } from './SearchInput'
 import { SortHeader } from './SortHeader'
 import { Tooltip } from './Tooltip'
@@ -45,19 +49,26 @@ const FILE_SORT = {
  * whether its definitions are shared; then the concepts, with the same Use action and "N in use"
  * count as the standards' tabs.
  *
+ * A file's row opens its drawer (`?file=`), which has every field and the acts: Show Concepts, Share
+ * Definitions or Stop Sharing, and Remove. The address also opens the file's concepts below the table.
+ * `drawerHost` is the element the drawer is drawn into, beside the page's card.
+ *
  * Importing, removing and sharing are an Administrator's, behind the second factor: another role sees
  * the buttons greyed, with who may press them. A removal says first how many metrics use the file.
  * Sharing asks for a confirmation that says the licence is the site's responsibility. Each act ends
  * in a toast that links to the file.
  */
-function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
+function SiteVocabularyPanel({ canManage, onUseEntry, showToast, drawerHost = null }) {
   const [files, setFiles] = useState([])
   const [concepts, setConcepts] = useState([])
   const [catalog, setCatalog] = useState([])
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState(null)
   const [search, setSearch] = useUrlState('search')
-  const [focused] = useUrlState('file')
+  // The file whose drawer is open. A link to one that has been removed is tidied away once the files are read.
+  const [focused, setFocused] = useUrlState('file', '', { allowed: loaded && !loadError ? files.map(f => f.id) : null })
+  // The section Show Concepts has opened, scrolled to once it is drawn.
+  const [revealing, setRevealing] = useState(null)
   const [importing, setImporting] = useState(false)
   const [removing, setRemoving] = useState(null)
   const [sharing, setSharing] = useState(null)
@@ -140,6 +151,17 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
     in_use: metricsUsing(file, concepts, catalog).length
   })), [files, concepts, catalog, names])
   const [sortedFiles, sort] = useSortableRows(rows, FILE_SORT)
+  const selected = rows.find(f => f.id === focused) || null
+  const selectFile = (file) => setFocused(id => (id === file.id ? '' : file.id))
+
+  // Show Concepts: the file's section opens, and the card scrolls to it once it is drawn.
+  const showConcepts = (file) => { setOpen([`site:${file.id}`], true); setRevealing(`site:${file.id}`) }
+  useEffect(() => {
+    if (!revealing) return
+    const section = [...document.querySelectorAll('[data-section]')].find(el => el.dataset.section === revealing)
+    section?.scrollIntoView?.({ block: 'start' })
+    setRevealing(null)
+  }, [revealing])
 
   // The dialog has already toasted; the table reads the files again.
   const imported = () => {
@@ -168,6 +190,86 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
 
   // Stopping is the safe direction, so it asks nothing; a refusal is shown, as the database worded it.
   const stopSharing = (file) => share(file, false).catch(e => showToast?.(e.message, 'error'))
+
+  // Every field the row has, the ones its name's tooltip holds, and each metric In use counts.
+  const using = selected ? metricsUsing(selected, concepts, catalog) : []
+  const drawer = (
+    <ContextPanel
+      open={!!selected}
+      onClose={() => setFocused('')}
+      type="VOCABULARY"
+      subject="vocabulary"
+      onCopy={showToast}
+      title={selected?.name || ''}
+      icon={<IconFileCode size={16} />}
+      recordId={selected && { label: 'Vocabulary UUID', value: selected.id }}
+      fields={selected ? [
+        {
+          label: 'What it is',
+          value: selected.kind === 'published_standard' && selected.standard_publisher
+            ? `${selected.label}, ${selected.standard_publisher}` : selected.label,
+          full: true,
+          help: "A published standard the site holds a copy of, or the site's own vocabulary."
+        },
+        { label: 'Version', value: selected.version || null, help: 'The version the file states.' },
+        { label: 'Format', value: SOURCE_FORMAT_LABELS[selected.source_format] || selected.source_format },
+        {
+          label: 'Imported by',
+          value: <PersonName name={names.get(selected.imported_by)} id={selected.imported_by} emailOnHover fallback="someone" />
+        },
+        { label: 'Imported', value: formatDateTime(selected.imported_at) },
+        { label: 'Concepts', value: String(selected.concept_count), help: 'How many concepts it holds. Show Concepts opens them below the table.' },
+        {
+          label: 'In use',
+          value: using.length === 0 ? 'None' : (
+            <div className="context-device-list">
+              {using.map(m => (
+                <RouteLink key={m.metric_uuid} className="chip chip-link" to={metricUrl(m.metric_uuid, !!m.deprecated)} title={`Open ${m.name} on the Metrics page`}>
+                  <IconTag size={11} />
+                  <OverflowText className="chip-name">{m.name}</OverflowText>
+                </RouteLink>
+              ))}
+            </div>
+          ),
+          full: true,
+          help: 'The catalog metrics that use one of its concepts or were started from it. Each opens on the Metrics page.'
+        },
+        {
+          label: 'Definitions',
+          value: selected.definitions_shareable ? 'Shared' : 'Not shared',
+          help: 'Whether an export carries the definitions. Until they are shared it carries the preferred names alone.'
+        },
+        { label: 'Licence', value: selected.licence_note || null, full: true },
+        { label: 'SHA-256', value: selected.sha256, mono: true, copyable: true, full: true }
+      ] : []}
+      actions={selected ? [
+        {
+          label: 'Show Concepts', icon: <IconBookOpen size={13} />,
+          onClick: () => showConcepts(selected),
+          primary: true,
+          title: 'Open its concepts below the table'
+        },
+        selected.definitions_shareable ? {
+          label: 'Stop Sharing', icon: <IconFileCode size={13} />,
+          onClick: () => stopSharing(selected),
+          disabled: !canManage,
+          title: canManage ? 'An export carries the preferred names alone again' : deniedTitle
+        } : {
+          label: 'Share Definitions', icon: <IconFileCode size={13} />,
+          onClick: () => setSharing(selected),
+          disabled: !canManage,
+          title: canManage ? 'Let an export carry the definition of each concept' : deniedTitle
+        },
+        {
+          label: 'Remove', icon: <IconTrash size={13} />,
+          onClick: () => setRemoving(selected),
+          disabled: !canManage,
+          danger: true,
+          title: canManage ? 'Remove this vocabulary and its concepts from this site' : deniedTitle
+        }
+      ] : []}
+    />
+  )
 
   return (
     <>
@@ -221,12 +323,21 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
                     <SortHeader sort={sort} column="concept_count" className="num fit-880" title="How many concepts it holds.">Concepts</SortHeader>
                     <SortHeader sort={sort} column="in_use" className="num fit-880" title="How many catalog metrics use one of its concepts or were started from it.">In use</SortHeader>
                     <SortHeader sort={sort} column="shared" className="fit-520" title="Whether an export carries the definitions. Until they are shared it carries the preferred names alone.">Definitions</SortHeader>
-                    <th className="row-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedFiles.map(file => (
-                    <tr key={file.id} aria-current={file.id === focused ? 'true' : undefined}>
+                    <tr
+                      key={file.id}
+                      className={`row-selectable${file.id === focused ? ' row-selected' : ''}`}
+                      tabIndex={0}
+                      onClick={rowSelectHandler(() => selectFile(file))}
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+                        e.preventDefault()
+                        selectFile(file)
+                      }}
+                    >
                       <td>
                         <Tooltip text={`${SOURCE_FORMAT_LABELS[file.source_format] || file.source_format}. SHA-256 ${file.sha256}.${file.licence_note ? ` Licence: ${file.licence_note}` : ''}`}>
                           <span>{breakAfterSeparators(file.name)}</span>
@@ -245,38 +356,6 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
                       <td className="num fit-880">{file.concept_count}</td>
                       <td className="num fit-880">{file.in_use}</td>
                       <td className="fit-520">{file.definitions_shareable ? 'Shared' : 'Not shared'}</td>
-                      <td className="row-actions">
-                        {file.definitions_shareable ? (
-                          <ActionButton
-                            className="btn btn-ghost btn-sm"
-                            permitted={canManage}
-                            deniedTitle={deniedTitle}
-                            onClick={() => stopSharing(file)}
-                            aria-label={`Stop sharing the definitions of ${file.name}`}
-                          >
-                            Stop Sharing
-                          </ActionButton>
-                        ) : (
-                          <ActionButton
-                            className="btn btn-ghost btn-sm"
-                            permitted={canManage}
-                            deniedTitle={deniedTitle}
-                            onClick={() => setSharing(file)}
-                            aria-label={`Share the definitions of ${file.name}`}
-                          >
-                            Share Definitions
-                          </ActionButton>
-                        )}
-                        <ActionButton
-                          className="btn btn-ghost btn-sm"
-                          permitted={canManage}
-                          deniedTitle={deniedTitle}
-                          onClick={() => setRemoving(file)}
-                          aria-label={`Remove ${file.name}`}
-                        >
-                          Remove
-                        </ActionButton>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -311,6 +390,8 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
           </>
         )}
       </div>
+
+      {drawerHost ? createPortal(drawer, drawerHost) : drawer}
 
       {importing && (
         <ImportVocabularyModal showToast={showToast} onImported={imported} onClose={() => setImporting(false)} />
@@ -359,13 +440,13 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
  * The tab descriptor `VocabularyPanel` takes for the vocabularies a site imported. A self-loading
  * tab: it carries a `panel`, which reads its own rows, and no sections. `canManage` is the
  * permission Add Metric is gated on, which is the Administrator's; `onUseEntry` hands a concept over
- * to Add Metric on the Metrics page.
+ * to Add Metric on the Metrics page; `drawerHost` is where a file's drawer is drawn.
  */
-export function siteVocabularyTab({ canManage, onUseEntry, showToast }) {
+export function siteVocabularyTab({ canManage, onUseEntry, showToast, drawerHost = null }) {
   return {
     id: 'Imported',
     label: 'Imported',
     hint: 'Vocabularies this site imported from AAS files: its own naming, or a standard it holds a copy of. An Administrator imports them.',
-    panel: <SiteVocabularyPanel canManage={canManage} onUseEntry={onUseEntry} showToast={showToast} />
+    panel: <SiteVocabularyPanel canManage={canManage} onUseEntry={onUseEntry} showToast={showToast} drawerHost={drawerHost} />
   }
 }

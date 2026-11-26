@@ -197,6 +197,7 @@ describe('every drawer about a record passes its id', () => {
     'components/tabs/AccessControlTab.jsx': 1, // a broker role
     'components/tabs/BackupsTab.jsx': 2, // a database's own backup, and a backup run
     'components/tabs/BuiltInAlertDrawer.jsx': 1, // a rule of the rules file
+    'components/tabs/MetricsTab.jsx': 1, // a name devices declare that no catalog row has
     'components/tabs/PeopleSection.jsx': 1, // a person, by their email
   }
   /** One ContextPanel whose panel is one of three objects: a lane's, which is no record, and these. */
