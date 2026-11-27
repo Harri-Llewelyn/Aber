@@ -1,4 +1,4 @@
-import { fail, pass, read } from './lib.mjs';
+import { fail, pass, read, sectionOf, supabaseReadme } from './lib.mjs';
 
 // -------------------------------------------------------------------------------------------------
 // 630. Build Schema from Template is named alike on the Schemas page, in its dialog, on the Templates
@@ -32,9 +32,8 @@ export default function check() {
   if (!schema.template) problems630.push('device-schemas.schema.json has no `template`');
   if (!read('docs/device-schemas.md').includes('| `template` | No |')) problems630.push('docs/device-schemas.md has no row for `template`');
   if (!schemasHelp.includes('`template`')) problems630.push('help/pages/schemas.md does not say what `template` in a file does');
-  if (!read('unreleased/migrations/0342.md').includes('supabase/functions/_shared/schemaTemplate.ts')
-      && !read('supabase/README.md').includes('supabase/functions/_shared/schemaTemplate.ts')) {
-    problems630.push("neither 0342's note nor supabase/README.md names the export rule, _shared/schemaTemplate.ts");
+  if (!sectionOf(supabaseReadme(), '### A schema is built from a template (0342)').includes('supabase/functions/_shared/schemaTemplate.ts')) {
+    problems630.push("0342's section of supabase/README.md does not name the export rule, _shared/schemaTemplate.ts");
   }
 
   if (problems630.length) {

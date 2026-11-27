@@ -7373,6 +7373,1324 @@ are `STABLE` and `SECURITY INVOKER` with the `search_path` pinned, so they read 
 caller, and PostgREST serves them over `GET` as well as `POST`. Nothing is written, so no second
 factor is asked for.
 
+### A document of device schemas names a schema by its lineage (0316)
+
+A device schemas document named a schema by its version in force's name with one trailing `_v<n>`
+taken off (`schema_version_base_name()`, `0295`). That holds while a lineage's versions are
+`Robot_Arm_Schema`, `Robot_Arm_Schema_v2`, `Robot_Arm_Schema_v3`. When a version's name is already
+taken, `fork_schema()` numbers it further, as `Robot_Arm_Schema_v2_2`, and that name keeps its tail. A
+lineage whose version in force had such a name exported under `Robot_Arm_Schema_v2_2`, and another site
+that has `Robot_Arm_Schema` did not find it as the same schema. Every version carries its lineage's name
+since `0298`: `lineage_name`, the name of the first version. The document now uses it.
+
+#### The export writes the lineage's name
+
+- **`device_schema_stored_document()`** renders a stored schema under its `lineage_name`. An export of
+  the lineage above names it `Robot_Arm_Schema`, whatever its version in force is called.
+- **`device_schemas_document(p_ids)`** picks the lineages of the ids given by `lineage_root_id`. It
+  picked them by the stem of each version's name, so the id of the archived `Robot_Arm_Schema` did not
+  reach its version in force, `Robot_Arm_Schema_v2_2`: **Export YAML** in that version's drawer found no
+  schema in force to export. The id of any version now exports its lineage's version in force.
+
+#### The matcher finds a schema by its lineage
+
+`device_schemas_parse()` finds a schema by two rules, in order:
+
+1. **A lineage whose `lineage_name` is the file's name.** `schema_name` is unique, so a name is at most
+   one lineage's.
+2. **Where no lineage has the name, as `0295` did:** the versions whose names, with one trailing
+   `_v<n>` taken off, are the file's name with one taken off. [`0318`](README.md#a-new-schema-version-is-named-from-its-lineage-0318) finds the lineage of
+   such a version instead, since a version in force need not share the name any more.
+
+A name that is both a lineage's and another lineage's stem finds the lineage. For example, a lineage
+`Pump` and another whose first version is named `Pump_v7`: `0295` refused `Pump` as two schemas, and
+`0316` finds the lineage `Pump`. A name that only the second rule finds, and that finds two lineages, is
+still refused.
+
+The version in force of what it finds is what the file is compared with, as before. Two schemas of one
+file that find one lineage are refused as one name used twice, such as `Robot_Arm_Schema` and
+`Robot_Arm_Schema_v2_2`. The reasons name the schema by its lineage. The checked schema carries the
+version in force (`head`), the lineage's name and the stem a new version was named from, which
+`0318` took out.
+
+`apply_device_schemas()` takes the version in force the checker found, by its id, rather than looking
+it up again by the stem, and renders the file's schema under the lineage's name, so a file that says
+what that version says is `unchanged`. A changed schema's draft is still named as `fork_schema()` names a
+version. This file left the name coming from the version in force, and [`0318`](README.md#a-new-schema-version-is-named-from-its-lineage-0318), in the same
+release, names both from the lineage: `Robot_Arm_Schema_v2_2` is followed by `Robot_Arm_Schema_v3`.
+Each body is `0295`'s with only these changes. The gate, the second factor, the grants and every other
+rule are `0295`'s.
+
+#### A file written before 0316
+
+A file exported before `0316` applies as it did. It names a schema by the stem of its version in
+force's name. For a lineage whose versions are `X`, `X_v2` and so on, that is the lineage's name, so the
+first rule finds it. For one numbered further, the file says `X_v2_2`, which no lineage is named, so the
+second rule finds it. A site has nothing to do on upgrade, so there is no upgrade note. To
+name such a schema by its lineage in a file, export it again. A file exported before 1.10.0 names no
+derived metrics, so applying it takes away the ones its schemas name ([`0336`](README.md#a-schema-names-the-derived-metrics-its-devices-get-0336)).
+
+A first version whose own name ends in a version, such as `Pump_v7`, is now exported under that name,
+where `0295` wrote `Pump`. Another site that has no such schema refuses the name as one that ends in a
+version, as it refuses any new schema named that way. Rename it in the file.
+
+`0316`'s self-check asserts the writer's gate, second factor, `SECURITY DEFINER` and pin, that `anon`
+may run none of the four functions and the parser is no browser's, and that the three readers run as
+their caller. On rows a subtransaction takes back, it asserts that a lineage whose version in force is
+`X_v2_2` exports under `X` from its archived first version's id, and that a file naming `X` and
+`X_v2_2` finds it under both. `test_a_document_of_device_schemas_names_a_schema_by_its_lineage.py`
+holds the lineage the issue names, the file written before `0316`, a name used twice, the round trip,
+the draft's name beside `fork_schema()`'s, and a lineage's name winning over a stem.
+
+### A device has no connection_method column (0317)
+
+1.9.0 deprecated `devices.connection_method`, so 1.10.0 removes it, as `0219` removed
+`cells.grafana_url` and `0175` removed `devices.schema_id`. Every device reaches Aber over Sparkplug B,
+so the column said nothing, and the dashboard stopped sending it in 1.9.0. The drop is guarded by
+the column's existence, in one `DO` block: only the first boot of an upgrade does anything, and a
+fresh install and every later boot take no lock on `devices`.
+
+- **The values go with the column.** db-init's log names the drop in a NOTICE, with the number of
+  devices that held a value that was not blank. Unlike `0219`, the values are not cleared first to
+  leave an audit row each. The audit trigger records the whole row, so each device's earlier audit
+  rows already hold its value. The value names a protocol, not something about the site. An `UPDATE`
+  per device would also file one **Configuration** change per device that nobody made.
+- **The boot is never refused for a proposal.** A proposal filed before the upgrade that names the
+  key stays open. Refusing the boot would stop db-init on every boot until someone acted, while
+  nobody could reach the dashboard to act. It would also make the release major (*Deprecation* in
+  [`docs/releases.md`](../docs/releases.md#deprecation)).
+- **Approving that proposal is refused instead, and says what to do.** `proposable_columns()` no
+  longer admits the key, and `approve_proposal()` re-checks every patch against it. So the approval
+  fails with `invalid_parameter_value`, which PostgREST answers 400. The message now ends "reject it,
+  and ask for a new proposal without it". Nothing applies it with the key left out, which
+  `jsonb_populate_record()` would otherwise do, since it ignores a key with no column. A new proposal
+  that names the key is refused when it is filed. The upgrade note gives the query that lists the
+  open ones.
+- **Then the column goes.** Only the audit trigger fires on an `UPDATE` of it, and no view, index or
+  constraint names it.
+- **`approve_proposal()` sets no `connection_method`.** Its devices branch set the column from the
+  merged row. `0001` and `0165` now declare it without that line, and with the refusal's new ending,
+  and this file does not redeclare it. `0165` replays before `0317` on every boot, so
+  `approve_proposal()` never names the column while the column is gone, not even for a moment between
+  two files.
+
+The earlier files are in their final form, as `0219` left the files before it. `0001` no longer
+creates the column, adds it, drops its default, admits it in `proposable_columns()` or sets it in
+`approve_proposal()`. `0202` no longer admits it in `proposable_columns()`. `0165`, and the merge
+comment in `0001`, `0165` and `0293`, no longer name it. An API client that still writes or reads the
+column gets PostgREST's unknown-column error.
+
+The Audit Trail's old rows keep their snapshots. `audit_event_class()` (`0306`) reads the key out of
+`old_data` and `new_data`, never out of the table, so a past change to it is still
+**Configuration**. The classifier is not redeclared.
+
+The file's self-check asserts that the column is gone and that the device lane does not admit it. It
+also asserts that the live `approve_proposal()` does not name the column, still re-checks the patch and
+asks for a second factor, and is `SECURITY DEFINER` with its search path pinned.
+`test_a_device_has_no_connection_method_column.py` rebuilds 1.9.0's column and allowlist in each
+test's transaction. It holds:
+
+- the drop, the count in the log, and the audit rows that already hold a value;
+- the refusals at filing and at approval, the rejection, and the upgrade note's query;
+- a second boot: `0001`'s statements for `devices` add no column and use no attribute number, and
+  `0317` finds nothing to do and takes no lock on `devices`.
+
+Check 527 (`scripts/check-docs-drift.mjs`) holds that no other migration names the column, outside
+the classifier's snapshot reads. It also holds that `0317` keeps its guard and declares no function,
+that the API spec documents the column on neither `Device` nor `DeviceWrite`, and that no code reads
+it but the Approvals page's label for an old proposal.
+
+### A new schema version is named from its lineage (0318)
+
+`fork_schema()` named a version from its parent's name with one trailing `_v<n>` taken off
+(`schema_version_base_name()`), and `apply_device_schemas()` named a draft the same way. That holds
+while a lineage's versions are `Robot_Arm_Schema`, `Robot_Arm_Schema_v2`, `Robot_Arm_Schema_v3`. A name
+that is already taken is numbered further, `Robot_Arm_Schema_v2_2`. That name does not end in `_v<n>`, so
+the version after it was `Robot_Arm_Schema_v2_2_v3`, and every later one kept the tail. Since `0298`
+every version carries its lineage's name (`lineage_name`), and a new version is now named from it.
+
+#### The rule
+
+A new version is `<lineage_name>_v<next>`. While that name is taken it is numbered further, with `_2`,
+`_3` and so on, as before. `<next>` is the parent's `version` plus one, as before.
+
+- After `Robot_Arm_Schema_v2_2` comes `Robot_Arm_Schema_v3`.
+- A lineage whose first version's own name ends in a version, such as `Pump_v7`, has that whole name as
+  its `lineage_name`, so its next version is `Pump_v7_v2`.
+- A renamed first version renames its lineage on every version (`trg_schemas_rename_their_lineage`,
+  `0298`). The next version takes the new name, and the versions there are keep theirs.
+- **Existing names stay as they are.** No row is renamed: a published version cannot be edited, and the
+  Audit Trail names it as it is. Only a version made after this takes the new name. A lineage that
+  holds `Robot_Arm_Schema_v2_2_v3` goes on with `Robot_Arm_Schema_v4`.
+
+`fork_schema()` reads the name from the parent it has locked, and `apply_device_schemas()` from the checked
+schema, whose `lineage` is the version in force's. The name is written inline in both, as it was, and
+mirror check 142 holds the two together with the dashboard's prediction (`nextVersionName()` in
+`schemaVersion.js`, which the **Create Version** dialog shows). Nothing names a version from
+`schema_version_base_name()` any more. Drift check 549 holds that.
+
+#### A file written before 0316 still finds its lineage
+
+`device_schemas_parse()` is redeclared for two reasons.
+
+- **A name no lineage has is found through a version's lineage.** A file exported before `0316` names
+  such a lineage `Robot_Arm_Schema_v2_2`. `0316` found it by looking for a version **in force** with that
+  name, its trailing `_v<n>` taken off. That worked because every later version kept the tail. The
+  version after it is now `Robot_Arm_Schema_v3`, so once it was published that file would have been
+  refused, with a message telling the person to publish a draft that does not exist. The parser now
+  takes the lineage of any version with that name, and compares the file with that lineage's version in
+  force. The same holds for `Pump_v7` exported as `Pump`. A name that the versions of two lineages have
+  is refused, as before. The first rule, a lineage's own name, is unchanged.
+- **The checked schema carries no `stem`.** It was the name a new version was made from, and nothing
+  reads it now.
+
+Each body is its latest (`0165`'s, `0316`'s) with only these changes, and the comments beside them. The
+gate, the second factor, the 404 and the unique-violation refusals, the grants and every other arm are
+as they were. `apply_device_schemas()` is declared before `device_schemas_parse()`, because the files
+replay one statement at a time: the old parser gives `lineage` too, while the old writer would have read
+a `stem` the new parser does not give.
+
+A site has nothing to do on upgrade, so there is no upgrade note.
+
+#### What holds it
+
+`0318`'s self-check asserts the shape, gate and grants of the functions. It reads what the two writers
+name a version from in their source, and calls neither: it runs on every boot of every site, and must
+not depend on a site's roles, its second factor or its sign-in service. On rows a subtransaction takes
+back it makes a lineage `X`, `X_v2_2`, `X_v3` with `X_v3` in force. A file naming `X_v2_2` must still find
+it, so `X` beside it is the same schema twice. It counts nothing.
+
+`test_a_new_schema_version_is_named_from_its_lineage.py` asks each name of three calls in one state: a
+document's preview, its apply and `fork_schema()`. It holds the suffix and the version after it, a
+version named before `0318`, `Pump_v7`, a rename of a published lineage and of a draft, the files
+written before `0316`, `fork_schema()`'s refusals, and the self-check passing on a site where nobody
+may version a schema and leaving nothing behind.
+
+### The comments say who a change names and which identities are seeded (0319)
+
+A table's comment is where someone reading the schema looks first. Four said things the code does not
+do:
+
+- **`audit_trail.actor_source`** said `changed_by` is NULL for every machine-originated write. A
+  machine identity has an `auth.users` row and its token a `sub`, so `log_audit_trail_event()` writes
+  its id there: an ingestion write names `Service_Ingestor`. `changed_by` is NULL where no account
+  acted, as in the owner's session or with the service-role key, and where a function pins it
+  ([Attribution](README.md#attribution)).
+- **`user_roles`** said three machine principals are seeded, each granted `telemetry:read`. `0181`
+  seeded a fourth, `Service_ReleaseCheck`, which is granted nothing. The other three are unchanged.
+- **`machine_principals`** said the same three have no row there, and that `create_machine_principal()`
+  alone writes it. The four seeded ones have none, and `describe_machine_principal()` changes a row.
+- **`audit_trail`** said it records changes to cells, gateways and devices. It records every kind
+  `audit_trail_action_kinds()` lists. The comment names no list of its own: it points to
+  [How Aber identifies things](../docs/architecture.md#how-aber-identifies-things), which drift check
+  566 holds to the code.
+
+`COMMENT ON` only, so a replay restates the same text. `0001` states the four older comments earlier in
+each boot, and this file runs after it. The self-check reads each comment back.
+
+Drift check 565 holds the two counts to the seed: it reads the principals the migrations seed
+(`INSERT INTO auth.users (id)`), and each comment as the last migration states it. A fifth seeded
+identity fails it until the two comments and `supabase/README.md` say five. Check 11d holds the
+dashboard's registry to the seed.
+
+### An IDTA template is seeded with its nested elements (0320)
+
+The one submodel template Aber knew was the Digital Nameplate, and its 20 top-level elements were typed
+into `0002` by hand. Its nested collections were left out "until something needs them". Adopting another
+template, such as Asset Interfaces Description, meant typing that one too. `0320` seeds both from the JSON
+IDTA publishes, nested elements included.
+
+- **`idta_template_elements` is new:** one row for each element of a template. The key is the template and
+  the element's `path`, so an idShort that repeats in two collections is two rows. The path is the AAS API's
+  idShortPath: a dot into a collection and `[n]` into a list, as in `Markings[0].MarkingName`. A template's
+  `[0]` stands for each item of the list, and an item has no idShort.
+- **What a row holds.** The template's semantic id, name, IDTA number and version; the element's path, its
+  parent's path, its place in the document, its idShort, its model type and its value type; its semantic
+  id and that id's type; the further ids the template gives it; its cardinality; what the template says of
+  it; and the example the template gives. A column the template has nothing for is NULL, and the further ids
+  are empty.
+- **`ordinal` runs through the document,** an element before what is inside it. Reading a template by it
+  gives each element under its parent.
+- **Two templates, 396 rows.** Digital Nameplate 3.0.3 (IDTA 02006) has 36 elements, 20 of them at the top.
+  Asset Interfaces Description 1.0.1 (IDTA 02017) has 360, under an interface template for each of HTTP,
+  Modbus and MQTT. Each version is the newest bug-fix release of its minor version, which is what IDTA's
+  repository says to use.
+- **The rows are generated.** [`scripts/vocabularies/`](../scripts/vocabularies/README.md) keeps each
+  template's JSON, pinned by SHA-256, with IDTA's CC BY 4.0 licence beside it, so CI needs no network.
+  `scripts/generate-idta-template.mjs` writes the block in this file and
+  `scripts/check-idta-seed-sync.mjs` checks it. CI runs both, and `git diff` fails the step when what the
+  generator wrote is not what is committed.
+- **Another template is a file plus one line** of `TEMPLATES` in `scripts/lib/idta-template.mjs`. The block
+  is written only while its migration is unreleased, as the OPC UA blocks are. After the release the
+  generator only verifies it, so the next template goes in a block of the migration that adds it.
+
+#### No IEC CDD or ECLASS text
+
+A template cites IEC CDD and ECLASS for most of its concepts, and its file carries their definitions as
+ConceptDescriptions. IDTA publishes the file under CC BY 4.0, but those texts are the dictionaries', under
+terms of their own. The Nameplate's file has 27 of them.
+
+- **The kept copy leaves them out.** `generate-idta-template.mjs --vendor` writes it from the downloaded
+  file, and changes nothing else. The generator refuses a file that carries one.
+- **The ids stay.** An IRDI is only a value, and the seed already carried the 20 of the released rows.
+- **So most Nameplate elements have no definition here:** 14 of the 36 do. Those are IDTA's notes, such as
+  the one on the date format, and the definition IDTA wrote for `UniqueFacilityIdentifier`. Nothing was
+  written in the place of one that was left out.
+- **Asset Interfaces Description has no dictionary text and almost no definitions.** Its file says `EMPTY`
+  for every concept, and `Current counter value` for a sample property. The generator takes neither for a
+  definition. 57 of its elements carry a constraint, such as "Only applicable for MQTT binding".
+
+#### The released table stays
+
+`idta_submodel_templates` is released. Its key, its CHECKs and its 20 rows run on every boot, and they stay
+as they are. Its readers stay on it: the Nameplate dialog, the semantic id picker, `concept_definitions` and
+the AAS export. Drift check `567` holds the 20 rows to the top-level Nameplate elements of the new table,
+by name, order, semantic id and type.
+
+The released rows were typed from version 2.0, which marks `YearOfConstruction` mandatory and
+`OrderCodeOfManufacturer` optional. Version 3.0 swapped the two, as its specification's list of changes says.
+`0323` gives each row the generated element's cardinality, so the two tables agree.
+
+#### What it does not do
+
+- **`AddressInformation` has no elements inside it.** It is mandatory in the Nameplate, and the template
+  takes its elements from IDTA's drop-in of that name, which is in Contact Information (IDTA 02002). `0324`
+  seeds that template. The specification makes `Street`, `Zipcode`, `CityTown` and `NationalCode` mandatory
+  in it, in its text only: no file says so.
+- **`concept_definitions` gains no arm.** A row's definition is what a template says of an element in that
+  template. It is not a definition of the concept the element cites, so no export reads it.
+- **12 elements of Asset Interfaces Description have no cardinality,** because the template gives them none.
+  It is NULL rather than a default Aber chose.
+- **A later release of a template already seeded is not handled.** Two entries for one template would
+  each rewrite the other's rows on every boot, so the generator refuses them.
+
+#### Access
+
+It is the other vocabularies'. Row security is on, and the one policy lets `authenticated` read. No role
+holds INSERT, UPDATE or DELETE: the migration writes the rows as the owner. Anon is revoked by name. A row
+is written only where it differs, so a replay on a settled database writes nothing.
+
+The self-check asserts row security, the grants, and that every nested element has its parent before it. It
+counts no totals and reads only seeded rows, so a second boot passes.
+
+`test_an_idta_template_is_seeded_with_its_nested_elements.py` (db lane) holds the rows, the access, the
+CHECKs, the two tables' agreement and the replay. `scripts/lib/idta-template.test.mjs` holds the generator to
+a small synthetic template.
+
+### Every entity is listed and found by any id (0321)
+
+Aber shows ids in many places: drawers, the Audit Trail, logs, MQTT topics, AAS ids, API answers. Nothing
+answered *what is this id?* To find out, a person guessed the kind and searched that kind's page. Nothing
+listed what is in service either. The one page that lists entities of several kinds held only what had been
+taken out. `0321` adds one view of every entity and one search over it, and the page is now **Entities**:
+Active, Archived and Retired.
+
+- **`entity_directory` is one row for each entity** a page of the dashboard lists by its id. It is a `UNION ALL`
+  of the tables that hold them, and the page's Active tab and its search both read it, so they cannot
+  disagree.
+- **`find_entities(p_query, p_limit, p_per_kind)` is the search.** It answers the rows of the view that one text
+  names, and at most `p_per_kind` of each kind where a caller asks for that.
+
+#### What is in it
+
+| `kind` | `second_ids` | `variant` | `page_id` |
+| :--- | :--- | :--- | :--- |
+| `areas`, `cells` | none | none | its id |
+| `gateways` | its Sparkplug id | `playback`, for the Playback gateway | its id |
+| `devices` | its Sparkplug id, and the id it reports when that differs | `quarantined`, or `replay_lane` | its id |
+| `schemas` | its semantic id | its status: `draft`, `active` or `archived` | its id |
+| `metric_catalog` | its semantic ids, its own first and then `metric_semantic_ids` | `deprecated`, else `derived` | its id |
+| `captures` | its stored file's path | its subject's kind: `gateway` or `device` | its subject's id |
+| `backups` | its stamp | its origin: `requested` or `scheduled` | its job's id |
+| `automations` | its key | `disabled` | its key |
+| `service_principals` | none | `withdrawn` | its id |
+| `areas`, `cells`, `gateways`, `devices`, retired | the Sparkplug id and the reported identity it had | `replay_lane` | none: it has no page |
+
+- **`kind` is the word `audit_trail.entity_type` uses,** so a row's link to its Audit Trail needs no mapping.
+- **`state` is the archive lifecycle's alone.** Only an area, a cell, a gateway or a device can be archived and
+  deleted from the archive. So a superseded schema version, a deprecated metric and a disabled automation are
+  `active`, and `variant` says which. A quarantined device is in service, as every count says.
+- **`second_ids` holds ids and never a subject's.** A capture is of a device, whose id is in `device_id`. Were the
+  device's Sparkplug id in the capture's `second_ids`, that id would name two rows and open neither.
+- **`page_id` is what the kind's own page opens it by.** The Capture page opens a subject, the Backups page a run
+  and the Automations page a key. A backup whose job is gone has none.
+- **`area_id` and `cell_id` are where it is:** a device's effective place (`device_locations`), and a
+  gateway's own. `gateway_id` is the gateway a device publishes through. A capture's subject is in `gateway_id`
+  and `device_id`.
+
+#### What is left out
+
+- **A live replay lane.** It is a recording of a device and not an entity in service. An archived one is listed,
+  because the Archived tab lists it and its search must agree with it.
+- **People.** `auth.users` is served by no table, and every read of it is `SECURITY DEFINER`. The view calls no
+  function of `public`, and the self-check holds it to that. The page reads people apart, through
+  `list_user_accounts()`, which answers the Administrator and the Auditor. No new reader of people was made.
+- **The identities `0002` and `0181` pin.** They have no `machine_principals` row, since nobody made them. The
+  dashboard names them from its own list, as Access Control and the Audit Trail do.
+- **Vocabularies, proposals, alerts, recordings and playbacks.** Each is read by a name or from its subject.
+
+#### What the search matches
+
+- **A whole id:** the key, or any of `second_ids`.
+- **The start of an id, from 8 characters.** That is an uuid's first group, which logs and lists often cut an id to.
+- **Any part of a name.**
+
+It ignores case and the spaces round a pasted id. It compares text and never a pattern, because a semantic id
+holds `%`, `_` and `#`. A whole id comes first, then a whole name, then the rest. It answers 200 rows, or
+`p_limit`, and never more than 500. Blank text answers nothing. Mirror check `159` holds the rule to the one
+the dashboard applies to people.
+
+It is a function because a PostgREST filter cannot match the start of an array's element. It is not faster than
+the view: it reads the view.
+
+#### A limit of each kind
+
+An answer is of 200 rows, ranked and then by name, so one kind can fill it: four hundred devices before a cell. With
+`p_per_kind` the function answers at most that many rows of each kind. A kind's rows go by:
+
+1. **How the text names them:** a whole id, a whole name, the start of an id, part of a name.
+2. **Their state:** active, archived, retired. The three are in that order by their letters.
+3. **Their name,** a shorter one first, so *Press 2* is kept before *Press 10*. The search bar lists names in the
+   order people read numbers (`shortlist()`), and ten kept by letters alone would be *Press 1* and *10* to *18*.
+
+`p_limit` still holds the total, and the state then counts in the order of the whole answer too. A number below 1 is
+1, as it is for `p_limit`. Without `p_per_kind`, every row keeps its place.
+
+The search bar asks for 10 of a kind and 200 in all. There are ten kinds, so the total never cuts one short.
+
+#### One form
+
+A new argument is a new signature, and PostgREST calls by argument names. With two forms declared, a call naming
+`p_query` and `p_limit` is neither's. This file declared the two-argument form before it took `p_per_kind`, so a
+database that ran it then holds that one. **It is dropped in the transaction that declares the other**, guarded on
+`to_regprocedure`, so no boot commits two forms, or none. `0230` dropped its earlier form in a file of its own, and a
+boot of its upgrade held two for a moment. This file was unreleased when it took `p_per_kind`, so the form is declared in place and no later
+file holds a copy: a copy would leave this one declaring the earlier form on every boot.
+
+Measured while the whole chain was replayed as db-init replays it, under three callers that each asked again as they
+were answered, and a fourth with `p_per_kind` on a later boot:
+
+| Boot | Forms in the catalogue, sampled each millisecond | Calls through PostgREST |
+| :--- | :--- | :--- |
+| Over the earlier form, twice | the earlier, then the other | 2 of 2,581 failed, each in flight as the form went |
+| Over this one, twice | the other | 0 of 6,047 failed |
+
+A call planned against the earlier form as it goes fails with `cache lookup failed`, and the next succeeds. The view's
+own `REVOKE` and `GRANT` are one transaction for the same reason: a read between the two was refused.
+
+#### Access
+
+- **Both run as their caller:** `security_invoker` on the view, and no `SECURITY DEFINER` on the function. The
+  policies of the tables beneath decide the rows, so a role sees what it saw before and nothing else. An
+  Operator reads the plant, the model and the automations. A Shopfloor Manager reads captures too, and an
+  Auditor captures and machine identities. An Administrator reads all of it. The tombstones are for whoever
+  holds `archive:manage` or `audit_trail:read`.
+- **`authenticated` may read the view and call the function.** Anon, `service_role` and `PUBLIC` hold nothing.
+
+#### How long it takes
+
+Measured on a database of 4,950 live and 50 archived devices, 400 gateways, 200 cells, 1,500 metrics with a further
+semantic id each, 100 schemas, 200 automations and 200 tombstones, on a laptop with other work running.
+
+| Read | Time |
+| :--- | :--- |
+| The whole Active list: 7,371 rows, 2.8 MB as JSON | 34 to 37 ms |
+| One search, of any kind, by a whole id, the start of one or a name | 66 to 107 ms, 75 in the middle |
+
+A search takes the same time whatever it finds, since it reads every row. A tombstone cost most, until
+[`0330`](README.md#a-search-asks-about-the-tombstones-once-0330), which has the times since. Placing each row within its kind costs a sort of the rows found, whether
+or not a limit is asked for: 19 ms where 9,620 rows are, and nothing to notice where a few are.
+
+#### What it changes beside
+
+`0001`'s comments on `areas.is_archived` and `retired_entities` named the page by its old name. `0001` is
+released and replays first, so this file states both again after it.
+
+`test_every_entity_is_listed_and_found_by_any_id.py` (db lane) holds each kind's row, each role's rows against
+what that role reads from the tables, and the search. `test_a_search_asks_about_the_tombstones_once.py` holds the limit
+of each kind, the answer without it against a copy of the body from before it, and the one form. Mirror check `169`
+holds the limit and the order to the search bar's.
+
+### A released template row is mandatory as the template has it (0323)
+
+Two of the 20 Digital Nameplate rows `0002` seeds in `idta_submodel_templates` kept version 2.0's answer:
+`YearOfConstruction` was mandatory and `OrderCodeOfManufacturer` optional. Version 3.0 swapped the two, as its
+specification's list of changes says. The Nameplate dialog marked the wrong one of each.
+
+- **`is_mandatory` now follows the generated table.** `idta_submodel_template_as_generated()`, a `BEFORE
+  INSERT OR UPDATE` trigger on `idta_submodel_templates`, sets it from `idta_template_elements.cardinality`:
+  `One` or `OneToMany` is mandatory. It does so wherever that table holds the element, whatever the statement
+  proposes, and leaves a row it does not hold as it is. Nothing else of a row is decided by it here. It also
+  gives ten descriptions since [0334](README.md#the-nameplates-texts-say-what-each-element-is-0334).
+- **The two rows are corrected once,** by an `UPDATE` that writes only a row that differs.
+- **An `UPDATE` that would leave a row as it is is skipped.** `0002`'s upsert has no guard, so it rewrote all 20
+  rows on every boot with the values they already held.
+
+#### Why a trigger, and not the `UPDATE` alone
+
+`0002` is released and is not edited. db-init replays its upsert on every boot, ahead of this file, and the
+upsert sets `is_mandatory`. So an `UPDATE` alone, which is how `0305` corrected four descriptions, would be
+undone and made again on every boot. Two rows would be written twice, and a person opening a Nameplate dialog
+between the two files would read the old answer.
+
+With the trigger in place, the upsert proposes version 2.0's value, the trigger gives it the template's, and the
+row is unchanged. **A second boot writes no row of the table,** and the value is never put back, not even for a
+moment between two files. The first boot of an upgrade still shows the old value from `0002` to `0323`, as it
+did before.
+
+Two other ways were not taken. Editing the two words in `0002` would be the simplest, and a released file is
+edited in place only to drop a column. Reading the cardinality everywhere instead of `is_mandatory` would leave
+a column in the API that is wrong.
+
+#### What the checks hold
+
+The file's self-check asserts that the trigger is enabled and is `BEFORE INSERT OR UPDATE FOR EACH ROW`, that its
+function is pinned and no API role may run it, and that no row disagrees with its element. It counts no totals.
+`test_a_released_template_row_is_mandatory_as_the_template_has_it.py` (db lane) runs `0002`'s statement and this
+file as db-init does. It holds the second boot, by each row's version, and the first boot of an upgrade.
+
+Drift check `567` lists no difference any more. It holds that each of the 20 elements states a cardinality, and
+that the trigger takes `is_mandatory` from it.
+
+### A nameplate holds the manufacturer's address and order code (0324)
+
+The Digital Nameplate template (IDTA 02006, 3.0) asks for five elements at its top: `URIOfTheProduct`,
+`ManufacturerName`, `ManufacturerProductDesignation`, `AddressInformation` and `OrderCodeOfManufacturer`.
+`device_nameplate` had no column for the last two, so no nameplate could be complete.
+
+- **Six optional text columns:** `order_code_of_manufacturer`, and the manufacturer's address as
+  `address_street`, `address_zipcode`, `address_city_town`, `address_state_county` and
+  `address_national_code`. Each is named for its element.
+- **Text, as the fields beside them are.** The template types the address elements as multi-language, as it
+  does `ManufacturerName`. Its specification recommends at most one string, in any language, so one text
+  column holds it. The AAS export tags it `en`, the language of every text it writes.
+- **No CHECK on the country.** `country_of_origin` has none either, and a plate may carry a three-letter code.
+- **A proposal carries them.** `proposable_columns()` admits the six, and `approve_proposal()` sets them. Both
+  are declared from their latest bodies, `0202`'s and `0165`'s, and nothing else in them changes.
+- **The audit is as it was.** The trigger records whole rows, so a change is one `UPDATE` with both values. No
+  action, class or domain is new.
+
+#### Contact Information is seeded for the address elements' ids
+
+The Nameplate's file holds nothing inside `AddressInformation`. Its elements are those of `ContactInformation` in
+another template, Contact Information (IDTA 02002). So `idta_template_elements` gains that template, 1.0.4, as
+36 rows in a generated block of this file. `0320`'s block is as it was.
+
+- **The kept file has no ECLASS text.** 29 ConceptDescriptions are left out, as 27 are of the Nameplate's. Contact
+  Information also quotes an ECLASS definition inside an element's description, in one sentence about
+  `Language`. `generate-idta-template.mjs --vendor` now takes such a sentence out too, and the generator refuses
+  a file that has one.
+- **Four elements are mandatory by the specification's text alone.** *Mandatory information for address
+  information* in IDTA 02006 names `Street`, `Zipcode`, `CityTown` and `NationalCode`, and its list of changes
+  says they are "only listed in the document, not in the AASX file". Contact Information marks each one
+  `ZeroToOne`. So the exporter (`MANDATORY_ADDRESS_ELEMENTS` in `_shared/aas/shell.ts`) and the Nameplate dialog
+  (`frontend/src/utils/nameplate.js`) name the four, and mirror check `160` holds the two lists to each other.
+- **The ids are ECLASS's,** such as `0173-1#02-AAO128#002` for `Street`. An id is only a value.
+
+What the export does with them is in
+[*What a shell's submodels claim*](README.md#what-a-shells-submodels-claim).
+
+The file's self-check asserts the columns, the lane, that `approve_proposal()` sets each column and is still
+`SECURITY DEFINER`, pinned, behind the second factor and re-checking the patch, and that the five address
+elements are seeded with ids. `test_a_nameplate_holds_the_manufacturer_s_address_and_order_code.py` (db lane)
+holds the writes by role, the audit row, the proposal and its approval, the seeded rows against the kept file,
+and the replay. Drift check `583` holds a nameplate's columns to every place that lists them.
+
+### The id of a record cannot be changed (0325)
+
+Everything else finds a record by its id: a foreign key, the Audit Trail, an exported shell, an i3X or
+Factory+ client. A device's and a gateway's `sparkplug_id` is generated from it, and names a device's
+readings and a gateway's broker account and repository. Nothing in Aber changed an id, and nothing refused
+it either. Measured on a fresh database at 149d4c3e, as a person with the `Shopfloor_Manager` role:
+`UPDATE ... SET id = ...` changed one row of `areas`, `cells`, `gateways`, `devices`, `links`,
+`directory_services` and of their own open proposal. An Administrator changed `metric_catalog` and
+`metric_groups` too. A foreign key refused it only where another row already pointed at the row, so a
+device with a schema attached was held and a device without one was not.
+
+Through PostgREST that is one `PATCH` with another `id` in its body. The dashboard never sends it. A
+script can, and what it breaks is not put back by a later edit: the readings, the cold archive and the
+credential stay under the old id, and each client that stored it gets a 404.
+
+- **`refuse_key_change()` refuses it,** as `check_violation`, which PostgREST answers with a 400. The
+  message names the kind and the record: `the id of device "Press 4" cannot be changed. Other records
+  and other systems find it by this id.` The trigger's first argument is the kind as a person says it.
+  The second is the column that names the record.
+- **One trigger per table, `BEFORE UPDATE OF id`.** A write that leaves `id` out of its SET list runs none
+  of it.
+- **An id set to its own value passes.** A client that PATCHes the whole row it read sends the id back,
+  and an upsert on `id` sets it.
+- **An upsert on another key is refused when it brings an id of its own,** since it would give the row
+  that id. Leave `id` out of it.
+
+#### Which tables
+
+Those whose id a person's session may write (a column privilege and an UPDATE policy) and that something
+outside the row holds: `areas`, `cells`, `gateways`, `devices`, `schemas`, `metric_catalog`,
+`metric_groups`, `links`, `directory_services` and `change_proposals`. A proposal's id is in the link its
+reviewer follows, in the client that filed it, and in the Audit Trail once it expires.
+[How Aber identifies things](../docs/architecture.md#how-aber-identifies-things) lists the kinds, and drift check
+586 holds its list of these tables to the triggers.
+
+`automations` has one too. No session may write that table, so it holds the functions that do.
+
+Two ids a person's session may write have none, because nothing outside the row holds them.
+`asset_config` is read by its asset and metric, and `device_submodels` by its device and schema.
+
+#### No role is exempt
+
+The owner and the service-role key are refused as a person is. Nothing that runs as the owner changes an id:
+
+- no migration does, outside `archive/`, which is never applied;
+- of the functions in `public`, none sets an `id`. `approve_proposal()`,
+  `approve_quarantined_device()`, `relocate_devices()`, `apply_automations()` and
+  `publish_schema_version()` each write other columns of the row they were given;
+- an archive, a restore and a merge from Quarantine keep the row. A backup's restore inserts rows, and
+  an INSERT runs no UPDATE trigger.
+
+A migration that one day must move a pinned id disables the trigger around its own statement, and says so.
+
+#### Replay
+
+Each trigger is a `replay_trigger()` call, so a boot that finds it as stated takes no lock and prints no
+notice. The self-check asserts that each table's trigger is enabled and calls the function, and that neither
+`anon` nor `authenticated` may run it. `test_the_id_of_a_record_cannot_be_changed.py` (db lane) changes each id as each kind of
+caller. It also holds the keys a person's session may write to the tables with a trigger and a list with a
+reason each, so a new table fails it until it is one or the other.
+
+### A refused cell archive names the drawer action (0326)
+
+`refuse_archiving_an_occupied_cell()` ([0198](README.md#a-cell-is-archived-only-when-nothing-is-in-it-0198))
+says in its HINT where to find what the cell holds. It named *Show Its Devices*. Every drawer action
+that opens a page is named `View in <page>`, so that one is *View in Devices*. A script or an API client
+that archived an occupied cell was sent to an action nobody could find. The dashboard shows the message
+and not the HINT.
+
+`0198` is released, so this redeclares the function from that body with the one name changed. The owner,
+the grants, the comment and the trigger are `0198`'s. Drift check 587 holds the HINT in the latest body
+to the Cells drawer, so the next rename fails there.
+
+### A gateway records the platform bump that waits (0327)
+
+Aber opens the pull request that moves a Remote gateway to the platform of the release the site runs
+(`proposePlatformBump()`, in *The platform playbook is published by the sweep*). Nothing in the
+dashboard said that one waits. On a site with forty gateways, the only list of what waits was forty
+repositories' **Pull Requests** tabs. The gateway drawer's **Platform** row now says it.
+
+**Two columns on `gateways`, a copy of what the forge holds.** `forge_bump_tag` is the release
+proposed and `forge_bump_number` the pull request's number. There is no address: the dashboard
+builds it from the gateway's `sparkplug_id`, as it builds the other forge links. They are set and
+cleared together, by two functions and nothing else
+([`bumpRecord.ts`](functions/_shared/bumpRecord.ts)):
+
+| What happened | Who writes it | The row |
+| :--- | :--- | :--- |
+| The sweep opens the pull request, or finds its own open | `forge-sweep` | the tag and the number |
+| It was closed | `forge-sweep`, on its next pass | both null |
+| `main` no longer names an older release, however it got there | `forge-sweep`, on its next pass | both null |
+| The merge arrives | `forge-events`, on the delivery | both null |
+| The gateway is archived, or is no longer Remote | `forge-sweep`, on the pass that change asks for | both null |
+
+A pass reads the pull requests of a gateway only where `main` is behind, as before, or where
+`platform.yml` cannot be used. So a site whose fleet is up to date pays nothing for it. A pass that
+could not read a repository leaves its row as it was.
+
+**`forge-events` reads the file, not the push.** Every push to `main` of a gateway whose row has one
+waiting reads `platform.yml` at the pushed commit, by object id. It clears the row only when that file
+names no older release, so a flow's merge leaves it. The update names the tag it clears, so a newer
+one the sweep recorded meanwhile stays. It never fails the delivery: the push is recorded by then, and
+the next pass reads the proposal itself.
+
+**It is not audited.** The forge holds the proposal, who approved it and when. A row for each gateway
+on each upgrade, and another on each merge, would add nothing to an append-only trail that the forge
+does not say. `audit_telemetry_columns()` names both columns, beside the readings a heartbeat rewrites,
+so an `UPDATE` of them alone is no event. One that changes anything else as well still is, and its
+snapshots carry both. The function's body is `0001`'s with the two names added.
+
+**It is news, not a fault.** The row says *v1.10.0 waits for approval* after what it said before. Its
+tone, the Health block's summary and the drawer's warnings do not change. The words are a link to the
+pull request for an Administrator and a Shopfloor Manager, whom the forge admits, and plain for the rest.
+
+`gateway_status` selects `g.*`, so `0327` rebuilds it with `ensure_gateway_status_view()`. Its self-check
+asserts that the view carries both columns, and that `audit_telemetry_columns()` names them and
+everything it named before. `test_a_gateway_records_the_platform_bump_that_waits.py` holds what is
+audited and who reads it, `bumpRecord_test.ts` each write and clear against a stand-in forge, and
+`test_forge_sweep_proposes_the_platform_bump.py` the same against the live one.
+
+### A match is offered only for a device nobody registered (0328)
+
+Quarantine holds two kinds of device: one Aber has never admitted, and a registered one held again. A
+registered device is held when its birth comes through a gateway it is not bound to, or carries a faulty
+id (`ingest_requarantine_device()`). **Accept Match** was offered for both. A registered `CNC_01` that had
+moved gateways could be offered `CNC_02`, newly provisioned and alike in name. Accepting it deleted
+`CNC_01`, with its schemas, nameplate, links and captures, and left its readings under an id no device
+had. `approve_quarantined_device()`'s merge checked neither device, and the page's list can be old.
+
+#### How a device registered before is told apart
+
+Nothing on the row said so. Its name, its gateway and its first birth can be what a newly found device
+has. `quarantine_reason` does not say it either: `GATEWAY_MISMATCH` is only ever a registered device's,
+and the two identity reasons are both kinds'. The Audit Trail does, as the `UPDATE` that turned
+`is_quarantined` on, but it has no index on the entity, a page would read it for each row of the queue,
+and a log is not where a writer should look for state.
+
+- **`devices.requarantined_at`** is when a registered device was last held again. A device Aber never
+  admitted arrives with `is_quarantined` already true, so its column is null.
+- **`trg_devices_requarantined` writes it,** `BEFORE UPDATE OF is_quarantined`, as the flag goes from not
+  true to true. It is a trigger, and not a line of `ingest_requarantine_device()`, because a `PATCH` of
+  `is_quarantined` holds a device too. A second hold of a device that is already held writes nothing, so
+  a device never admitted cannot gain it that way.
+- **An approval keeps it.** It says that the device was registered, which stays true.
+
+#### What an upgraded site's rows get
+
+Every device has null, except the ones in Quarantine at the upgrade that were registered before they were
+held. Those get the time of their last hold, from the Audit Trail, and db-init's log says how many. The
+column, the fill and the trigger are one transaction, so no hold falls between them. The fill runs only on
+the boot that adds the column. A hold is classed `lifecycle`, so the fill reads that class's index alone:
+on a trail of 400,000 rows it took 2 ms, against 111 ms over the table. It writes one audit row for each
+device it fills, as the migration.
+
+#### The merge refuses
+
+After both rows are locked, and before anything is written:
+
+| The device | Refused when |
+| :--- | :--- |
+| the one that would be deleted | it is not in Quarantine, or it was registered before it was held |
+| the one that would be kept | it is archived, is in Quarantine itself, or has sent its first birth |
+
+Each is `raise_exception` with a sentence a person reads. The `approve-quarantine` function answers that
+code with the sentence itself, as a 409. It does the same for a place that is archived, by how that sentence
+ends. Every other failure of the RPC still answers a fixed sentence, because a driver's message names tables
+and constraints. The body is `0293`'s with these five
+refusals, and its grants are as they were: only `service_role` may call it.
+
+The dashboard reads the column with the queue, and `suggestMatches()` offers nothing for a device that
+has it. Drift check 597 holds the two to each other. The self-check asserts the column, the trigger and
+that the function reads each condition before it writes.
+`test_a_match_is_offered_only_for_a_device_nobody_registered.py` (db lane) holds each refusal, what each
+kind of hold writes, the fill, and a second boot.
+
+### A 3D model no device names is swept from storage (0329)
+
+A device's 3D model is an object in the `asset-3d-models` bucket that `devices.model_3d_path` names. The
+bucket is public, so whoever has a file's link can open it. Until 1.10.0 a file that was replaced was
+deleted only when the new one had its name, which overwrote it. A file of another name was stored beside
+it, and nothing deleted the old one. No device named it and no page listed it.
+
+The dashboard now deletes the file it replaced, once the row names the new one
+(`uploadDeviceModel()`), as Replace does for an area plan. A failed delete is swallowed there, as it is in
+**Remove**, so a file can still be left. `0329` finds those, and what earlier replacements left.
+
+- **The database says which models nothing names.** `is_unclaimed_device_model_object()` is true when none
+  of these names the object:
+
+  | What can name one | Why it counts |
+  | :--- | :--- |
+  | A device: archived, quarantined and a replay lane too | It shows the model, and its shell publishes it. The folder does not matter: a machine may name a file stored under its lane's id (`0294`) |
+  | The tombstone of a retired device (`retired_entities.old_data`) | It is the last record of the device, and a bundle exported from it may carry the model as a link |
+  | An open change proposal | `model_3d_path` is a proposable column, and approving writes what was proposed |
+
+  While there is no device at all it is false for every object. A database being restored has made
+  `devices` and not filled it.
+- **`ingest_unclaimed_device_model_objects()`** lists up to 500 such objects untouched for a given age, for
+  the ingestion principal alone. Both functions are `SECURITY DEFINER`: a tombstone and a proposal are
+  hidden from most callers, and an answer that left them out would be yes. `authenticated` executes them,
+  because the bucket's policies call the first as the caller and the sweep calls the second through
+  PostgREST. What the first tells a signed-in person is whether a path they already know is named.
+- **A CronJob of its own deletes them.** `device-model-sweep` runs `python -m device_model_sweep` from the
+  ingestion image every hour, five minutes after `area-plan-sweep`, over the same loop. It deletes what has
+  gone a day untouched. The day spares an upload in flight: the dashboard uploads a model before it
+  writes `model_3d_path`. `deviceModelSweep.enabled` turns it off.
+- **The bucket lets it delete nothing else.** `asset_3d_models_select_privileged` and
+  `asset_3d_models_delete_privileged` in `storage-policies.sql` each gain one arm: the ingestion principal,
+  for an object `is_unclaimed_device_model_object()` answers for. Storage reads back the row it deletes,
+  which is what the `SELECT` arm is for. The other arms, their names and their MFA check are as they were.
+  The file's self-check fails the boot if either arm is missing, or if any arm admits the principal
+  unconfined.
+
+#### What is kept, and what is not
+
+The last model of a device that was archived and then deleted is kept, because its tombstone names it. A
+model it had before that one is not. Neither is the model of a device deleted without a tombstone: one
+rejected from Quarantine, merged into another, or deleted through the API while it was live.
+
+The file behind a `File` URL that an earlier exported shell carries is gone once its model is replaced, as
+it is once the model is removed. An AASX package holds its own copy.
+
+`test_device_model_sweep.py` (db lane) holds what is listed, when, and for whom, and the two policies and
+their self-check verbatim on a stand-in table. `ingestion/test_device_model_sweep_worker.py` holds the
+sweep, and drift check 598 the names, the bucket and the age across the migration, the policies, the
+worker, the chart and the dashboard.
+
+### A search asks about the tombstones once (0330)
+
+Each tombstone made every search slower by about 0.1 ms. `retired_entities_select_privileged` called
+`has_authority()` bare, and the planner runs a bare call for each row it reads.
+[`entity_directory`](README.md#every-entity-is-listed-and-found-by-any-id-0321) reads all of them.
+
+In a sub-select the call is an initplan, run once for the statement. `0177` and `0204` made the policies they restate
+so. Three more that the view reads were written the same way, and this file restates them too:
+`captures_select_privileged`, `backups_select_administrator` and `machine_principals_select_admin_or_auditor`. Each
+admits whom it did.
+
+`0001` still states the per-row form, with `p_stated_by` naming this file (`STATED_LATER`). It creates one only
+where it is missing, so a fresh install meets the old form between the two files and a later boot never does. The
+self-check reads the live policies and fails on a call outside a sub-select.
+
+#### How long it takes
+
+Measured with 2,000 tombstones, 4,950 live and 50 archived devices, 400 gateways, 200 cells and 1,500 metrics, as an
+Administrator, on a quiet laptop. The median of 20, before and after taking turns. *Before* is `find_entities()` as it
+was with no limit of each kind.
+
+| Read | Before | After |
+| :--- | :--- | :--- |
+| `SELECT * FROM entity_directory` | 230 ms | 42 ms |
+| `SELECT * FROM retired_entities` | 207 ms | 12 ms |
+| `find_entities()` by an id | 252 ms | 62 ms |
+| `find_entities()` by a name one row has | 249 ms | 55 ms |
+| `find_entities()` by a text every name holds | 249 ms | 76 ms |
+| `find_entities()` by an id, as an Operator, who reads no tombstone | 231 ms | 49 ms |
+| With 10 of a kind, by an id | | 61 ms |
+| With 10 of a kind, by a text every name holds | | 73 ms |
+
+`test_a_search_asks_about_the_tombstones_once.py` (db lane) holds the four policies: each is an initplan of its read,
+and admits the roles it did.
+
+### The Audit Trail's search finds every id (0331)
+
+A person pastes an id into the Audit Trail's search. It found an entity by its own id, its Sparkplug id, an automation's
+key and a backup's stamp. It found nothing for a semantic id, for the id a device publishes under or for a capture's
+file, though the entity's drawer shows each and [`entity_directory`](README.md#every-entity-is-listed-and-found-by-any-id-0321) lists it. An empty timeline reads as
+*nothing happened to this*.
+
+#### What it reads
+
+`audit_trail_matching()` is `0228`'s, with one arm of its search changed and one added. `audit_trail_page()` calls it as
+before.
+
+- **Three more fields of either snapshot:** `semantic_id`, `reported_identity` and `storage_path`. A snapshot names
+  each field as its column is named, and these are the columns of `second_ids` that were not read. Mirror check `170`
+  holds the two lists together, so a kind added to the view is a field added here.
+- **A metric, by a further semantic id it has.** A row of `metric_semantic_ids` is filed under its metric: its
+  `entity_type` is `metric_semantic_ids` and its `entity_id` is the metric's. It holds the id, so it is found by it. No
+  row of the metric's own holds it, so the metric is looked up in the table, under the caller's own policies. So any
+  of a metric's semantic ids finds the metric's whole history, and one that several metrics share finds each. An id
+  that was removed finds the rows that hold it.
+- **Nothing else changes:** the classes, the filters, the window, the purged rule, `SECURITY INVOKER`, and the grants.
+  What the search found it still finds, which the suite holds by running `0228`'s body beside this one for each role.
+
+A further id finds the rows that hold it. An entity's own id finds every row about it, so the search bar still hands
+over the record's own id where a further id is one record's.
+
+#### One comparison, and no index
+
+A search reads every row's snapshots. No index serves it, before or now. The cost is in the comparing. `ILIKE` folds
+the term and the value to one case for each field, and a device's row has two or three of them in each snapshot. Three
+more fields the same way made a search a fifth slower.
+
+So the fields are joined into one text, which is folded and compared once. Eleven fields this way take less time than
+eight did the other. The unit separator (`\x1f`) stands between them, so no term matches across two.
+
+Measured with `audit_trail_page()` and its counts, as an Administrator, over a million rows in ten months (the seed of
+`test_a_million_row_trail_answers_in_under_a_second.py`, with a device's snapshot widened to its 24 columns). The median
+of three, the forms taking turns, on a quiet laptop:
+
+| The search | A term nothing has | No search |
+| :--- | :--- | :--- |
+| `0228`: eight fields, one at a time | 5.5 s | 0.65 s |
+| Eleven fields, one at a time | 6.7 s | 0.64 s |
+| `0331`: eleven fields as one text, and the metrics' lookup | 4.0 s | 0.63 s |
+
+**A search is still seconds on a million rows**, and no index was built for one. Without a search the plan is `0228`'s:
+the planner folds the whole condition away, so each class is read from its index.
+
+`test_the_audit_trails_search_finds_every_id.py` (db lane) holds each id, both snapshots, the metric's history, what
+the search found before, each role's lanes and the plan.
+
+### A nameplate and an attached schema stay with their device (0332)
+
+[The id of a record cannot be changed](README.md#the-id-of-a-record-cannot-be-changed-0325) holds each `id` a person's session may write and
+something outside the row holds. Two rows are found by a device instead: `device_nameplate`, whose primary key is `device_id`, and `device_submodels`, which
+attaches a schema to one. Neither `device_id` was held. Measured on a fresh database at 6c91f955, as a person
+with the `Shopfloor_Manager` role: `UPDATE ... SET device_id = ...` changed one row of each table. The Audit
+Trail wrote one `UPDATE` for each, filed under the new device alone. So the first device's lane still showed a
+nameplate, or a schema attached, and never said that it went. The dashboard sends neither. A script can.
+
+- **`refuse_device_change()` refuses it,** as `refuse_key_change()` refuses an `id`: `check_violation`, which
+  PostgREST answers with a 400, and the same words. `the device_id of the nameplate of "Press 4" cannot be
+  changed. Other records and other systems find it by this id.` The hint adds how to move one.
+- **One trigger per table, `BEFORE UPDATE OF device_id`.** A write that leaves `device_id` out of its SET list
+  runs none of it.
+- **A `device_id` set to its own value passes.** The Nameplate dialog's save is an upsert on `device_id`, which
+  sets it.
+- **To move one, remove it and make it again on the other device.** The Audit Trail files a `DELETE` under the
+  first device and an `INSERT` under the second.
+
+#### Why a function of its own
+
+`refuse_key_change()` compares `id`, and names a record by a column of its row. These rows have no name, so
+the message names the device, read with the caller's own rights. Redeclaring that function to take a column's
+name was the other way. `0325` states the narrower body again on every boot, so for the moment between the two
+files the new triggers would have run a body that does not read `device_id`.
+
+#### Which tables
+
+The two are every table whose `device_id` a person's session may `UPDATE` (a column privilege and an UPDATE
+policy). `captures`, `capture_jobs`, `capture_uploads` and `alert_suppression_windows` have the column, and no
+session may write it. [How Aber identifies things](../docs/architecture.md#how-aber-identifies-things) names
+the two, and drift check 604 holds that sentence to the triggers.
+
+#### No role is exempt
+
+The owner and the service-role key are refused as a person is, as `0325` has it. Nothing that runs as the owner
+moves either row:
+
+- **a merge from Quarantine** (`approve_quarantined_device()`) re-keys the discovered device's birth values in
+  `asset_config`, and deletes the device with its nameplate and its schemas. The target keeps its own;
+- **`approve_proposal()`** makes the nameplate's row if there is none, and updates the other columns;
+- **`publish_schema_version()`** moves an attachment's `schema_id`, and **`set_device_schemas()`** adds and
+  deletes rows;
+- **a relocation, an archive and a restore** write the device. A backup's restore inserts rows, and an INSERT
+  runs no UPDATE trigger;
+- **no migration sets either column**, so the chain replays as before.
+
+#### Replay
+
+Each trigger is a `replay_trigger()` call, so a boot that finds it as stated takes no lock and prints no
+notice. The self-check asserts that each table's trigger is enabled and calls the function, and that neither
+`anon` nor `authenticated` may run it. `test_a_nameplate_and_an_attachment_stay_with_their_device.py` (db lane) sends each change as each
+kind of caller and runs each writer above. It also holds the tables whose `device_id` a person's session may
+write to the two with the trigger, so a new one fails it.
+
+### A link's kind is one of four (0333)
+
+`links.entity_type` says what kind of thing a link is on: an `area`, a `cell`, a `device` or a `gateway`. Nothing
+in the database held it to those words: an INSERT with the word `nonsense` was accepted. The dashboard sends
+no other. A script could, and each page reads the links of its own kind, so the row would be on no page.
+
+- **`links_entity_type_known` holds the column to the four words,** for every writer. PostgREST answers a
+  refused one with a 400.
+- **A row with another word stops nothing.** The constraint is added `NOT VALID`, so the boot that adds it
+  reads no row to do so. From then on a new link and a changed one are held, and the odd row stands as it is.
+- **Nothing is renamed or deleted.** Which word was meant is not in the row.
+- **Each boot prints a WARNING for each such row,** with its id, its word and the id it is attached to, and
+  what to do: `0333: the link 3f2c… is on 'nonsense' with the id '71ab…', which is no kind a link can be on,
+  so no page shows it. Set its entity_type to area, cell, device or gateway, or delete the row. The next boot
+  checks it again.`
+- **A boot that finds no such row validates the constraint,** once. A row put right by hand is therefore
+  validated on the next boot, and a later boot reads no link for it.
+
+A row with another word can be changed only by giving it one of the four: an UPDATE of its address alone is
+refused, because the CHECK reads the whole row.
+
+#### Replay
+
+The constraint is added only where it is missing, and is never dropped. So a later file may widen it, and a boot
+of this one leaves it as that file has it. The self-check asserts that the constraint is there and admits the
+four words. Whether it is validated is the site's rows, so it is not asserted.
+
+`test_a_links_kind_is_one_of_four.py` (db lane) sends each word as each kind of caller. It also runs this file
+over a site with odd rows: what the log says, that no row changes, the second boot, and the boot after one is
+put right. Drift check 566 holds the words in
+[the other columns that hold a word for a kind](../docs/architecture.md#entity_type-the-word-for-a-kind) to
+the CHECK, and to what the dashboard opens its Attached Links dialog with.
+
+### The Nameplate's texts say what each element is (0334)
+
+Each of the 20 Digital Nameplate rows `0002` seeds in `idta_submodel_templates` has a description. The Nameplate
+dialog and the semantic id picker show it, and an export gives it as the definition of the element's
+ConceptDescription. Ten were not definitions.
+
+- **Two made a claim the template does not.** `ManufacturerProductFamily` and `ManufacturerProductType` each said
+  they were mandatory unless the other was given. Digital Nameplate 3.0.3 gives both `ZeroToOne`.
+- **Eight held a note to ourselves:** on the seeded id (`AssetSpecificProperties`, `UniqueFacilityIdentifier`), on
+  how the template is laid out (`AddressInformation`, `YearOfConstruction`), or on this platform
+  (`URIOfTheProduct`, `SerialNumber`, `FirmwareVersion`, `CompanyLogo`). A reader of an exported shell has no use
+  for one.
+
+Each now says what the element is, in this project's own words. None is a sentence of IDTA's, IEC CDD's or
+ECLASS's. The other ten rows keep what `0002` says of them. What the notes recorded for somebody changing Aber
+is in [IDTA Digital Nameplate](../docs/vocabularies.md#idta-digital-nameplate).
+
+#### Why the trigger, and not an `UPDATE` or an edit
+
+`0002` is released and is not edited, and db-init replays its upsert on every boot. Measured on a private
+database, by each row's version, over the boot's three files that write the table (`0002`, `0323` and this one):
+
+| Way | Rows written on a second boot |
+| :--- | :--- |
+| An `UPDATE` alone, as `0305` corrected its texts | 20: the ten by `0002`'s upsert, and the ten again here |
+| The trigger gives the texts | None |
+| The ten texts edited in `0002` | None |
+
+So `idta_submodel_template_as_generated()`, which gives a row its `is_mandatory` since
+[0323](README.md#a-released-template-row-is-mandatory-as-the-template-has-it-0323), gives these ten their text as well, whatever the statement proposes. A released file is edited
+in place only to drop a column, so `0002` is left as it is.
+
+`0323` states its own body again on every boot, and this file restates the whole one. Nothing writes the table
+between the two, and `0323`'s body decides no text, so it puts none back. A boot that stops between them leaves
+`0323`'s body, so the next boot's `0002` writes the ten old texts and this file corrects them.
+
+#### What the checks hold
+
+The self-check asserts that the trigger is enabled, that its function is pinned and that no API role may run it.
+It also asserts that the three rows an export was found with have not their old text. It counts no totals.
+
+`test_the_nameplates_texts_say_what_each_element_is.py` (db lane) holds the ten texts, and that no text of the 20
+claims a cardinality or names the seed, the template, Aber or an id's kind. It runs `0002`'s statement, `0323` and
+this file as db-init does: a second boot by each row's version, and the first boot of an upgrade.
+`test_aas_export.py` and `test_a_nameplate_claims_its_template_on_the_stack.py` (stack lane) read the definitions
+of an exported shell. `generate-idta-template.mjs` and `check-idta-seed-sync.mjs` write and check
+`idta_template_elements` alone, so neither reads these texts.
+
+### A schema names the derived metrics its devices get (0336)
+
+A derived metric (`0267`) applied to every device in service that reported all its inputs. That suits a
+counter rate. It does not suit a time in state: two robots both report `MotionDevice/TaskProgramName` and
+run different programs, so a share of time in a program one of them never runs was drawn for it, as a line
+at 0%. Nothing let a person say which devices a derived metric is for. A schema is where Aber says what a
+kind of device is, so a schema version now names the derived metrics its devices get, and a device has the
+ones its schemas name.
+
+#### Where the list is kept
+
+`schemas.derived_metrics`, a `text[]` of catalogue names in name order. It is beside `schema_definition`,
+not in it: the definition is the JSON Schema a payload is judged against (Enforce drops a reading by it,
+Quarantine matches on it, the AAS export reads it), and nothing publishes a derived metric.
+
+A table of (version, metric) would carry the catalogue's foreign key. It was not taken, because of what
+the column gives for nothing:
+
+| What was asked | The column | A table |
+| :--- | :--- | :--- |
+| Its change is the schema's own row in the Audit Trail | An `UPDATE` of `schemas` holds the list before and after, filed as any change of the version | A new `entity_type`, which the audit classifiers are closed over |
+| Frozen with a published version | `prevent_active_schema_mutation()` compares every column but `status` | A second guard, to keep in step with the first |
+| Carried by Create Version, gone with a discarded draft | One row is copied, and one row is deleted | A copy and a cascade |
+| Row security no wider than the version's | The same row | Policies of its own |
+| A named derived metric cannot be deleted | `trg_metric_catalog_derived_is_named` | The foreign key |
+
+No view lists the columns of `schemas` with `SELECT *`, and no released file states a view whose column
+list would have to grow. `entity_directory` (`0321`) names its own columns.
+
+#### What is checked when it is saved
+
+`trg_schemas_derived_metrics` is `BEFORE INSERT OR UPDATE OF schema_definition, derived_metrics`, for every
+caller. `schema_derived_metric_problems()` gives every reason, each naming the metric, and the trigger
+refuses the row with all of them:
+
+- a name the catalogue lacks, and a measured metric;
+- a deprecated derived metric, unless the version or the one it was made from names it, as a deprecated
+  metric is treated;
+- an input the same schema does not model, so a schema is whole on its own: one reason for each input;
+- for a time in state, a state that the schema's own copy of the input (its `enum`) leaves out.
+
+So a draft that drops an input of a derived metric it names is refused until the derived metric goes too.
+The trigger locks the catalogue's rows `FOR KEY SHARE`, as a foreign key does, so none is deleted between
+the check and the commit.
+
+**A copy of a published version is not checked.** The catalogue's permitted values may change under a
+published version, and nobody can edit it, so a check would leave a schema that cannot be versioned. The
+draft is where it is put right: the first edit of its definition or its list is checked.
+
+**A version inserted without a list takes its parent's.** `fork_schema()` therefore carries it without
+being declared again, and so does the copy of `fork_schema()` that an older file puts back for a moment on
+every boot. A first version inserted without one names none.
+
+#### The versions there are, filled once
+
+Derived metrics came with `v1.8.0`, so a site has some by the old rule. The fill gives every version a
+device is bound to, and every draft, the derived metrics whose inputs that version models. Nothing a
+person sees goes. It follows `0298`'s fill: the column first, nullable, then the trigger, then, behind a
+lock that holds writers off `schemas`, the fill and `SET NOT NULL`. The audit trigger does not run for it.
+It records no choice anybody made, and a row for each version would read as an edit of every schema. The
+column admitting `NULL` is what says the fill is still to run, so it runs on one boot and on no later one.
+
+It fills what the check would refuse on a new version: a deprecated derived metric, and one that counts a
+state the version's copy of the input leaves out. Their values are shown today.
+
+Two NOTICEs in db-init's log say what it cannot carry. Each names the devices and their metrics, up to 100
+devices:
+
+- **A device with no schema** had the derived metrics its birth certificate's metrics cover.
+- **A device none of whose schemas models every input**: the inputs are split across two of its schemas,
+  or some of them only its birth certificate declares.
+
+Measured on a private test database with 4,950 devices (9,000 bindings), 300 versions of 100 metrics and
+100 derived metrics: 1.9 seconds for the fill and its NOTICEs, under the lock. A later boot spends 0.8 ms.
+
+#### The rule, once
+
+`device_derived_metrics()` is the rule: the derived metrics the schemas bound to a device name, several
+schemas' together. A replay lane has its original's, whatever its own bindings say by now. The rule in the
+browser is `derivedMetricsOfDevice()` in `utils/derivedMetric.js`, and in the AAS exporter
+`derivedMetricsFor()`. Both replace the rule of `0267`, that a device has a derived metric when it reports
+every input. [`device-derived-metrics.json`](../test-harness/fixtures/device-derived-metrics.json) holds
+the three together, and `schema_derived_metric_problems()` with the dashboard's `derivedProblems()`, word
+for word. `schema_modelled_metrics()` is one more implementation of the modelled-metrics contract
+([`modelled-metrics.json`](../test-harness/fixtures/modelled-metrics.json)).
+
+Values are still computed when they are read (`0282`), for whatever device and metric a caller asks. So a
+version that starts naming a derived metric shows its whole history at once, and one that stops loses
+nothing.
+
+#### A threshold on a derived metric
+
+`automations_parse()` (`0256`) refuses a threshold on a derived metric the device does not have, at the
+device's own path. The reason names the schemas it looked in, or says there is none. **What the automation
+watches already stays:** a schema may stop naming a metric at any time, and the file
+`automations_document()` writes must still apply as unchanged. The evaluator (`0283`) is as it was. Nothing
+is refused or rewritten on a boot, and the page marks such a trigger with a warning.
+
+#### The document of device schemas
+
+`device_schema_stored_document()`, `device_schemas_parse()` and `apply_device_schemas()` are their latest
+bodies (`0316`, `0318`) with the `derived_metrics` key added, and these changes beside it:
+
+- **`changes` lists a key the file leaves out.** It was read from the keys of the new document alone, so a
+  description the file dropped was not said. It matters for this key above all: a file says what is saved,
+  so a file exported before `1.10` names none.
+- **The result has `derived_metrics`, `{added, removed}`,** for a changed schema, as `metrics` is.
+- **The state check is made last, against the properties to be written** (`device_schema_properties()`,
+  taken out of the writer, which both the check and the writer now call). The preview therefore says what
+  the trigger would refuse, and an unchanged schema is not judged by a catalogue that has changed since.
+- The renderer keeps its five arguments. `0295` declares it again on every boot, so a sixth would leave two
+  of them. `device_schema_derived_part()` adds the key to what it gives.
+
+#### What holds it
+
+The self-check reads structure and calls three immutable readers on literals. It plants nothing.
+
+| Suite (db lane) | What it holds |
+| :--- | :--- |
+| `test_a_schema_names_the_derived_metrics_its_devices_get.py` | What may be named, the version, the record, the catalogue, the fill |
+| `test_a_device_has_the_derived_metrics_its_schemas_name.py` | The rule and its words against the fixtures, and the automations check |
+| `test_a_document_of_device_schemas_names_derived_metrics.py` | The file: there and back, what it changes, what it is refused |
+
+### A registered device held again is not deleted by a Reject (0337)
+
+Quarantine holds two kinds of device: one Aber has never admitted, and a registered one held again
+([`requarantined_at`](README.md#a-match-is-offered-only-for-a-device-nobody-registered-0328)). **Reject** deleted the row of either. A registered device takes its schemas,
+nameplate, links, captures and 3D model with it. One that is not archived leaves no tombstone, so only the
+Audit Trail says what went. The hold can come from somebody else's message: a gateway that publishes a birth
+under another gateway's device has that device held, and a person who reads `GATEWAY_MISMATCH` may reject it
+as an impostor. [`0328`](README.md#a-match-is-offered-only-for-a-device-nobody-registered-0328) made the merge refuse such a device for the same reason.
+
+#### What is refused
+
+`trg_devices_held_registered_device_is_kept`, `BEFORE DELETE` on `devices`, refuses a delete of a device that
+is in Quarantine, was registered before it was held, and is not archived. It is `raise_exception` with a
+sentence that names the device and says what to do: approve it on the Quarantine tab, or archive it and then
+delete it from Entities. PostgREST answers it as a 400 with the sentence as `message`.
+
+- **Who is refused.** Every caller but the table's owner: a person through PostgREST, whatever their role, and
+  `service_role`. The function is not `SECURITY DEFINER`, so `current_user` is the caller's. It is the owner
+  only inside the owner's own functions, or on the owner's own connection.
+- **What still deletes.** A device nobody registered, by **Reject** or by the merge, which refuses a registered
+  one itself. An archived device, by **Permanent Delete** or the nightly purge, which deletes only archived
+  ones. A replay lane, which goes with its machine, and is archived with it first. The owner's own connection,
+  as a suite's clean-up is.
+
+#### The dashboard
+
+The Quarantine tab offers no **Reject** for such a device. Its way out is **Approve & Onboard**, which lets it
+in where it was and keeps what is set on it. Its row and the approval dialog say so in a sentence.
+
+The self-check asserts the trigger, that its function runs as its caller, that it reads each condition, and
+that neither `anon` nor `authenticated` may execute it. `test_a_registered_device_held_again_is_not_deleted_by_a_reject.py` (db lane)
+holds the refusal for each caller and that it deletes nothing, and each writer above.
+
+### Every read policy checks the caller once (0338)
+
+Nine read policies in `0001` called `has_role()` bare, and the planner runs a bare call for each row it reads. They
+guard the capture, playback, rebirth, backup and export jobs, the playback worker's status, the revoked principals and
+tokens, and the webhook endpoints. [`entity_directory`](README.md#every-entity-is-listed-and-found-by-any-id-0321) reads the revoked principals on every search, and
+the job tables grow with use.
+
+In a sub-select the call is an initplan, run once for the statement. `0177`, `0204` and [`0330`](README.md#a-search-asks-about-the-tombstones-once-0330) made the
+policies they restate so, and this file restates the nine. Each admits whom it did. No read policy on a table in
+`public` now calls a role check for each row.
+
+`0001` still states the per-row form, with `p_stated_by` naming this file (`STATED_LATER`). It creates one only
+where it is missing, so a fresh install meets the old form between the two files and a later boot never does. The
+self-check reads the live policies and fails on a call outside a sub-select.
+
+#### How long it takes
+
+Measured with 2,000 machine principals, each revoked, as an Administrator, on a quiet laptop. The median of 20 runs
+of `EXPLAIN (ANALYZE, TIMING OFF)`, before and after taking turns, in one transaction that swaps the policy.
+
+| Read | Before | After |
+| :--- | :--- | :--- |
+| `SELECT * FROM entity_directory` | 29.7 ms | 1.7 ms |
+| `SELECT * FROM revoked_service_principals` | 26.9 ms | 0.5 ms |
+| `find_entities()` by an id, ten of each kind | 46.3 ms | 17.3 ms |
+| `find_entities()` by a text every name holds, ten of each kind | 46.5 ms | 15.0 ms |
+
+Each read answered the same rows in both forms, for an Administrator and an Auditor.
+
+`test_every_read_policy_checks_the_caller_once.py` (db lane) holds the nine: each is an initplan of its read and
+admits the roles it did, `0001` creates each only where it is missing, and a later boot recreates neither. It also
+holds that no read policy in `public` calls `has_role()` or `has_authority()` outside a sub-select.
+
+### The Audit Trail counts the entities its events are about (0339)
+
+The foot of the Audit Trail said "200 of 18,431" and **Show 200 more**. It did not say that it counted events, or how
+many entities they were about. It now says "200 events of 18,431 events for 57 entities", beside **Show 200 More
+Events**.
+
+#### The figure
+
+`audit_trail_page()` gives `matching_entities` beside `total_matching`: how many entities the matching rows are
+about. It is counted under the same filters, the same purged rule and the caller's own policies as `total_matching`,
+over the whole match rather than the page, so it does not move as the reader pages.
+
+- **An entity is its id.** A device, its nameplate and its schemas are three lanes on the timeline and one entity
+  here, as they share the device's id. A metric's further semantic ids are filed under the metric's id already.
+- **A deleted entity is left out**, as its rows are, unless deleted entities are asked for.
+- **Nothing else changes:** the page, the cursor, `total_matching`, `purged_assets` and the counts are `0168`'s, and
+  the suite checks each of them against what it planted.
+
+#### Read from the tally, not the trail
+
+The totals, the purged count and the counts were sums over a tally: one row per class, kind, action and deleted
+entity, read once from the class indexes. The tally is now kept per entity as well, and the figure is one more sum
+over it. The class indexes already include `entity_id`, so the read is still index-only. The tally grows from a few
+dozen rows to one per entity and kind of event: from 25 to 3,251 on the million-row seed.
+
+Measured with `audit_trail_page()` and its counts, as an Administrator with the policies on, over a million rows in
+ten months (the seed of `test_a_million_row_trail_answers_in_under_a_second.py`). `0168`'s body and this one were
+called in turns, in one transaction, on a laptop shared with other work: once when the body was written, with seven
+calls each, and once when it was done, with nine. The median of each:
+
+| The call | `0168`, first | `0339`, first | `0168`, last | `0339`, last |
+| :--- | ---: | ---: | ---: | ---: |
+| All time, nothing chosen, with the counts | 942 ms | 977 ms | 1,041 ms | 808 ms |
+| All time, Lifecycle, with the counts | 757 ms | 655 ms | 1,074 ms | 950 ms |
+| All time, Read and Lifecycle, with the counts | 670 ms | 659 ms | 685 ms | 778 ms |
+| All time, Lifecycle, the next page | 94 ms | 96 ms | 119 ms | 105 ms |
+
+Each form answered the same events, totals, counts and cursor. The difference is within what the laptop's load moves a
+call by, which put `0168` itself over a second once. On the seed's ten months the figure is 1,207, as a plain
+`count(DISTINCT entity_id)` under the same rule gives.
+
+`test_the_audit_trail_counts_the_entities_its_events_are_about.py` (db lane) holds the figure: once each, by the
+filters, without the deleted, over the whole match, under each role's policies.
+
+### A schema is built from a template (0342)
+
+A schema that implements an IDTA submodel template was put together by hand. A person worked out which
+catalogue metrics carry the template's elements, ticked them, and typed the template's id as the schema's
+semantic id. **Build Schema from Template** does the three. A version now says which template it was built
+from, and which element each of its metrics fills, and the AAS export reads that.
+
+#### Where it is kept
+
+Two columns of `schemas`, beside `derived_metrics` (`0336`) and for the same reasons: a change of them is the
+schema's own row in the Audit Trail, `prevent_active_schema_mutation()` freezes them with a published version,
+and the version's policies are theirs. No audit classifier changes.
+
+- **`template_id`** is the template, as `idta_template_elements` (`0320`) names it. A version built from one
+  carries the template's id as its `semantic_id` too.
+- **`template_elements`** is the element each metric fills, by catalogue name:
+  `{"Nameplate/MANUFACTURER": {"path": "ManufacturerName", "semantic_id": "0112/2///61987#ABA565#009"}}`. The
+  element's id is kept beside its path, so the export needs no second read of the template.
+- Both are `NULL` for a schema built any other way. Nothing is filled on the upgrade: every version there is was
+  built some other way.
+
+#### The rule
+
+`schema_template_elements()` is the rule, and `templateElementFill()` in `utils/idtaTemplates.js` is the same
+rule in the dashboard. [`schema-template-elements.json`](../test-harness/fixtures/schema-template-elements.json)
+holds the two together.
+
+- **A metric fills an element a value goes in:** a `Property` or a `MultiLanguageProperty`, with a semantic id.
+  A collection, a list or a file is filled by what is inside it, or by nothing a metric publishes.
+- **The element's semantic id is the metric's own id, or else one of its further ids** (`metric_semantic_ids`,
+  `0299`). Of several, the first in the template's order, and one matching the own id before any matching a
+  further id. Two metrics may fill one element.
+- **A template requires an element** that a metric can fill, whose cardinality is `One` or `OneToMany`, and
+  that is inside no element of another cardinality (`template_required_paths()`). The Digital Nameplate
+  requires four: `URIOfTheProduct`, `ManufacturerName`, `ManufacturerProductDesignation` and
+  `OrderCodeOfManufacturer`. Asset Interfaces Description requires none, because each of its interfaces may be
+  left out.
+- **An element inside one that may be left out is not asked for.** `Markings[0].MarkingName` is required only in
+  a marking that is there, and a schema of metrics does not say whether one is. `AddressInformation` is a
+  collection, and a device's nameplate holds it (`0324`).
+
+#### What is checked when it is saved
+
+`trg_schemas_template` is `BEFORE INSERT OR UPDATE OF schema_definition, semantic_id, template_id,
+template_elements`, for every caller.
+
+- It writes `template_elements` from the rule. What a caller sends for it is replaced.
+- It refuses the row with every reason `schema_template_problems()` gives, in the words the editor says them
+  in (mirror check 182): a template Aber does not hold, a semantic id that is not the template's, and the
+  required elements no metric fills, by path.
+- **A version inserted with neither column takes its parent's template.** So `fork_schema()` carries it
+  without being declared again. `template_elements` given without a template says none: that is how
+  `apply_device_schemas()` (`0343`) makes a draft that is no longer built from one.
+- **A copy of its parent keeps its parent's elements, unchecked,** and so does an edit that changes neither the
+  template, the definition nor the semantic id. The catalogue may change under a published version, and nobody
+  can edit that, so Create Version must not be refused. The draft is where it is put right: the first change of
+  its metrics is checked.
+
+#### The export
+
+In a submodel made from a version built from a template, the element's id is the metric's `semanticId`, and the
+metric's own id is one of its `supplementalSemanticIds`, beside its further ids (decided in #481). A schema
+built any other way exports as it did. The rule is `templateSemanticIds()` in
+`supabase/functions/_shared/schemaTemplate.ts`.
+
+#### What holds it
+
+The self-check reads structure only. It plants nothing and reads no site's rows.
+
+| Suite (db lane) | What it holds |
+| :--- | :--- |
+| `test_a_schema_is_built_from_a_template.py` | The rule against the fixture, the seeded templates' required elements, the refusals, the version, the draft and the record |
+
+### A document of device schemas names the template (0343)
+
+A version built from a template ([`0342`](README.md#a-schema-is-built-from-a-template-0342)) says which template, and the template is part of the
+version: it is frozen with it and carried by Create Version. A file of device schemas says what a version is,
+so it says that too.
+
+#### The key
+
+`template` is the template's id, as the Vocabulary page's Templates tab lists it. Which element each metric
+fills is not written: it follows from the template and the catalogue of the site the file is applied on, as it
+does in the editor. `device_schema_template_part()` renders the key, as `device_schema_derived_part()`
+(`0336`) renders `derived_metrics`, so a stored version and a checked document are one shape.
+
+`device_schema_stored_document()`, `device_schemas_parse()` and `apply_device_schemas()` are their latest
+bodies (`0336`) with the key added:
+
+- **A template Aber does not hold is refused** at `$[n].template`.
+- **The schema's semantic id is the template's id.** A file may leave `semantic_id` out, and the id and the
+  type `IRI` are taken from the template. Another id is refused at `$[n].semantic_id`.
+- **An element the template requires that no metric the file lists fills** is refused at `$[n].template`, in
+  the words `trg_schemas_template` uses. The parser asks the rule with the names the file lists, so the
+  preview says what the save would.
+- **A file says what is saved.** A file without the key builds no template, and applying it to a version
+  built from one makes a draft that is not: `changes` lists `template`. The draft is inserted with
+  `template_elements` and no template, which tells `trg_schemas_template` not to take its parent's.
+- **A file written before 1.10 is read as it was.** No version was built from a template before 1.10, so it
+  changes nothing.
+
+The JSON Schema (`device-schemas.schema.json`) has the key, and the export writes it after
+`semantic_id_type`.
+
+#### What holds it
+
+The self-check reads structure, and what the renderer says of three literals. It plants nothing.
+
+| Suite (db lane) | What it holds |
+| :--- | :--- |
+| `test_a_schema_is_built_from_a_template.py`, `TheDocument` | The key there and back, a file without it, a file that adds it, and the three refusals at their paths |
+| `test_the_device_schemas_json_schema_and_the_function_agree.py` | The fixtures `valid/a-template.json` and `invalid/template-*.json` through the JSON Schema and the function |
+
 > Notes for migrations not yet released are files in [`unreleased/migrations/`](../unreleased/migrations/README.md). The release folds each into a section above this one, in number order.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)

@@ -558,9 +558,9 @@ opening a shell:
 
 | Row | Reads | Means |
 | :--- | :--- | :--- |
-| **Platform** | `v1.9.1 · converged 40 minutes ago` | the playbook version this appliance is actually on. Different tags across the fleet mean a rollout in progress, which is what the per-gateway pointer is for |
+| **Platform** | `v1.10.0 · converged 40 minutes ago` | the playbook version this appliance is actually on. Different tags across the fleet mean a rollout in progress, which is what the per-gateway pointer is for |
 | **Platform** | `v1.9.1 · converged 40 minutes ago · v1.10.0 waits for approval` | Aber has opened the pull request that moves it to `v1.10.0`, and nobody has merged it. The last words link to it for an Administrator and a Shopfloor Manager. The row is not a warning |
-| **Platform** | `v1.9.1 · failed` | `ansible-pull` did not complete. The timer retries within the hour; the appliance's journal says why |
+| **Platform** | `v1.10.0 · failed` | `ansible-pull` did not complete. The timer retries within the hour; the appliance's journal says why |
 | **Custom** | *(empty)* | this gateway's repository carries no playbook of its own. The ordinary case |
 | **Custom** | `converged at a1b2c3d` | its adapter is running, from that commit |
 | **Custom** | `failed at a1b2c3d` | its adapter is **not** running |

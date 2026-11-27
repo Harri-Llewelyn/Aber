@@ -23,7 +23,10 @@
 
 ## Deprecated
 
-<!-- What still works, what replaces it, and the release it goes away in. -->
+<!--
+  What still works, what replaces it, and the issue that will remove it. Name no later release:
+  milestones change. Say "will be removed in a later release", and link the issue.
+-->
 
 ## Fixed
 

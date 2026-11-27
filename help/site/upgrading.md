@@ -126,6 +126,22 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   and [*nobody holds a gateway's repository by name*](#from-191-nobody-holds-a-gateways-repository-by-name).
 - **A mirror or a migration in the forge?** It stops: the forge no longer fetches from another host or pushes to
   one. See [*nobody holds a gateway's repository by name*](#from-191-nobody-holds-a-gateways-repository-by-name).
+- **Derived metrics, or a file of schemas you keep to upload again?** Plan to read db-init's log after the
+  upgrade, and export the schemas again: see
+  [*a schema names the derived metrics its devices get*](#from-1100-a-schema-names-the-derived-metrics-its-devices-get).
+- **A file in the `asset-3d-models` bucket that no device names, or NetworkPolicies of your own?** Keep it,
+  or admit the sweep, first: see [*a replaced 3D model's file is deleted*](#from-1100-a-replaced-3d-models-file-is-deleted).
+- **A value in a device's `connection_method` you want, or a script that reads or writes it?** Save it, or
+  change the script, first: see [*`devices.connection_method` is removed*](#from-1100-devicesconnection_method-is-removed).
+- **An ERP, PLM or MES that stored a Submodel's id?** Move it to the current id first: see
+  [*aas-api no longer answers a Submodel's old id*](#from-1100-aas-api-no-longer-answers-a-submodels-old-id).
+- **Something that reads a device's Digital Nameplate from Aber?** Change it: see
+  [*a complete Digital Nameplate names its template*](#from-1100-a-complete-digital-nameplate-names-its-template).
+- **A Remote gateway?** Plan to approve the pull request Aber opens for each after the upgrade: see
+  [*Aber opens the pull request that moves a gateway to the new platform*](#from-1100-aber-opens-the-pull-request-that-moves-a-gateway-to-the-new-platform).
+- **A client that reads Aber's AAS shells or its i3X server?** Check it meets the new parts: see
+  [*aas-api says where a device's live readings are read*](#from-1100-aas-api-says-where-a-devices-live-readings-are-read)
+  and [*a shell and its i3X device name each other*](#from-1100-a-shell-and-its-i3x-device-name-each-other).
 
 ### The command
 
@@ -2612,21 +2628,22 @@ column. It still works in 1.9.x, and it is removed no sooner than 1.10.0. There 
 ### From 1.9.0, four ISO 22400 KPIs are deprecated
 
 From 1.9.0, `UTILIZATION`, `SCRAP_RATIO`, `MTBF` and `MTTR` are deprecated in the ISO 22400 vocabulary. They
-still work in 1.9.x, and they are removed no sooner than 1.10.0. There is nothing to run.
+still work, and they are removed no sooner than 1.10.0. There is nothing to run.
 
 - **The Vocabulary page marks them.** The ISO 22400 tab says **deprecated** on each, and the line under its
   tooltip says why. `UTILIZATION` is not an ISO 22400 KPI, and its description now says so. No free
   source publishes the formulas of the other three.
-- **They stay through 1.9.x.** The four rows, their groups (`Quality`, `Utilization` and `Maintenance`) and
-  the example metrics that use them are all still there. Add Metric still offers them.
+- **They stay until a later release removes them.** The four rows, their groups (`Quality`, `Utilization`
+  and `Maintenance`) and the example metrics that use them are all still there. Add Metric still offers them.
 - **Your metrics are not changed.** An id is only a value, so a metric that carries one of these ids keeps
-  it after 1.10.0 too. Its ConceptDescription in an AAS export then takes the catalog's description, as it
-  does for any id no vocabulary defines.
+  it after they are removed too. Its ConceptDescription in an AAS export then takes the catalog's
+  description, as it does for any id no vocabulary defines.
 - **What replaces them is an import.** A site that owns ISO 22400-2 can import it on the Vocabulary page,
   with its licence recorded. Its concepts carry the ids your file gives them, not these, so the import
   does not define a metric that keeps one of these ids. To have it defined by the import, give the metric
   the imported concept's id in **Edit** on the Metrics page, and add the old id as a further id if a
-  consumer matches on it. Do that before 1.10.0 if you want its definition to stay a vocabulary's own.
+  consumer matches on it. Do that before they are removed if you want its definition to stay a
+  vocabulary's own.
 - **A script that reads `/rest/v1/iso22400_vocabulary`** gets a `deprecated_reason` on each row: the reason
   for these four, and null for the other four. `docs/openapi.yaml` marks the four deprecated. They are not
   the OEE KPIs: `AVAILABILITY`, `EFFECTIVENESS`, `QUALITY` and `OEE` stay, cited to OPC 40501-1.
@@ -2956,6 +2973,359 @@ No line means that every repository was as enrolment makes it. For each reposito
 
 A repository made by hand arrives as its maker left it. **What `main` holds when the gateway enrols is
 deployed as it is**, and nobody approved it. Read it before you set the appliance up.
+
+### From 1.10.0, a schema names the derived metrics its devices get
+
+Before 1.10 a derived metric was on every device that reported all its inputs. From 1.10 a device has the
+derived metrics its schemas name. You choose them in the schema editor, under **Derived Metrics**.
+
+#### What the upgrade does for you
+
+The upgrade fills the list once, so what you see today stays. Each schema version a device uses, and each
+draft, names the derived metrics whose inputs that version models. No Audit Trail entry is made.
+
+#### What to check
+
+Read db-init's log after the upgrade, and look for lines that start `0336:`.
+
+1. **A device with no schema no longer has any derived metric.** The line names each device and its metrics.
+   Give the device a schema that names them.
+2. **A device whose schemas each model only some of the inputs loses that derived metric.** The line names
+   these devices too. Add the missing inputs to one of their schemas, name the derived metric there, and
+   publish the version.
+
+The log names up to 100 devices in each line. The values are not lost. They are computed from the
+readings, so they are back, with their whole past, as soon as a schema names the metric.
+
+#### Files of schemas exported before 1.10
+
+**Such a file takes the derived metrics away when you apply it.** It has no `derived_metrics` list, and a file
+says what is saved. The preview warns you and names each one before anything is written, and the change is a
+draft you can discard. Export the schemas again, and edit that file.
+
+#### Automations, the AAS export and scripts
+
+- **An automation you have goes on as it was.** Where none of the device's schemas names the derived metric it
+  watches, the editor marks it with a warning. A new threshold on such a metric is refused.
+- **The AAS export's `DerivedMetrics` submodel** holds the derived metrics the device's schemas name.
+- **A script that deletes a derived metric** gets HTTP 409 while a schema names it. Deprecate it, or remove it
+  from the schemas first.
+- **`schemas.derived_metrics`** is a new field of the API. A schema made without it names none, and a new
+  version without it takes the ones of the version before.
+- **The result of `apply_device_schemas`** has `derived_metrics`, with what a changed schema gains and loses.
+  Its `changes` now lists a key the file leaves out, such as a description.
+
+### From 1.10.0, a replaced 3D model's file is deleted
+
+Replacing a device's 3D model deletes the file it replaced, as removing a model does. A `File` URL in a
+shell exported before the replacement then stops answering.
+
+- **Files left by earlier replacements are deleted too, within the hour after the upgrade.** A new CronJob,
+  `device-model-sweep`, runs every hour at 50 minutes past. It deletes each file in the `asset-3d-models`
+  bucket that no device names, once the file is a day old. That includes any other file put in the bucket,
+  and the model of a device that was deleted without being archived first.
+- **A deleted device's last model is kept** if the device was archived before it was deleted.
+- **To keep a file,** copy it out before upgrading: a backup with `backup.includeStorage` on holds it. Or
+  set `deviceModelSweep.enabled: false` first. This lists what the first run deletes:
+
+  ```bash
+  kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+    "SELECT o.name, o.updated_at FROM storage.objects o WHERE o.bucket_id = 'asset-3d-models'
+       AND o.updated_at <= now() - interval '1 day'
+       AND NOT EXISTS (SELECT 1 FROM public.devices d WHERE d.model_3d_path = o.name)
+       AND NOT EXISTS (SELECT 1 FROM public.retired_entities r
+                        WHERE r.entity_type = 'devices' AND r.old_data ->> 'model_3d_path' = o.name)
+       AND NOT EXISTS (SELECT 1 FROM public.change_proposals p
+                        WHERE p.entity_type = 'devices' AND p.status = 'open'
+                          AND p.patch ->> 'model_3d_path' = o.name) ORDER BY 1;"
+  ```
+
+- **Under NetworkPolicies of your own** beyond the chart's, admit `device-model-sweep` to `supabase-envoy`
+  on port 8000. The chart's own policies already do. Without it, each run fails and deletes nothing.
+
+### From 1.10.0, `devices.connection_method` is removed
+
+1.9.0 deprecated a device's `connection_method` (see
+[*`devices.connection_method` is deprecated*](upgrading.md#from-190-devicesconnection_method-is-deprecated)).
+From 1.10.0 the column is gone (#1521). Nothing replaces it: every device reaches Aber over
+Sparkplug B.
+
+- **Stop any API client that writes or reads it before upgrading.** After the upgrade, a request
+  that names it gets HTTP 400.
+- **To keep its values, read them before upgrading.** The upgrade drops them with the column. This
+  lists every device that holds one. No rows means none:
+
+  ```bash
+  kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+    "SELECT id, name, connection_method FROM public.devices WHERE btrim(connection_method) <> '' ORDER BY name;"
+  ```
+
+- **What the upgrade does.** Migration `0317` drops the column. db-init's log says how many devices
+  held a value. There is nothing to run.
+- **A change proposal that names it can no longer be approved.** A new one is refused when it is
+  filed. One filed before the upgrade stays open on the **Approvals** page, and approving it is
+  refused. Reject it, and ask for a new proposal without the field. Nothing is approved with the
+  field left out. To list the open ones, run this before or after upgrading. No rows means none:
+
+  ```bash
+  kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+    "SELECT id, entity_id, proposed_by_email, proposed_at FROM public.change_proposals
+       WHERE status = 'open' AND entity_type = 'devices' AND patch ? 'connection_method' ORDER BY proposed_at;"
+  ```
+
+- **The Audit Trail keeps its old rows.** A past change to a device's connection method still shows
+  in them, and is still filed as **Configuration**.
+
+### From 1.10.0, aas-api no longer answers a Submodel's old id
+
+From 1.10.0, the AAS API finds a schema's Submodel by its current id only. 1.9.0 announced this in
+[*a schema's Submodel ids follow its lineage and carry its version*](upgrading.md#from-190-a-schemas-submodel-ids-follow-its-lineage-and-carry-its-version).
+There is nothing to run. Read this if an ERP, PLM or MES reads Submodels from the AAS API.
+
+**Before you upgrade, move each client that stored an old id to the current one.** An old id carries
+the name of a version after the first: `<globalAssetId>/submodel/Robot_Arm_Schema_v2/OperationalTelemetry`.
+Since 1.9.0, that Submodel's id is `<globalAssetId>/submodel/Robot_Arm_Schema/OperationalTelemetry`.
+To find the current ids, read the shell's submodel references again:
+`GET /functions/v1/aas-api/shells/{aasIdentifier}/submodel-refs`, with the shell's id
+base64url-encoded. The current ids already work in 1.9.x.
+
+**After the upgrade, an old id answers 404.** Both Submodel routes, `/submodels/{submodelIdentifier}`
+and `/shells/{aasIdentifier}/submodels/{submodelIdentifier}`, answer it as they answer any id the
+shell does not carry. The current id is answered as before.
+
+**Files don't change.** A JSON export and an `.aasx` have held only the current id since 1.9.0.
+
+### From 1.10.0, a complete Digital Nameplate names its template
+
+Read this if something reads Aber's AAS exports or `aas-api`. Nothing on the site has to be changed.
+
+From 1.10.0, a device's `DigitalNameplate` submodel carries
+`https://admin-shell.io/idta/nameplate/3/0/Nameplate` (IDTA 02006) as its `semanticId`, once every element the
+template asks for has a value. Until then it carries none, as before. To let it conform, the submodel changed
+in four ways, all in this release. There is no window in which both forms are written.
+
+#### What moved, and what is gone
+
+| Was in `DigitalNameplate` | From 1.10.0 |
+| :--- | :--- |
+| `AssetSparkplugId` | In a new submodel, idShort `PlatformConnection`, id `<globalAssetId>/submodel/PlatformConnection`. The same id is in the shell's `specificAssetIds`, as `sparkplugId` |
+| `EdgeGatewayName` | In `PlatformConnection` |
+| `EdgeGatewaySparkplugId` | In `PlatformConnection` |
+| `ManufacturerProductDesignation` holding the device's own name, where nothing was recorded | Gone. The device's name is the site's. The element is there only where somebody recorded a designation, or the device publishes one |
+
+The properties keep their idShorts, and neither they nor the new submodel carry a `semanticId`.
+
+#### What changed type
+
+The template types these four, and they were all `xs:string` Properties:
+
+| Element | From 1.10.0 |
+| :--- | :--- |
+| `ManufacturerName`, `ManufacturerProductDesignation` | A MultiLanguageProperty. `value` is a list with one entry, `[{ "language": "en", "text": "..." }]`. `/$value` answers `[{ "en": "..." }]` |
+| `URIOfTheProduct` | A Property of `xs:anyURI` |
+| `DateOfManufacture` | A Property of `xs:date` |
+
+#### What is new
+
+- `OrderCodeOfManufacturer`, and `AddressInformation` with `Street`, `Zipcode`, `CityTown`, `StateCounty` and
+  `NationalCode`. Each is there when it has a value.
+- **A device with no nameplate value has no `DigitalNameplate` submodel.** `aas-api` answers its id with a `404`,
+  and the shell does not list it. It always had one before, because the platform's properties and the device's
+  name were in it.
+
+#### What to do
+
+1. In a client that reads the three platform properties, read them from `PlatformConnection`.
+2. In a client that reads `ManufacturerName` or `ManufacturerProductDesignation`, read `value[0].text`.
+3. To have a nameplate name its template, open the device's **Digital Nameplate**. The dialog lists the fields
+   that are still empty: the product URI, manufacturer, product designation, order code, and the manufacturer's
+   street, postal code, town or city, and country code.
+
+A shell exported before the upgrade still has the old form. Export it again for a server that keeps a copy.
+
+#### The dialog
+
+The dialog marked **Year of Construction** as mandatory and the order code not at all, which is version 2.0's
+answer. Version 3.0 swapped the two. From 1.10.0 the year is not marked and **Order Code** is, and
+`idta_submodel_templates.is_mandatory` says the same.
+
+### From 1.10.0, Aber opens the pull request that moves a gateway to the new platform
+
+Until 1.10.0, somebody on your site changed the `tag` in a gateway's `platform.yml` after an upgrade,
+by a pull request of their own. A site with one Administrator could not merge it: a gateway's `main`
+needs one Administrator's approval, and the forge never lets an author approve their own.
+
+From 1.10.0 Aber opens it. Nothing needs doing before you upgrade. Within about fifteen minutes
+afterwards, the repository of each Remote gateway in service that is on an older release holds one
+pull request, *Converge to the platform at* `v1.10.0`, from Aber's own account. It changes that one
+line. A site with more than ten such gateways gets ten every fifteen minutes.
+
+1. Start with one gateway. Open its drawer, and its **Health** block. The **Platform** row says
+   *v1.10.0 waits for approval*, which is a link to the pull request. A gateway that has reported no
+   health has no such row: choose **Open in the forge** in its drawer, then **Pull Requests**.
+2. As an Administrator, read the change and approve it. Nobody on your site wrote it, so you may.
+3. Merge it. The appliance converges within the hour, and the drawer's **Platform** row shows the new
+   release. Then do the others: **Release waiting** on the Gateways page lists them.
+
+Nothing moves until you merge, so a gateway you leave alone keeps running as it is.
+
+- **To keep a gateway on its release**, close its pull request. Aber does not open another for that
+  release, and opens one for the next. You can reopen it.
+- **A tag you chose yourself is left alone**: a branch, a commit, a pre-release, or a newer release. A
+  `platform.yml` that Aber cannot change safely is left alone too, and the functions log says why.
+- **A pull request of your own still works.** Close Aber's if you move the tag yourself.
+- **Coming from 1.9.0 or earlier,** merge Aber's pull request in place of the one
+  [*a tag cannot stand in for a gateway's branch*](upgrading.md#from-191-a-tag-cannot-stand-in-for-a-gateways-branch)
+  asks you to make. The platform at `v1.10.0` carries 1.9.1's fix, and needs no second Administrator.
+- **An appliance whose `flow-sync` never started**, on a tag before `v1.9.0`, cannot fetch the merge.
+  Merge Aber's pull request, then do step 2 of
+  [*flow sync starts on an appliance the install command set up*](upgrading.md#from-190-flow-sync-starts-on-an-appliance-the-install-command-set-up)
+  once, with the tag the pull request names in place of `v1.9.0`.
+
+Every gateway repository also gets a fourth branch rule, `aber-platform-*`. It gives those branches to
+Aber's account and closes them to everyone else, and to the appliance's key. The page on
+[remote gateways](remote-gateways.md#who-may-approve-and-the-change-aber-proposes) has
+the rest.
+
+### From 1.10.0, the id of a record cannot be changed
+
+From 1.10.0 the database refuses an API request that gives a record another `id`. There is nothing to run.
+Read this if a script of yours writes to Aber's API.
+
+- **What is refused.** A `PATCH` whose body holds an `id` other than the record's own, on `areas`,
+  `cells`, `gateways`, `devices`, `schemas`, `metric_catalog`, `metric_groups`, `links`,
+  `directory_services` or `change_proposals`. So is an upsert on another key that brings an `id` of its own.
+- **The answer is HTTP 400,** and its message names the record: `the id of device "Press 4" cannot be
+  changed.`
+- **What to do.** Leave `id` out of the body, or send the one the record has. Both are accepted, as
+  before.
+- **No earlier change is undone.** A record whose id was changed before the upgrade keeps the id it has
+  now.
+
+### From 1.10.0, a nameplate and an attached schema stay with their device
+
+From 1.10.0 the database refuses an API request that moves a nameplate or an attached schema to another
+device. There is nothing to run. Read this if a script of yours writes to Aber's API.
+
+- **What is refused.** A `PATCH` of `device_nameplate` or `device_submodels` whose body holds a `device_id`
+  other than the row's own.
+- **The answer is HTTP 400,** and its message names the device: `the device_id of the nameplate of "Press 4"
+  cannot be changed.`
+- **What to do.** Delete the row and post it again with the other device. The Audit Trail then shows it under
+  both devices.
+
+### From 1.10.0, a link's kind is one of four
+
+The database refuses a link whose `entity_type` is not `area`, `cell`, `device` or `gateway`, with HTTP 400. A
+link your site already holds with another word is kept: db-init's log names it at each boot until you give it one
+of the four or delete it.
+
+### From 1.10.0, a registered device held in Quarantine again is not deleted
+
+A device that was registered before and is held in Quarantine again has no **Reject**. There is nothing to
+run.
+
+- **What is refused.** A `DELETE` of such a device, through PostgREST or with the service key, while it is
+  not archived. The answer is HTTP 400, and `message` is a sentence that names the device.
+- **What to do.** Use **Approve & Onboard** to admit the device again. Its schemas, nameplate and links are
+  kept. To delete it, archive it first. **Permanent Delete** and the nightly purge then delete it as before.
+- **What is not changed.** A device nobody registered is rejected as before.
+
+### From 1.10.0, a merge from Quarantine is refused for a registered device
+
+A device that was registered before and is held in Quarantine again is offered no match. There is nothing
+to run.
+
+- **What is refused.** **Accept Match**, or a call of `approve-quarantine` with `merge_into_device_id`. It
+  is refused when the held device was registered before or is no longer in Quarantine. It is also refused
+  when the other device is archived, is in Quarantine, or has sent its first birth.
+- **The answer is HTTP 409,** and `error` is a sentence that names the device.
+- **What to do.** Use **Approve & Onboard** to admit the device again. Its schemas, nameplate and links are
+  kept. The dialog starts from the location and the gateway the device has, so approving it moves nothing.
+- **Devices held at the upgrade.** The Audit Trail says which were registered before. db-init's log
+  counts them.
+
+### From 1.10.0, the page of archived entities is Entities
+
+The dashboard page that listed archived and retired entities is now **Entities**. It has a new first tab,
+**Active**, which lists everything in service. One search on the page finds what any ID names
+([the page's help](../pages/archives.md)).
+
+**Nothing needs doing.** What you may notice:
+
+- **Every role now has the page in the sidebar.** It was for Administrators and Shopfloor Managers. Each
+  role sees only what it could already see on the other pages. Nobody gains **Restore**, **Export Bundle…**
+  or **Permanent Delete**: those are still for Administrators and Shopfloor Managers.
+- **Every role can open the Archived tab.** It lists archived areas, cells, gateways and devices, which every
+  role could already read with each page's lifecycle filter. The **Retired** tab is still for Administrators,
+  Shopfloor Managers and Auditors.
+- **Old links still work.** `/archives` opens the Archived tab, and `/archives/retired` the Retired one.
+- **Written instructions of your own** that send people to the page by its old name need the new one. So do
+  alerts or scripts that match the old name in a log line: ingestion's line for traffic from an archived
+  device now says *Restore it on the Entities page*.
+- **The API has two new reads:** the view `entity_directory` and the function `find_entities()`. Both run as
+  their caller.
+
+### From 1.10.0, the Gateways page leaves the Playback gateway off its list
+
+Nothing needs doing. Until 1.10.0 the Playback gateway, which every install has, took a row of the
+Gateways page. The page now leaves it off. Tick **Show Playback gateway**, under **Filters**, to list it,
+for example to issue its broker credential. The lifecycle and the type are under **Filters** too, as on
+Devices.
+
+A link to it lists it, and something wrong with it lists it by itself. Every count still includes it.
+
+### From 1.10.0, aas-api says where a device's live readings are read
+
+Read this if something reads shells from `aas-api`. Nothing on the site has to be changed, and exported
+files do not change.
+
+From 1.10.0, a shell `aas-api` serves has one more submodel, `AssetInterfacesDescription` (IDTA 02017), id
+`<globalAssetId>/submodel/AssetInterfacesDescription`. It names the live surfaces that are on:
+
+- **the i3X server,** on by default, with the device's and each modelled metric's `elementId`;
+- **the UNS bridge's broker,** while `ingestion.unsMqttEnabled` is on and the broker is published, with each
+  modelled metric's topic.
+
+So every signed-in reader of `aas-api` can read those two addresses. The submodel names the security scheme a
+client uses, never a credential. With neither surface on, a shell has no such submodel.
+
+**A client that compares a shell from `aas-api` with an exported one** finds one more submodel reference in
+`aas-api`'s. An exported JSON file, an `.aasx` and a bundle never carry this submodel, because they leave the
+site. [Connecting an AAS client](../../supabase/README.md#connecting-an-aas-client) says what each interface
+holds.
+
+### From 1.10.0, a shell and its i3X device name each other
+
+Read this if something reads Aber's AAS shells or its i3X server. Nothing on the site has to be changed.
+
+From 1.10.0, the two views of a device say that they describe one device, and i3X carries its nameplate.
+
+#### In a shell
+
+Each telemetry submodel's `Segments` collection holds a second history link, `I3XLinkedSegment`, after
+`LinkedSegment`. It is there while the chart publishes the i3X server, which it does by default:
+
+- `Endpoint` is the i3X server's `/v1/objects/history`.
+- `Query` is a JSON body naming the submodel's metrics by their i3X elementIds,
+  `{"elementIds": ["<sparkplug_id>/<metric name>", ...]}`. A client adds a `startTime` and an `endTime`.
+
+`LinkedSegment` is as it was, so a client that reads only it is not affected. Exported files, `.aasx`
+packages and `aas-api` all carry the new link.
+
+#### On the i3X server
+
+- **Each device names its shell.** `metadata.system` holds `aasShellId` and `aasGlobalAssetId` beside
+  `quarantined`. They are under the base IRI the chart gives the AAS export
+  (`supabaseFunctions.aas.baseIri`), which the i3X server is now given too.
+- **A device's nameplate is a component.** A device whose nameplate has a value has a `Nameplate`
+  object, `i3x:nameplate:<sparkplug_id>`, in its `HasComponent` list. Its value is the nameplate's
+  fields, and it has no history.
+- **A device's components are not all metrics.** A client that took every `HasComponent` child of a
+  device for a metric should skip the one typed `i3x:type:nameplate`. A device with no metrics but a
+  nameplate is now `isComposition: true`.
+- **One more namespace while a device has a nameplate:**
+  `https://admin-shell.io/idta/nameplate/3/0?projection=i3X`, for the `Nameplate` type.
 
 ## Backups
 
