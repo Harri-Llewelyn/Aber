@@ -608,7 +608,7 @@ supabaseAuth:
   enabled: true
   image:
     repository: supabase/gotrue
-    tag: v2.197.0
+    tag: v2.198.0
     pullPolicy: IfNotPresent
   replicas: 1
   # Whether GoTrue refuses self-registration at POST /auth/v1/signup. True is closed, and it is
@@ -762,7 +762,7 @@ supabaseStorage:
   enabled: true
   image:
     repository: supabase/storage-api
-    tag: v1.81.0
+    tag: v1.98.2
     pullPolicy: IfNotPresent
   # One replica on the file backend (a single-writer ReadWriteOnce PVC). s3 lifts that.
   replicas: 1
@@ -819,7 +819,7 @@ supabaseMeta:
   image:
     # The version the official stack pairs with the Studio tag below (Zod-coupled).
     repository: supabase/postgres-meta
-    tag: v0.100.0
+    tag: v0.100.1
     pullPolicy: IfNotPresent
   replicas: 1
   resources:
