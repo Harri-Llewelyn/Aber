@@ -1822,8 +1822,9 @@ content at a time; the card scrolls, the page does not. Each tab explains itself
 Under the bar is a toolbar row, the existing `.filter-bar`, drawn only when the tab has
 filters or actions: its filters first, its actions in `.filter-bar-actions` at the right. Tabs carry
 no counts. A tab with work waiting takes `attention={n}`: the label turns
-the warning colour and gains an icon and the number, only while n is above 0. A row that outgrows one
-line keeps search, status and the key toggle and moves the rest into `common/FiltersPopover.jsx`.
+the warning colour and gains an icon and the number, only while n is above 0. The row's filters are
+the search box and one Filters button (`common/FiltersPopover.jsx`), as
+[Words and rules](#words-and-rules) has it.
 
 **The tabs are links, not the WAI-ARIA tabs pattern.** The bar is a `<nav>` named for the page,
 holding an `<a href>` per tab, the open one `aria-current="page"`. The tabs pattern is for panels
@@ -1907,10 +1908,12 @@ History. `everyDisabledReason`, a sentence, turns the interval half off and is i
 the Refresh half still reads; History passes one while its window has ended.
 
 **Every list filter takes several values, through one shared part**, `common/FilterChecklist.jsx`,
-as Home Assistant's entity filters do. A filter that picks from a list is never a `<select>`; a
-yes-or-no choice stays a toggle button in the toolbar.
+as Home Assistant's entity filters do. A filter that picks from a list is never a `<select>`. Under
+Filters ([Words and rules](#words-and-rules)) it is a `FilterList`, and a yes-or-no choice is a
+`FilterCheck`.
 
-- **In the toolbar it is a `FilterDropdown`**: a `ToolbarPopover` button where the select was,
+- **In the toolbar it is a `FilterDropdown`**, on a page built before every filter went under
+  Filters: a `ToolbarPopover` button where the select was,
   the same width (`width`: `sm`, `md` or `lg`), so the row keeps its shape whatever is chosen. It
   reads "Any status" with nothing chosen, the value with one, and "2 statuses" with several
   (`filterWords`). A page may name a choice, as Schemas' Current is Active and Draft. Its name is
@@ -3061,6 +3064,16 @@ in "building management system".
 - **Clear filters (N).** N counts every control that is off its default, the lifecycle filter
   included, and a list filter once however many values it holds. The button (`common/ClearFilters.jsx`) sits at the right end of the toolbar, first in
   `.filter-bar-actions` when the page has buttons.
+- **Every filter is under Filters.** A list's toolbar row holds the search box and one Filters
+  button (`common/FiltersPopover.jsx`), and no other filter. Status and a page's main toggle go in
+  the panel too, as a `FilterList` or a `FilterCheck`. After the Filters button come the controls
+  that change how the list is drawn, not what it holds, such as the time window and History's
+  bucket and chart choices. Then come `.filter-bar-actions`. This was decided on 2026-11-27
+  ([#892](https://github.com/Harri-Llewelyn/Aber/issues/892)) and replaces the rule that kept
+  status and the main toggle in the row. A page that adds or changes a filter puts it under Filters
+  now. Pages built before the rule still have filters in the row, and #892 moves them. #892 also
+  gives each filter that is set a chip in the row. It moves a count that says work is waiting, such
+  as Needs attention's, to somewhere it shows while the panel is closed.
 - **Empty states** tell "none yet" from "none match".
 - **Permission hints** name the roles that hold the permission ("Requires Administrator or Shopfloor
   Manager"), from one helper, never "Admin".

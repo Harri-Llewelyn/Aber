@@ -162,8 +162,8 @@ function FilterSections({ children }) {
 }
 
 /**
- * A "Filters" button in a toolbar row that opens a panel holding the filters the row has no room
- * for. Search, status and the page's key toggle stay in the row; the rest go in here.
+ * A "Filters" button in a toolbar row that opens a panel holding the row's filters. The row keeps
+ * the search box and no other filter (frontend/README.md, Words and rules).
  *
  *   <FiltersPopover activeCount={n} onClear={clearAll}>{controls}</FiltersPopover>
  *
